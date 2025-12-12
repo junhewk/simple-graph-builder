@@ -1,8 +1,311 @@
-/*
+/* Simple Graph Builder Plugin Styles */
 
-This CSS file will be included with your plugin, and
-available in the app when your plugin is enabled.
+/* Settings Tab - Keywords List */
+.keywords-list {
+	margin: 1em 0;
+}
 
-If your plugin does not need CSS, delete this file.
+.keywords-empty {
+	color: var(--text-muted);
+	font-style: italic;
+}
 
-*/
+.keywords-ul {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.5em;
+}
+
+.keyword-item {
+	display: inline-flex;
+	align-items: center;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 1em;
+	padding: 0.25em 0.5em 0.25em 0.75em;
+	font-size: 0.9em;
+}
+
+.keyword-item span {
+	margin-right: 0.5em;
+}
+
+.keyword-remove {
+	background: transparent;
+	border: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	font-size: 1.2em;
+	line-height: 1;
+	padding: 0 0.25em;
+	border-radius: 50%;
+}
+
+.keyword-remove:hover {
+	color: var(--text-error);
+	background: var(--background-modifier-hover);
+}
+
+/* Graph View Container */
+.simple-graph-container {
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	background-color: var(--background-primary);
+}
+
+.cytoscape-container {
+	width: 100%;
+	height: 100%;
+	background-color: var(--background-primary);
+}
+
+.graph-empty-state,
+.graph-loading {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 100%;
+	color: var(--text-muted);
+	font-style: italic;
+	text-align: center;
+	padding: 2em;
+}
+
+/* Vault analysis warning */
+.vault-analysis-warning {
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	padding: 1em;
+	margin-bottom: 1em;
+}
+
+.vault-analysis-warning ul {
+	margin: 0.5em 0;
+	padding-left: 1.5em;
+}
+
+.vault-analysis-warning li {
+	margin: 0.25em 0;
+}
+
+.vault-analysis-warning em {
+	color: var(--text-muted);
+}
+
+/* Search Modal */
+.simple-graph-search-modal {
+	min-width: 400px;
+}
+
+.simple-graph-search-modal .search-results {
+	margin-top: 1em;
+	max-height: 400px;
+	overflow-y: auto;
+}
+
+.simple-graph-search-modal .search-hint,
+.simple-graph-search-modal .search-no-results {
+	color: var(--text-muted);
+	font-style: italic;
+	text-align: center;
+	padding: 2em;
+}
+
+.simple-graph-search-modal .search-results-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.simple-graph-search-modal .search-result-item {
+	padding: 0.75em;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.simple-graph-search-modal .search-result-item:last-child {
+	border-bottom: none;
+}
+
+.simple-graph-search-modal .search-result-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.simple-graph-search-modal .search-result-link {
+	display: block;
+	font-weight: 500;
+	color: var(--text-accent);
+	cursor: pointer;
+	text-decoration: none;
+}
+
+.simple-graph-search-modal .search-result-link:hover {
+	text-decoration: underline;
+}
+
+.simple-graph-search-modal .search-result-meta {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	margin-top: 0.25em;
+}
+
+/* Neighborhood View */
+.neighborhood-view-container {
+	padding: 0;
+	height: 100%;
+	overflow-y: auto;
+}
+
+.neighborhood-header {
+	font-size: 1.1em;
+	font-weight: 600;
+	padding: 1em;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+}
+
+.neighborhood-content {
+	padding: 0.5em;
+}
+
+.neighborhood-empty {
+	color: var(--text-muted);
+	font-style: italic;
+	text-align: center;
+	padding: 2em 1em;
+}
+
+.neighborhood-analyze-btn {
+	display: block;
+	margin: 1em auto;
+	padding: 0.5em 1em;
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+	border: none;
+	border-radius: 4px;
+	cursor: pointer;
+}
+
+.neighborhood-analyze-btn:hover {
+	background: var(--interactive-accent-hover);
+}
+
+.neighborhood-section {
+	margin-bottom: 1em;
+}
+
+.neighborhood-section-title {
+	font-size: 0.8em;
+	font-weight: 600;
+	text-transform: uppercase;
+	color: var(--text-muted);
+	padding: 0.5em 0.5em 0.25em;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.neighborhood-current-note {
+	padding: 0.5em;
+	font-weight: 500;
+	color: var(--text-accent);
+}
+
+.neighborhood-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.neighborhood-item {
+	padding: 0.4em 0.5em;
+	border-radius: 4px;
+}
+
+.neighborhood-item:hover {
+	background: var(--background-modifier-hover);
+}
+
+.neighborhood-item-note .neighborhood-link {
+	color: var(--text-accent);
+}
+
+.neighborhood-item-entity .neighborhood-link {
+	color: #53dfdd;
+}
+
+.neighborhood-item-keyword .neighborhood-link {
+	color: #e5a84b;
+}
+
+.neighborhood-link.clickable {
+	cursor: pointer;
+}
+
+.neighborhood-link.clickable:hover {
+	text-decoration: underline;
+}
+
+/* Neighborhood Popup */
+.neighborhood-popup {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 8px;
+	box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+	min-width: 200px;
+	max-width: 300px;
+	max-height: 300px;
+	overflow: hidden;
+	z-index: 100;
+}
+
+.neighborhood-popup-header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	padding: 0.75em 1em;
+	background: var(--background-secondary);
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-weight: 500;
+}
+
+.neighborhood-popup-close {
+	background: transparent;
+	border: none;
+	font-size: 1.2em;
+	cursor: pointer;
+	color: var(--text-muted);
+	padding: 0;
+	line-height: 1;
+}
+
+.neighborhood-popup-close:hover {
+	color: var(--text-normal);
+}
+
+.neighborhood-popup-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+	max-height: 200px;
+	overflow-y: auto;
+}
+
+.neighborhood-popup-list li {
+	padding: 0.5em 1em;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.neighborhood-popup-list li:last-child {
+	border-bottom: none;
+}
+
+.neighborhood-popup-list li:hover {
+	background: var(--background-modifier-hover);
+}

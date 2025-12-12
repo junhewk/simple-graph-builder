@@ -1,94 +1,132 @@
-# Obsidian Sample Plugin
+# Simple Graph Builder
 
-This is a sample plugin for Obsidian (https://obsidian.md).
+Build a knowledge graph from your Obsidian notes using LLM-powered entity extraction.
 
-This project uses TypeScript to provide type checking and documentation.
-The repo depends on the latest plugin API (obsidian.d.ts) in TypeScript Definition format, which contains TSDoc comments describing what it does.
+![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/main/docs/graph-view.png)
 
-This sample plugin demonstrates some of the basic functionality the plugin API can do.
-- Adds a ribbon icon, which shows a Notice when clicked.
-- Adds a command "Open Sample Modal" which opens a Modal.
-- Adds a plugin setting tab to the settings page.
-- Registers a global click event and output 'click' to the console.
-- Registers a global interval which logs 'setInterval' to the console.
+## Features
 
-## First time developing plugins?
+- **Entity Extraction**: Automatically extract entities (people, concepts, methods, etc.) from your notes using AI
+- **Knowledge Graph**: Build connections between notes through shared entities and keywords
+- **Internal Link Support**: Automatically processes `[[wikilinks]]` to build note-to-note connections
+- **Multiple LLM Support**: Works with Claude, OpenAI, Gemini, and Ollama (local)
+- **Korean Language Support**: Full support for Korean text analysis and entity extraction
+- **User-defined Keywords**: Define your own ontology terms for domain-specific analysis
+- **Interactive Graph View**: Visualize your knowledge graph with fCoSE force-directed layout
+- **Large Graph Support**: Optimized for thousands of nodes with fast rendering
+- **Exact Search**: Find notes by exact entity/keyword match
+- **Note Neighborhood Panel**: See connections for the current note in a sidebar
+- **Quick Access**: Ribbon icon menu for common actions
+- **Status Bar**: Real-time graph statistics display
 
-Quick starting guide for new plugin devs:
+## Commands
 
-- Check if [someone already developed a plugin for what you want](https://obsidian.md/plugins)! There might be an existing plugin similar enough that you can partner up with.
-- Make a copy of this repo as a template with the "Use this template" button (login to GitHub if you don't see it).
-- Clone your repo to a local development folder. For convenience, you can place this folder in your `.obsidian/plugins/your-plugin-name` folder.
-- Install NodeJS, then run `npm i` in the command line under your repo folder.
-- Run `npm run dev` to compile your plugin from `main.ts` to `main.js`.
-- Make changes to `main.ts` (or create new `.ts` files). Those changes should be automatically compiled into `main.js`.
-- Reload Obsidian to load the new version of your plugin.
-- Enable plugin in settings window.
-- For updates to the Obsidian API run `npm update` in the command line under your repo folder.
+| Command | Description |
+|---------|-------------|
+| `Analyze current note` | Extract entities from the active note |
+| `Search related notes` | Find notes by entity or keyword |
+| `Open graph view` | Show the knowledge graph visualization |
+| `Open note neighborhood panel` | Show current note's connections in sidebar |
+| `Remove current note from graph` | Remove active note from the graph |
+| `Clear all graph data` | Reset the entire graph |
 
-## Releasing new releases
+## UI Elements
 
-- Update your `manifest.json` with your new version number, such as `1.0.1`, and the minimum Obsidian version required for your latest release.
-- Update your `versions.json` file with `"new-plugin-version": "minimum-obsidian-version"` so older versions of Obsidian can download an older version of your plugin that's compatible.
-- Create new GitHub release using your new version number as the "Tag version". Use the exact version number, don't include a prefix `v`. See here for an example: https://github.com/obsidianmd/obsidian-sample-plugin/releases
-- Upload the files `manifest.json`, `main.js`, `styles.css` as binary attachments. Note: The manifest.json file must be in two places, first the root path of your repository and also in the release.
-- Publish the release.
+### Ribbon Icon
+Click the graph icon in the left ribbon to access:
+- Analyze current note
+- Open graph view
+- Search related notes
+- Show note neighborhood
+- Remove current note from graph
 
-> You can simplify the version bump process by running `npm version patch`, `npm version minor` or `npm version major` after updating `minAppVersion` manually in `manifest.json`.
-> The command will bump version in `manifest.json` and `package.json`, and add the entry for the new version to `versions.json`
+### Status Bar
+Shows real-time graph statistics: `Graph: 5N 12E 3K` (Notes, Entities, Keywords)
 
-## Adding your plugin to the community plugin list
+### Note Neighborhood Panel
+A sidebar panel showing:
+- **Linked Notes**: Notes connected via internal links or shared entities
+- **Entities**: Extracted concepts from the current note
+- **Keywords**: Matched user-defined terms
+- Click entities/keywords to see all connected notes
 
-- Check the [plugin guidelines](https://docs.obsidian.md/Plugins/Releasing/Plugin+guidelines).
-- Publish an initial version.
-- Make sure you have a `README.md` file in the root of your repo.
-- Make a pull request at https://github.com/obsidianmd/obsidian-releases to add your plugin.
+## Settings
 
-## How to use
+### API Configuration
+- **API Provider**: Choose between Claude, OpenAI, Gemini, or Ollama
+- **API Key**: Your API key (not needed for Ollama)
+- **Model**: Select or enter a custom model name
 
-- Clone this repo.
-- Make sure your NodeJS is at least v16 (`node --version`).
-- `npm i` or `yarn` to install dependencies.
-- `npm run dev` to start compilation in watch mode.
+### Keywords
+Define domain-specific terms that the LLM will identify in your notes. Examples:
+- Research domains: `machine learning`, `clinical trial`, `regression analysis`
+- Korean terms: `머신러닝`, `임상연구`, `회귀분석`
 
-## Manually installing the plugin
+### Analysis Settings
+- **Auto-analyze on save**: Automatically analyze notes when you save them (2-second debounce)
+- **Analyze entire vault**: Batch analyze all notes with progress tracking and cancellation support
 
-- Copy over `main.js`, `styles.css`, `manifest.json` to your vault `VaultFolder/.obsidian/plugins/your-plugin-id/`.
+### Data Management
+- View graph statistics (notes, entities, keywords, connections)
+- Clear all graph data
 
-## Improve code quality with eslint (optional)
-- [ESLint](https://eslint.org/) is a tool that analyzes your code to quickly find problems. You can run ESLint against your plugin to find common bugs and ways to improve your code. 
-- To use eslint with this project, make sure to install eslint from terminal:
-  - `npm install -g eslint`
-- To use eslint to analyze this project use this command:
-  - `eslint main.ts`
-  - eslint will then create a report with suggestions for code improvement by file and line number.
-- If your source code is in a folder, such as `src`, you can use eslint with this command to analyze all files in that folder:
-  - `eslint ./src/`
+## Installation
 
-## Funding URL
+### From Obsidian Community Plugins
+1. Open Settings → Community plugins
+2. Search for "Simple Graph Builder"
+3. Click Install, then Enable
 
-You can include funding URLs where people who use your plugin can financially support it.
+### Manual Installation
+1. Download `main.js`, `styles.css`, and `manifest.json` from the latest release
+2. Create folder: `VaultFolder/.obsidian/plugins/simple-graph-builder/`
+3. Copy the downloaded files into the folder
+4. Reload Obsidian and enable the plugin
 
-The simple way is to set the `fundingUrl` field to your link in your `manifest.json` file:
+## Usage
 
-```json
-{
-    "fundingUrl": "https://buymeacoffee.com"
-}
-```
+### Quick Start
+1. Configure your API key in Settings → Simple Graph Builder
+2. Open a note and run command: `Analyze current note`
+3. View results with command: `Open graph view`
 
-If you have multiple URLs, you can also do:
+### Graph View
+- **Click** a node to highlight its connections
+- **Double-click** a note node to open it
+- **Double-click** an entity/keyword to search for related notes
+- **Click** the background to reset highlights
+- **Scroll** to zoom in/out
+- **Drag** to pan around the graph
 
-```json
-{
-    "fundingUrl": {
-        "Buy Me a Coffee": "https://buymeacoffee.com",
-        "GitHub Sponsor": "https://github.com/sponsors",
-        "Patreon": "https://www.patreon.com/"
-    }
-}
-```
+The graph uses fCoSE (fast Compound Spring Embedder) layout, optimized for large graphs with thousands of nodes.
 
-## API Documentation
+### Search
+1. Run command: `Search related notes`
+2. Enter a concept, keyword, or topic
+3. Toggle **Exact match** for precise matching (default: on)
+   - ON: "AI기본법" only matches "AI기본법"
+   - OFF: "AI기본법" matches "AI", "AI기본법", etc.
+4. Click results to navigate to notes
 
-See https://github.com/obsidianmd/obsidian-api
+## API Costs
+
+This plugin makes API calls to extract entities. Approximate costs:
+- **Claude**: ~$0.003 per note (Sonnet)
+- **OpenAI**: ~$0.001 per note (GPT-4o-mini)
+- **Gemini**: Free tier available
+- **Ollama**: Free (runs locally)
+
+## Privacy
+
+- Your notes are sent to the configured LLM provider for entity extraction
+- No data is stored externally; all graph data stays in your vault
+- Consider using Ollama for fully local, private processing
+
+## Support
+
+- [GitHub Issues](https://github.com/junhewk/simple-graph-builder/issues)
+- [Documentation](https://github.com/junhewk/simple-graph-builder)
+
+## License
+
+MIT License - see [LICENSE](LICENSE) for details.
