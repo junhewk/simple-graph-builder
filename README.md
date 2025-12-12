@@ -2,7 +2,7 @@
 
 Build a knowledge graph from your Obsidian notes using LLM-powered entity extraction.
 
-![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/main/docs/graph-view.png)
+![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
 ## Features
 
