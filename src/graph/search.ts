@@ -1,72 +1,80 @@
-import { GraphData, GraphNode } from '../types';
+import { GraphData, OntologyNode } from '../types';
 import type { GraphCache } from './cache';
 
 export interface SearchResult {
-	notePath: string;
-	noteLabel: string;
+	nodeName: string;
+	nodeLabel: string;
+	sourceNotes: string[];
 	score: number;
-	matchedEntities: string[];
+	matchedOn: 'name' | 'label';
 }
 
 export interface SearchOptions {
 	exactMatch?: boolean;
+	labelFilter?: string;
 }
 
 /**
  * Search graph using GraphCache (O(1) lookups via indexes).
+ * Searches nodes by name and optionally filters by label.
  */
 export function searchGraphCache(cache: GraphCache, query: string, options?: SearchOptions): SearchResult[] {
 	const queryLower = query.toLowerCase().trim();
 	if (!queryLower) return [];
 
 	const exactMatch = options?.exactMatch ?? false;
+	const labelFilter = options?.labelFilter;
 
-	// Find matching entity/keyword nodes
-	const matchingNodes: GraphNode[] = [];
-	for (const node of [...cache.getNodesByType('entity'), ...cache.getNodesByType('keyword')]) {
+	const results: SearchResult[] = [];
+
+	for (const node of cache.getAllNodes()) {
+		// Apply label filter if specified
+		if (labelFilter && node.label !== labelFilter) {
+			continue;
+		}
+
+		const nameLower = node.properties.name.toLowerCase();
 		const labelLower = node.label.toLowerCase();
 
+		let score = 0;
+		let matchedOn: 'name' | 'label' = 'name';
+
 		if (exactMatch) {
-			// Exact match: label must equal query exactly
-			if (labelLower === queryLower) {
-				matchingNodes.push(node);
+			// Exact match: name must equal query exactly
+			if (nameLower === queryLower) {
+				score = 1.0;
+				matchedOn = 'name';
 			}
 		} else {
 			// Fuzzy match: substring matching
-			if (labelLower.includes(queryLower) || queryLower.includes(labelLower)) {
-				matchingNodes.push(node);
+			if (nameLower === queryLower) {
+				// Exact name match
+				score = 1.0;
+				matchedOn = 'name';
+			} else if (nameLower.includes(queryLower)) {
+				// Name contains query
+				score = queryLower.length / nameLower.length;
+				matchedOn = 'name';
+			} else if (queryLower.includes(nameLower)) {
+				// Query contains name
+				score = nameLower.length / queryLower.length * 0.8;
+				matchedOn = 'name';
+			} else if (labelLower.includes(queryLower) || queryLower.includes(labelLower)) {
+				// Label match (lower priority)
+				score = 0.3;
+				matchedOn = 'label';
 			}
 		}
-	}
 
-	// Find notes connected to matching nodes (using indexed edge lookups)
-	const noteScores = new Map<string, { score: number; entities: string[] }>();
-
-	for (const matchNode of matchingNodes) {
-		// Find edges where this node is target (note -> entity/keyword)
-		const connectedEdges = cache.getEdgesByTarget(matchNode.id);
-
-		for (const edge of connectedEdges) {
-			const sourceNode = cache.getNodeById(edge.source);
-			if (sourceNode?.type === 'note' && sourceNode.notePath) {
-				const existing = noteScores.get(sourceNode.notePath) ?? { score: 0, entities: [] };
-				existing.score += 1;
-				existing.entities.push(matchNode.label);
-				noteScores.set(sourceNode.notePath, existing);
-			}
+		if (score > 0) {
+			results.push({
+				nodeName: node.properties.name,
+				nodeLabel: node.label,
+				sourceNotes: [...node.sourceNotes],
+				score,
+				matchedOn,
+			});
 		}
-	}
-
-	// Convert to results and sort by score
-	const results: SearchResult[] = [];
-	for (const [notePath, data] of noteScores) {
-		const noteNode = cache.getNodeByNotePath(notePath);
-		results.push({
-			notePath,
-			noteLabel: noteNode?.label ?? notePath,
-			score: data.score,
-			matchedEntities: [...new Set(data.entities)],
-		});
 	}
 
 	return results.sort((a, b) => b.score - a.score);
@@ -76,46 +84,75 @@ export function searchGraphCache(cache: GraphCache, query: string, options?: Sea
  * Search graph using raw GraphData (for backwards compatibility).
  * @deprecated Use searchGraphCache for better performance.
  */
-export function searchGraph(graph: GraphData, query: string): SearchResult[] {
+export function searchGraph(graph: GraphData, query: string, options?: SearchOptions): SearchResult[] {
 	const queryLower = query.toLowerCase().trim();
 	if (!queryLower) return [];
 
-	// Find matching entity/keyword nodes
-	const matchingNodes = graph.nodes.filter(node => {
-		if (node.type === 'note') return false;
+	const exactMatch = options?.exactMatch ?? false;
+	const labelFilter = options?.labelFilter;
+
+	const results: SearchResult[] = [];
+
+	for (const node of graph.nodes) {
+		// Apply label filter if specified
+		if (labelFilter && node.label !== labelFilter) {
+			continue;
+		}
+
+		const nameLower = node.properties.name.toLowerCase();
 		const labelLower = node.label.toLowerCase();
-		return labelLower.includes(queryLower) || queryLower.includes(labelLower);
-	});
 
-	// Find notes connected to matching nodes
-	const noteScores = new Map<string, { score: number; entities: string[] }>();
+		let score = 0;
+		let matchedOn: 'name' | 'label' = 'name';
 
-	for (const matchNode of matchingNodes) {
-		// Find edges where this node is target (note -> entity/keyword)
-		const connectedEdges = graph.edges.filter(e => e.target === matchNode.id);
-
-		for (const edge of connectedEdges) {
-			const sourceNode = graph.nodes.find(n => n.id === edge.source);
-			if (sourceNode?.type === 'note' && sourceNode.notePath) {
-				const existing = noteScores.get(sourceNode.notePath) ?? { score: 0, entities: [] };
-				existing.score += 1;
-				existing.entities.push(matchNode.label);
-				noteScores.set(sourceNode.notePath, existing);
+		if (exactMatch) {
+			if (nameLower === queryLower) {
+				score = 1.0;
+				matchedOn = 'name';
 			}
+		} else {
+			if (nameLower === queryLower) {
+				score = 1.0;
+				matchedOn = 'name';
+			} else if (nameLower.includes(queryLower)) {
+				score = queryLower.length / nameLower.length;
+				matchedOn = 'name';
+			} else if (queryLower.includes(nameLower)) {
+				score = nameLower.length / queryLower.length * 0.8;
+				matchedOn = 'name';
+			} else if (labelLower.includes(queryLower) || queryLower.includes(labelLower)) {
+				score = 0.3;
+				matchedOn = 'label';
+			}
+		}
+
+		if (score > 0) {
+			results.push({
+				nodeName: node.properties.name,
+				nodeLabel: node.label,
+				sourceNotes: [...node.sourceNotes],
+				score,
+				matchedOn,
+			});
 		}
 	}
 
-	// Convert to results and sort by score
-	const results: SearchResult[] = [];
-	for (const [notePath, data] of noteScores) {
-		const noteNode = graph.nodes.find(n => n.notePath === notePath);
-		results.push({
-			notePath,
-			noteLabel: noteNode?.label ?? notePath,
-			score: data.score,
-			matchedEntities: [...new Set(data.entities)],
-		});
-	}
-
 	return results.sort((a, b) => b.score - a.score);
+}
+
+/**
+ * Get nodes connected to a given node (1-hop).
+ */
+export function getConnectedNodesFromCache(cache: GraphCache, nodeName: string): OntologyNode[] {
+	const node = cache.getNodeByName(nodeName);
+	if (!node) return [];
+	return cache.getConnectedNodes(node.id);
+}
+
+/**
+ * Get source notes for a node by name.
+ */
+export function getSourceNotesForNode(cache: GraphCache, nodeName: string): string[] {
+	const node = cache.getNodeByName(nodeName);
+	return node ? [...node.sourceNotes] : [];
 }

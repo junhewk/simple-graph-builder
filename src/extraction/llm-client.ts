@@ -1,4 +1,4 @@
-import { ApiProvider, ExtractionResult, Settings } from '../types';
+import { ApiProvider, OntologyExtractionResult, Settings, RelationshipType, isValidRelationshipType } from '../types';
 import { requestUrl } from 'obsidian';
 
 export interface ExtractionError {
@@ -14,10 +14,13 @@ export interface ExtractionOptions {
 	ollamaHost?: string;
 }
 
-export async function extractEntities(
+/**
+ * Extract ontology (nodes and relationships) from note content using LLM.
+ */
+export async function extractOntology(
 	options: ExtractionOptions,
 	prompt: string
-): Promise<ExtractionResult> {
+): Promise<OntologyExtractionResult> {
 	const { provider, apiKey, model, ollamaHost } = options;
 
 	// Ollama doesn't need an API key
@@ -55,7 +58,7 @@ export async function extractEntities(
 		throw handleApiError(e, provider);
 	}
 
-	return parseResponse(response);
+	return parseOntologyResponse(response);
 }
 
 /**
@@ -115,7 +118,6 @@ async function callClaude(apiKey: string, model: string, prompt: string): Promis
 		},
 		body: JSON.stringify({
 			model: model,
-			max_tokens: 2048,
 			messages: [{ role: 'user', content: prompt }],
 		}),
 	});
@@ -150,6 +152,8 @@ async function callOpenAI(apiKey: string, model: string, prompt: string): Promis
 }
 
 async function callGemini(apiKey: string, model: string, prompt: string): Promise<string> {
+	console.log(`[Gemini] Calling model: ${model}, prompt length: ${prompt.length} chars`);
+
 	const res = await requestUrl({
 		url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
 		method: 'POST',
@@ -165,10 +169,29 @@ async function callGemini(apiKey: string, model: string, prompt: string): Promis
 	});
 
 	const data = res.json;
-	if (!data.candidates?.[0]?.content?.parts?.[0]?.text) {
+
+	if (data.error) {
+		console.error('Gemini API error:', data.error);
+		throw createError('api_error', `Gemini API error: ${data.error.message || JSON.stringify(data.error)}`);
+	}
+
+	const candidate = data.candidates?.[0];
+
+	// Debug logging
+	console.log(`[Gemini] Response finishReason: ${candidate?.finishReason}`);
+	console.log(`[Gemini] Response text length: ${candidate?.content?.parts?.[0]?.text?.length || 0} chars`);
+	if (data.usageMetadata) {
+		console.log(`[Gemini] Usage: prompt=${data.usageMetadata.promptTokenCount}, output=${data.usageMetadata.candidatesTokenCount}, total=${data.usageMetadata.totalTokenCount}`);
+	}
+
+	if (!candidate?.content?.parts?.[0]?.text) {
+		if (candidate?.finishReason === 'SAFETY') {
+			throw createError('api_error', 'Gemini extraction blocked by safety filters. Try distinct content.');
+		}
 		throw createError('api_error', 'Empty response from Gemini API');
 	}
-	return data.candidates[0].content.parts[0].text;
+
+	return candidate.content.parts[0].text;
 }
 
 async function callOllama(host: string, model: string, prompt: string): Promise<string> {
@@ -198,7 +221,11 @@ async function callOllama(host: string, model: string, prompt: string): Promise<
 	return data.response;
 }
 
-function parseResponse(response: string): ExtractionResult {
+/**
+ * Parse LLM response into OntologyExtractionResult.
+ * Validates relationship types and normalizes the structure.
+ */
+function parseOntologyResponse(response: string): OntologyExtractionResult {
 	// Extract JSON from response (handle markdown code blocks)
 	let jsonStr = response.trim();
 
@@ -219,29 +246,67 @@ function parseResponse(response: string): ExtractionResult {
 	try {
 		const parsed = JSON.parse(jsonStr);
 
-		// Validate and normalize response
-		const entities = Array.isArray(parsed.entities)
-			? parsed.entities.filter((e: unknown) => typeof e === 'string' && e.trim())
+		// Validate and normalize nodes
+		const nodes = Array.isArray(parsed.nodes)
+			? parsed.nodes
+				.filter((n: unknown) => {
+					if (!n || typeof n !== 'object') return false;
+					const node = n as Record<string, unknown>;
+					return node.id && node.label &&
+						node.properties &&
+						typeof (node.properties as Record<string, unknown>).name === 'string';
+				})
+				.map((n: Record<string, unknown>) => ({
+					id: String(n.id),
+					label: String(n.label),
+					properties: {
+						name: String((n.properties as Record<string, unknown>).name),
+						...Object.fromEntries(
+							Object.entries(n.properties as Record<string, unknown>)
+								.filter(([k]: [string, unknown]) => k !== 'name')
+						)
+					}
+				}))
 			: [];
 
-		const keywordMatches = Array.isArray(parsed.keywordMatches)
-			? parsed.keywordMatches.filter((k: unknown) => typeof k === 'string' && k.trim())
-			: [];
-
+		// Validate and normalize relationships
 		const relationships = Array.isArray(parsed.relationships)
-			? parsed.relationships.filter((r: unknown) =>
-				r && typeof r === 'object' &&
-				'source' in r && 'target' in r &&
-				typeof (r as {source: unknown}).source === 'string' &&
-				typeof (r as {target: unknown}).target === 'string'
-			).map((r: {source: string; target: string; type?: string}) => ({
-				source: r.source,
-				target: r.target,
-				type: 'relates_to' as const,
-			}))
+			? parsed.relationships
+				.filter((r: unknown) => {
+					if (!r || typeof r !== 'object') return false;
+					const rel = r as Record<string, unknown>;
+					return rel.source && rel.target && rel.type &&
+						isValidRelationshipType(String(rel.type));
+				})
+				.map((r: Record<string, unknown>) => ({
+					source: String(r.source),
+					target: String(r.target),
+					type: String(r.type) as RelationshipType,
+					properties: {
+						detail: r.properties && typeof (r.properties as Record<string, unknown>).detail === 'string'
+							? String((r.properties as Record<string, unknown>).detail)
+							: 'related',
+						...Object.fromEntries(
+							r.properties && typeof r.properties === 'object'
+								? Object.entries(r.properties as Record<string, unknown>)
+									.filter(([k]: [string, unknown]) => k !== 'detail')
+								: []
+						)
+					}
+				}))
 			: [];
 
-		return { entities, keywordMatches, relationships };
+		// Log warning for invalid relationship types that were filtered out
+		const invalidRelTypes = Array.isArray(parsed.relationships)
+			? (parsed.relationships as Record<string, unknown>[])
+				.filter(r => r.type && !isValidRelationshipType(String(r.type)))
+				.map(r => r.type)
+			: [];
+		if (invalidRelTypes.length > 0) {
+			console.warn('Filtered out invalid relationship types:', [...new Set(invalidRelTypes)]);
+		}
+
+		return { nodes, relationships };
 	} catch (e) {
 		console.error('Failed to parse LLM response:', response);
 		throw createError('parse_error', 'Failed to parse extraction result from LLM', response.slice(0, 200));

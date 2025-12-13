@@ -1,9 +1,9 @@
 import { Notice, MarkdownView, TFile } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
 import { loadHashes, saveHashes, computeHash, hasNoteChanged, updateNoteHash, removeNoteHash, clearHashes } from '../graph/hashes';
-import { mergeExtractionIntoCache, mergeInternalLinksIntoCache } from '../graph/merge';
+import { mergeExtractionIntoCache, mergeInternalLinksIntoCache, removeNoteFromCache } from '../graph/merge';
 import { buildExtractionPrompt, truncateContent } from '../extraction/prompts';
-import { extractEntities, settingsToExtractionOptions, ExtractionError } from '../extraction/llm-client';
+import { extractOntology, settingsToExtractionOptions, ExtractionError } from '../extraction/llm-client';
 
 // Track if vault analysis is running (to prevent multiple concurrent runs)
 let isVaultAnalysisRunning = false;
@@ -49,20 +49,24 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 	const loadingNotice = new Notice(`Analyzing "${file.basename}"...`, 0);
 
 	try {
-		// Get existing entities for context (O(1) via cache)
-		const existingEntities = plugin.graphCache.getExistingEntityLabels();
+		// Get existing node names for context (O(1) via cache)
+		const existingNodeNames = plugin.graphCache.getExistingNodeNames();
 
 		// Build prompt and call LLM
 		const truncatedContent = truncateContent(content);
-		const prompt = buildExtractionPrompt(truncatedContent, plugin.settings.keywords, existingEntities);
+		const prompt = buildExtractionPrompt(truncatedContent, existingNodeNames, plugin.settings.extractionMode || 'simple');
 		const options = settingsToExtractionOptions(plugin.settings);
-		const result = await extractEntities(options, prompt);
+		const result = await extractOntology(options, prompt);
 
 		// Hide loading notice
 		loadingNotice.hide();
 
 		// Merge results into graph cache (indexed, debounced save)
-		mergeExtractionIntoCache(plugin.graphCache, file.path, file.basename, result);
+		const { nodesAdded, relationshipsAdded } = mergeExtractionIntoCache(
+			plugin.graphCache,
+			file.path,
+			result
+		);
 
 		// Process internal links ([[wikilinks]])
 		const linksAdded = mergeInternalLinksIntoCache(plugin.graphCache, plugin.app, file, content);
@@ -73,23 +77,26 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 
 		// Build success message
 		const parts: string[] = [];
-		if (result.entities.length > 0) {
-			parts.push(`${result.entities.length} entities`);
+		if (nodesAdded > 0) {
+			parts.push(`${nodesAdded} nodes`);
 		}
-		if (result.keywordMatches.length > 0) {
-			parts.push(`${result.keywordMatches.length} keywords`);
-		}
-		if (result.relationships.length > 0) {
-			parts.push(`${result.relationships.length} relationships`);
+		if (relationshipsAdded > 0) {
+			parts.push(`${relationshipsAdded} relationships`);
 		}
 		if (linksAdded > 0) {
 			parts.push(`${linksAdded} links`);
 		}
 
+		// Also show total extracted (even if merged with existing)
+		const totalNodes = result.nodes.length;
+		const totalRels = result.relationships.length;
+
 		if (parts.length > 0) {
-			new Notice(`Extracted: ${parts.join(', ')}`);
+			new Notice(`Added: ${parts.join(', ')}\n(Extracted: ${totalNodes} nodes, ${totalRels} relationships)`);
+		} else if (totalNodes > 0 || totalRels > 0) {
+			new Notice(`Extracted ${totalNodes} nodes, ${totalRels} relationships (all merged with existing)`);
 		} else {
-			new Notice('No entities or keywords found in this note');
+			new Notice('No entities or relationships found in this note');
 		}
 
 		// Update status bar
@@ -126,15 +133,15 @@ export async function removeCurrentNoteFromGraph(plugin: SimpleGraphBuilderPlugi
 	}
 
 	const file = activeView.file;
-	const removed = plugin.graphCache.removeNoteByPath(file.path);
+	const { nodesRemoved, edgesRemoved } = removeNoteFromCache(plugin.graphCache, file.path);
 
-	if (removed) {
+	if (nodesRemoved > 0 || edgesRemoved > 0) {
 		// Also remove the hash so it can be re-analyzed
 		const hashes = await loadHashes(plugin);
 		const updatedHashes = removeNoteHash(hashes, file.path);
 		await saveHashes(plugin, updatedHashes);
 
-		new Notice(`Removed "${file.basename}" from graph`);
+		new Notice(`Removed "${file.basename}" from graph (${nodesRemoved} nodes, ${edgesRemoved} edges)`);
 		plugin.updateStatusBar();
 	} else {
 		new Notice('This note is not in the graph');
@@ -161,7 +168,7 @@ export async function analyzeFile(
 	file: TFile,
 	hashes: { hashes: Array<{ path: string; hash: string; analyzedAt: number }> },
 	options?: { skipUnchanged?: boolean }
-): Promise<{ success: boolean; skipped: boolean; error?: string }> {
+): Promise<{ success: boolean; skipped: boolean; nodesAdded: number; relationshipsAdded: number; error?: string }> {
 	const { skipUnchanged = true } = options ?? {};
 
 	try {
@@ -169,26 +176,30 @@ export async function analyzeFile(
 
 		// Check if content is too short
 		if (content.trim().length < 50) {
-			return { success: false, skipped: true };
+			return { success: false, skipped: true, nodesAdded: 0, relationshipsAdded: 0 };
 		}
 
 		// Check if note has changed
 		const currentHash = computeHash(content);
 		if (skipUnchanged && !hasNoteChanged(hashes, file.path, currentHash)) {
-			return { success: false, skipped: true };
+			return { success: false, skipped: true, nodesAdded: 0, relationshipsAdded: 0 };
 		}
 
-		// Get existing entities for context
-		const existingEntities = plugin.graphCache.getExistingEntityLabels();
+		// Get existing node names for context
+		const existingNodeNames = plugin.graphCache.getExistingNodeNames();
 
 		// Build prompt and call LLM
 		const truncatedContent = truncateContent(content);
-		const prompt = buildExtractionPrompt(truncatedContent, plugin.settings.keywords, existingEntities);
+		const prompt = buildExtractionPrompt(truncatedContent, existingNodeNames, plugin.settings.extractionMode || 'simple');
 		const extractionOptions = settingsToExtractionOptions(plugin.settings);
-		const result = await extractEntities(extractionOptions, prompt);
+		const result = await extractOntology(extractionOptions, prompt);
 
 		// Merge results into graph cache
-		mergeExtractionIntoCache(plugin.graphCache, file.path, file.basename, result);
+		const { nodesAdded, relationshipsAdded } = mergeExtractionIntoCache(
+			plugin.graphCache,
+			file.path,
+			result
+		);
 
 		// Process internal links ([[wikilinks]])
 		mergeInternalLinksIntoCache(plugin.graphCache, plugin.app, file, content);
@@ -202,10 +213,10 @@ export async function analyzeFile(
 			hashes.hashes.push(hashRecord);
 		}
 
-		return { success: true, skipped: false };
+		return { success: true, skipped: false, nodesAdded, relationshipsAdded };
 	} catch (error) {
 		const err = error as Error & ExtractionError;
-		return { success: false, skipped: false, error: err.message };
+		return { success: false, skipped: false, nodesAdded: 0, relationshipsAdded: 0, error: err.message };
 	}
 }
 
@@ -230,21 +241,21 @@ export function cancelVaultAnalysis(): void {
 export async function analyzeEntireVault(
 	plugin: SimpleGraphBuilderPlugin,
 	onProgress?: (current: number, total: number, currentFile: string) => void
-): Promise<{ analyzed: number; skipped: number; errors: number }> {
+): Promise<{ analyzed: number; skipped: number; errors: number; nodesAdded: number; relationshipsAdded: number }> {
 	if (isVaultAnalysisRunning) {
 		new Notice('Vault analysis is already running');
-		return { analyzed: 0, skipped: 0, errors: 0 };
+		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, relationshipsAdded: 0 };
 	}
 
 	// Check API configuration
 	const { apiProvider, apiKey, ollamaModel } = plugin.settings;
 	if (apiProvider !== 'ollama' && !apiKey) {
 		new Notice('Please configure your API key in settings');
-		return { analyzed: 0, skipped: 0, errors: 0 };
+		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, relationshipsAdded: 0 };
 	}
 	if (apiProvider === 'ollama' && !ollamaModel) {
 		new Notice('Please configure your Ollama model in settings');
-		return { analyzed: 0, skipped: 0, errors: 0 };
+		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, relationshipsAdded: 0 };
 	}
 
 	isVaultAnalysisRunning = true;
@@ -256,6 +267,8 @@ export async function analyzeEntireVault(
 	let analyzed = 0;
 	let skipped = 0;
 	let errors = 0;
+	let totalNodesAdded = 0;
+	let totalRelationshipsAdded = 0;
 
 	// Load hashes once
 	const hashes = await loadHashes(plugin);
@@ -266,7 +279,7 @@ export async function analyzeEntireVault(
 		for (let i = 0; i < files.length; i++) {
 			if (vaultAnalysisCancelled) {
 				progressNotice.hide();
-				new Notice(`Vault analysis cancelled. Analyzed: ${analyzed}, Skipped: ${skipped}`);
+				new Notice(`Vault analysis cancelled.\nAnalyzed: ${analyzed}, Nodes: ${totalNodesAdded}, Relationships: ${totalRelationshipsAdded}`);
 				break;
 			}
 
@@ -280,6 +293,8 @@ export async function analyzeEntireVault(
 
 			if (result.success) {
 				analyzed++;
+				totalNodesAdded += result.nodesAdded;
+				totalRelationshipsAdded += result.relationshipsAdded;
 			} else if (result.skipped) {
 				skipped++;
 			} else {
@@ -300,7 +315,11 @@ export async function analyzeEntireVault(
 		progressNotice.hide();
 
 		if (!vaultAnalysisCancelled) {
-			new Notice(`Vault analysis complete!\nAnalyzed: ${analyzed}, Skipped: ${skipped}, Errors: ${errors}`);
+			new Notice(
+				`Vault analysis complete!\n` +
+				`Analyzed: ${analyzed}, Skipped: ${skipped}, Errors: ${errors}\n` +
+				`Added: ${totalNodesAdded} nodes, ${totalRelationshipsAdded} relationships`
+			);
 		}
 
 		// Update status bar
@@ -310,7 +329,7 @@ export async function analyzeEntireVault(
 		vaultAnalysisCancelled = false;
 	}
 
-	return { analyzed, skipped, errors };
+	return { analyzed, skipped, errors, nodesAdded: totalNodesAdded, relationshipsAdded: totalRelationshipsAdded };
 }
 
 /**
@@ -346,7 +365,7 @@ export async function autoAnalyzeFile(plugin: SimpleGraphBuilderPlugin, file: TF
 
 		if (result.success) {
 			await saveHashes(plugin, hashes);
-			new Notice(`Auto-analyzed "${file.basename}"`);
+			new Notice(`Auto-analyzed "${file.basename}" (+${result.nodesAdded} nodes, +${result.relationshipsAdded} rels)`);
 			plugin.updateStatusBar();
 		}
 		// Silently ignore skipped/errors for auto-analysis

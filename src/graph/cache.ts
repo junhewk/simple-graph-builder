@@ -1,13 +1,12 @@
-import { GraphData, GraphNode, GraphEdge, PluginData, NodeType } from '../types';
+import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData } from '../types';
 import { DEFAULT_SETTINGS } from '../settings';
 import type SimpleGraphBuilderPlugin from '../main';
 
-const CURRENT_GRAPH_VERSION = 1;
 const SAVE_DEBOUNCE_MS = 1000;
 
 /**
  * GraphCache provides O(1) lookups via Maps and debounced persistence.
- * Replaces direct storage.ts usage for better performance with large graphs.
+ * Updated for ontology model (v2) with flexible node labels and fixed relationship types.
  */
 export class GraphCache {
 	private plugin: SimpleGraphBuilderPlugin;
@@ -16,17 +15,19 @@ export class GraphCache {
 	private saveTimeout: ReturnType<typeof setTimeout> | null = null;
 
 	// Raw data
-	private nodes: GraphNode[] = [];
-	private edges: GraphEdge[] = [];
-	private version = CURRENT_GRAPH_VERSION;
+	private nodes: OntologyNode[] = [];
+	private edges: OntologyEdge[] = [];
+	private version = GRAPH_SCHEMA_VERSION;
 
 	// Indexes for O(1) lookups
-	private nodeById: Map<string, GraphNode> = new Map();
-	private nodesByType: Map<NodeType, GraphNode[]> = new Map();
-	private nodeByNotePath: Map<string, GraphNode> = new Map();
-	private edgeById: Map<string, GraphEdge> = new Map();
-	private edgesBySource: Map<string, GraphEdge[]> = new Map();
-	private edgesByTarget: Map<string, GraphEdge[]> = new Map();
+	private nodeById: Map<string, OntologyNode> = new Map();
+	private nodesByLabel: Map<string, OntologyNode[]> = new Map();
+	private nodesBySourceNote: Map<string, OntologyNode[]> = new Map();
+	private nodeByName: Map<string, OntologyNode> = new Map(); // lowercase name -> node
+	private edgeById: Map<string, OntologyEdge> = new Map();
+	private edgesBySource: Map<string, OntologyEdge[]> = new Map();
+	private edgesByTarget: Map<string, OntologyEdge[]> = new Map();
+	private edgesBySourceNote: Map<string, OntologyEdge[]> = new Map();
 
 	constructor(plugin: SimpleGraphBuilderPlugin) {
 		this.plugin = plugin;
@@ -34,6 +35,7 @@ export class GraphCache {
 
 	/**
 	 * Ensure graph is loaded into memory. Idempotent.
+	 * Handles v1 -> v2 migration by clearing data.
 	 */
 	async ensureLoaded(): Promise<void> {
 		if (this.loaded) return;
@@ -42,13 +44,26 @@ export class GraphCache {
 		const graph = data?.graph;
 
 		if (graph) {
-			this.nodes = graph.nodes || [];
-			this.edges = graph.edges || [];
-			this.version = graph.version || CURRENT_GRAPH_VERSION;
+			// Check for legacy v1 data
+			if (isLegacyGraphData(graph)) {
+				console.log('Detected legacy v1 graph data. Clearing for v2 schema.');
+				this.nodes = [];
+				this.edges = [];
+				this.version = GRAPH_SCHEMA_VERSION;
+				// Clear hashes to allow re-analysis
+				if (data.hashes) {
+					data.hashes.hashes = [];
+				}
+				this.dirty = true;
+			} else {
+				this.nodes = (graph.nodes || []) as OntologyNode[];
+				this.edges = (graph.edges || []) as OntologyEdge[];
+				this.version = graph.version || GRAPH_SCHEMA_VERSION;
+			}
 		} else {
 			this.nodes = [];
 			this.edges = [];
-			this.version = CURRENT_GRAPH_VERSION;
+			this.version = GRAPH_SCHEMA_VERSION;
 		}
 
 		this.rebuildIndexes();
@@ -56,41 +71,130 @@ export class GraphCache {
 	}
 
 	/**
+	 * Check if legacy data was detected and cleared.
+	 */
+	wasLegacyDataCleared(): boolean {
+		return this.dirty && this.nodes.length === 0;
+	}
+
+	/**
 	 * Rebuild all indexes from raw arrays.
 	 */
 	private rebuildIndexes(): void {
 		this.nodeById.clear();
-		this.nodesByType.clear();
-		this.nodeByNotePath.clear();
+		this.nodesByLabel.clear();
+		this.nodesBySourceNote.clear();
+		this.nodeByName.clear();
 		this.edgeById.clear();
 		this.edgesBySource.clear();
 		this.edgesByTarget.clear();
-
-		// Initialize type arrays
-		this.nodesByType.set('note', []);
-		this.nodesByType.set('entity', []);
-		this.nodesByType.set('keyword', []);
+		this.edgesBySourceNote.clear();
 
 		for (const node of this.nodes) {
-			this.nodeById.set(node.id, node);
-			this.nodesByType.get(node.type)!.push(node);
-			if (node.notePath) {
-				this.nodeByNotePath.set(node.notePath, node);
-			}
+			this.indexNode(node);
 		}
 
 		for (const edge of this.edges) {
-			this.edgeById.set(edge.id, edge);
+			this.indexEdge(edge);
+		}
+	}
 
-			if (!this.edgesBySource.has(edge.source)) {
-				this.edgesBySource.set(edge.source, []);
-			}
-			this.edgesBySource.get(edge.source)!.push(edge);
+	/**
+	 * Add a node to all indexes.
+	 */
+	private indexNode(node: OntologyNode): void {
+		this.nodeById.set(node.id, node);
 
-			if (!this.edgesByTarget.has(edge.target)) {
-				this.edgesByTarget.set(edge.target, []);
+		// Index by label
+		if (!this.nodesByLabel.has(node.label)) {
+			this.nodesByLabel.set(node.label, []);
+		}
+		this.nodesByLabel.get(node.label)!.push(node);
+
+		// Index by source notes
+		for (const notePath of node.sourceNotes) {
+			if (!this.nodesBySourceNote.has(notePath)) {
+				this.nodesBySourceNote.set(notePath, []);
 			}
-			this.edgesByTarget.get(edge.target)!.push(edge);
+			this.nodesBySourceNote.get(notePath)!.push(node);
+		}
+
+		// Index by name (lowercase for case-insensitive lookup)
+		this.nodeByName.set(node.properties.name.toLowerCase(), node);
+	}
+
+	/**
+	 * Remove a node from all indexes.
+	 */
+	private unindexNode(node: OntologyNode): void {
+		this.nodeById.delete(node.id);
+		this.nodeByName.delete(node.properties.name.toLowerCase());
+
+		// Remove from label index
+		const labelArr = this.nodesByLabel.get(node.label);
+		if (labelArr) {
+			const idx = labelArr.indexOf(node);
+			if (idx >= 0) labelArr.splice(idx, 1);
+		}
+
+		// Remove from source note indexes
+		for (const notePath of node.sourceNotes) {
+			const noteArr = this.nodesBySourceNote.get(notePath);
+			if (noteArr) {
+				const idx = noteArr.indexOf(node);
+				if (idx >= 0) noteArr.splice(idx, 1);
+			}
+		}
+	}
+
+	/**
+	 * Add an edge to all indexes.
+	 */
+	private indexEdge(edge: OntologyEdge): void {
+		this.edgeById.set(edge.id, edge);
+
+		if (!this.edgesBySource.has(edge.source)) {
+			this.edgesBySource.set(edge.source, []);
+		}
+		this.edgesBySource.get(edge.source)!.push(edge);
+
+		if (!this.edgesByTarget.has(edge.target)) {
+			this.edgesByTarget.set(edge.target, []);
+		}
+		this.edgesByTarget.get(edge.target)!.push(edge);
+
+		if (edge.sourceNote) {
+			if (!this.edgesBySourceNote.has(edge.sourceNote)) {
+				this.edgesBySourceNote.set(edge.sourceNote, []);
+			}
+			this.edgesBySourceNote.get(edge.sourceNote)!.push(edge);
+		}
+	}
+
+	/**
+	 * Remove an edge from all indexes.
+	 */
+	private unindexEdge(edge: OntologyEdge): void {
+		this.edgeById.delete(edge.id);
+
+		const sourceArr = this.edgesBySource.get(edge.source);
+		if (sourceArr) {
+			const idx = sourceArr.indexOf(edge);
+			if (idx >= 0) sourceArr.splice(idx, 1);
+		}
+
+		const targetArr = this.edgesByTarget.get(edge.target);
+		if (targetArr) {
+			const idx = targetArr.indexOf(edge);
+			if (idx >= 0) targetArr.splice(idx, 1);
+		}
+
+		if (edge.sourceNote) {
+			const noteArr = this.edgesBySourceNote.get(edge.sourceNote);
+			if (noteArr) {
+				const idx = noteArr.indexOf(edge);
+				if (idx >= 0) noteArr.splice(idx, 1);
+			}
 		}
 	}
 
@@ -107,36 +211,71 @@ export class GraphCache {
 
 	// --- Node operations (O(1) lookups) ---
 
-	getNodeById(id: string): GraphNode | undefined {
+	getNodeById(id: string): OntologyNode | undefined {
 		return this.nodeById.get(id);
 	}
 
-	getNodesByType(type: NodeType): GraphNode[] {
-		return this.nodesByType.get(type) || [];
+	getNodesByLabel(label: string): OntologyNode[] {
+		return this.nodesByLabel.get(label) || [];
 	}
 
-	getNodeByNotePath(path: string): GraphNode | undefined {
-		return this.nodeByNotePath.get(path);
+	getNodesBySourceNote(notePath: string): OntologyNode[] {
+		return this.nodesBySourceNote.get(notePath) || [];
 	}
 
-	getAllNodes(): GraphNode[] {
+	getNodeByName(name: string): OntologyNode | undefined {
+		return this.nodeByName.get(name.toLowerCase());
+	}
+
+	getAllNodes(): OntologyNode[] {
 		return [...this.nodes];
 	}
 
-	addNode(node: GraphNode): void {
+	/**
+	 * Get all unique labels in the graph.
+	 */
+	getAllLabels(): string[] {
+		return Array.from(this.nodesByLabel.keys());
+	}
+
+	/**
+	 * Get all unique node names (for LLM context).
+	 */
+	getExistingNodeNames(): string[] {
+		return this.nodes.map(n => n.properties.name);
+	}
+
+	addNode(node: OntologyNode): void {
 		if (this.nodeById.has(node.id)) {
-			// Update existing
+			// Update existing - remove from indexes first
 			const existing = this.nodeById.get(node.id)!;
-			Object.assign(existing, node);
-		} else {
-			// Add new
-			this.nodes.push(node);
-			this.nodeById.set(node.id, node);
-			this.nodesByType.get(node.type)!.push(node);
-			if (node.notePath) {
-				this.nodeByNotePath.set(node.notePath, node);
-			}
+			this.unindexNode(existing);
+			const idx = this.nodes.indexOf(existing);
+			if (idx >= 0) this.nodes.splice(idx, 1);
 		}
+
+		this.nodes.push(node);
+		this.indexNode(node);
+		this.markDirty();
+	}
+
+	/**
+	 * Update an existing node (re-indexes it).
+	 */
+	updateNode(node: OntologyNode): void {
+		if (!this.nodeById.has(node.id)) {
+			// Node doesn't exist, add it
+			this.addNode(node);
+			return;
+		}
+
+		const existing = this.nodeById.get(node.id)!;
+		this.unindexNode(existing);
+
+		// Update in place
+		Object.assign(existing, node);
+
+		this.indexNode(existing);
 		this.markDirty();
 	}
 
@@ -144,21 +283,12 @@ export class GraphCache {
 		const node = this.nodeById.get(id);
 		if (!node) return false;
 
-		// Remove from arrays
+		// Remove from array
 		const idx = this.nodes.indexOf(node);
 		if (idx >= 0) this.nodes.splice(idx, 1);
 
-		const typeArr = this.nodesByType.get(node.type);
-		if (typeArr) {
-			const typeIdx = typeArr.indexOf(node);
-			if (typeIdx >= 0) typeArr.splice(typeIdx, 1);
-		}
-
-		// Remove from maps
-		this.nodeById.delete(id);
-		if (node.notePath) {
-			this.nodeByNotePath.delete(node.notePath);
-		}
+		// Remove from indexes
+		this.unindexNode(node);
 
 		// Remove connected edges
 		this.removeEdgesByNode(id);
@@ -169,38 +299,41 @@ export class GraphCache {
 
 	// --- Edge operations (O(1) lookups) ---
 
-	getEdgeById(id: string): GraphEdge | undefined {
+	getEdgeById(id: string): OntologyEdge | undefined {
 		return this.edgeById.get(id);
 	}
 
-	getEdgesBySource(sourceId: string): GraphEdge[] {
+	getEdgesBySource(sourceId: string): OntologyEdge[] {
 		return this.edgesBySource.get(sourceId) || [];
 	}
 
-	getEdgesByTarget(targetId: string): GraphEdge[] {
+	getEdgesByTarget(targetId: string): OntologyEdge[] {
 		return this.edgesByTarget.get(targetId) || [];
 	}
 
-	getAllEdges(): GraphEdge[] {
+	getEdgesBySourceNote(notePath: string): OntologyEdge[] {
+		return this.edgesBySourceNote.get(notePath) || [];
+	}
+
+	getAllEdges(): OntologyEdge[] {
 		return [...this.edges];
 	}
 
-	addEdge(edge: GraphEdge): void {
+	/**
+	 * Get all edges connected to a node (both directions).
+	 */
+	getConnectedEdges(nodeId: string): OntologyEdge[] {
+		const edges: OntologyEdge[] = [];
+		edges.push(...(this.edgesBySource.get(nodeId) || []));
+		edges.push(...(this.edgesByTarget.get(nodeId) || []));
+		return edges;
+	}
+
+	addEdge(edge: OntologyEdge): void {
 		if (this.edgeById.has(edge.id)) return; // Already exists
 
 		this.edges.push(edge);
-		this.edgeById.set(edge.id, edge);
-
-		if (!this.edgesBySource.has(edge.source)) {
-			this.edgesBySource.set(edge.source, []);
-		}
-		this.edgesBySource.get(edge.source)!.push(edge);
-
-		if (!this.edgesByTarget.has(edge.target)) {
-			this.edgesByTarget.set(edge.target, []);
-		}
-		this.edgesByTarget.get(edge.target)!.push(edge);
-
+		this.indexEdge(edge);
 		this.markDirty();
 	}
 
@@ -208,23 +341,13 @@ export class GraphCache {
 		const edge = this.edgeById.get(id);
 		if (!edge) return false;
 
-		// Remove from arrays
+		// Remove from array
 		const idx = this.edges.indexOf(edge);
 		if (idx >= 0) this.edges.splice(idx, 1);
 
-		const sourceArr = this.edgesBySource.get(edge.source);
-		if (sourceArr) {
-			const sIdx = sourceArr.indexOf(edge);
-			if (sIdx >= 0) sourceArr.splice(sIdx, 1);
-		}
+		// Remove from indexes
+		this.unindexEdge(edge);
 
-		const targetArr = this.edgesByTarget.get(edge.target);
-		if (targetArr) {
-			const tIdx = targetArr.indexOf(edge);
-			if (tIdx >= 0) targetArr.splice(tIdx, 1);
-		}
-
-		this.edgeById.delete(id);
 		this.markDirty();
 		return true;
 	}
@@ -245,7 +368,7 @@ export class GraphCache {
 
 	// --- Graph traversal ---
 
-	getConnectedNodes(nodeId: string): GraphNode[] {
+	getConnectedNodes(nodeId: string): OntologyNode[] {
 		const connectedIds = new Set<string>();
 
 		for (const edge of this.getEdgesBySource(nodeId)) {
@@ -255,19 +378,12 @@ export class GraphCache {
 			connectedIds.add(edge.source);
 		}
 
-		const result: GraphNode[] = [];
+		const result: OntologyNode[] = [];
 		for (const id of connectedIds) {
 			const node = this.nodeById.get(id);
 			if (node) result.push(node);
 		}
 		return result;
-	}
-
-	/**
-	 * Get all entity labels (for LLM context).
-	 */
-	getExistingEntityLabels(): string[] {
-		return this.getNodesByType('entity').map(n => n.label);
 	}
 
 	// --- Persistence ---
@@ -299,7 +415,7 @@ export class GraphCache {
 
 		const data: PluginData = (await this.plugin.loadData()) ?? {
 			settings: DEFAULT_SETTINGS,
-			graph: { nodes: [], edges: [], version: CURRENT_GRAPH_VERSION },
+			graph: { nodes: [], edges: [], version: GRAPH_SCHEMA_VERSION },
 			hashes: { hashes: [] },
 		};
 
@@ -324,52 +440,33 @@ export class GraphCache {
 	}
 
 	/**
-	 * Remove a note and its orphaned entities.
-	 */
-	removeNoteByPath(notePath: string): boolean {
-		const noteNode = this.nodeByNotePath.get(notePath);
-		if (!noteNode) return false;
-
-		// Collect entity IDs connected to this note before removal
-		const connectedEntityIds = new Set<string>();
-		for (const edge of this.getEdgesBySource(noteNode.id)) {
-			const target = this.nodeById.get(edge.target);
-			if (target?.type === 'entity') {
-				connectedEntityIds.add(target.id);
-			}
-		}
-
-		// Remove the note node (also removes its edges)
-		this.removeNode(noteNode.id);
-
-		// Check each connected entity - remove if orphaned
-		for (const entityId of connectedEntityIds) {
-			const entity = this.nodeById.get(entityId);
-			if (!entity) continue;
-
-			// Check if entity has any remaining connections
-			const hasConnections =
-				this.getEdgesBySource(entityId).length > 0 ||
-				this.getEdgesByTarget(entityId).length > 0;
-
-			if (!hasConnections) {
-				this.removeNode(entityId);
-			}
-		}
-
-		return true;
-	}
-
-	/**
 	 * Get statistics about the graph.
+	 * Returns dynamic label-based counts.
 	 */
-	getStats(): { nodes: number; edges: number; notes: number; entities: number; keywords: number } {
+	getStats(): { nodes: number; edges: number; labels: Record<string, number> } {
+		const labels: Record<string, number> = {};
+		for (const [label, nodes] of this.nodesByLabel) {
+			labels[label] = nodes.length;
+		}
+
 		return {
 			nodes: this.nodes.length,
 			edges: this.edges.length,
-			notes: this.getNodesByType('note').length,
-			entities: this.getNodesByType('entity').length,
-			keywords: this.getNodesByType('keyword').length,
+			labels,
 		};
+	}
+
+	/**
+	 * Get a summary string for status bar.
+	 */
+	getStatsSummary(): string {
+		const stats = this.getStats();
+		const labelCounts = Object.entries(stats.labels)
+			.sort((a: [string, number], b: [string, number]) => b[1] - a[1])
+			.slice(0, 3)
+			.map(([label, count]: [string, number]) => `${count} ${label}`)
+			.join(', ');
+
+		return `${stats.nodes} nodes, ${stats.edges} edges${labelCounts ? ` (${labelCounts})` : ''}`;
 	}
 }

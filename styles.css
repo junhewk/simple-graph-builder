@@ -99,7 +99,7 @@
 
 /* Search Modal */
 .simple-graph-search-modal {
-	min-width: 400px;
+	min-width: 450px;
 }
 
 .simple-graph-search-modal .search-results {
@@ -116,6 +116,20 @@
 	padding: 2em;
 }
 
+.simple-graph-search-modal .search-label-section {
+	margin-bottom: 1em;
+}
+
+.simple-graph-search-modal .search-label-header {
+	font-size: 0.8em;
+	font-weight: 600;
+	text-transform: uppercase;
+	color: var(--text-muted);
+	margin: 0.75em 0 0.25em 0;
+	padding-bottom: 0.25em;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
 .simple-graph-search-modal .search-results-list {
 	list-style: none;
 	padding: 0;
@@ -123,34 +137,70 @@
 }
 
 .simple-graph-search-modal .search-result-item {
-	padding: 0.75em;
-	border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.simple-graph-search-modal .search-result-item:last-child {
-	border-bottom: none;
+	padding: 0.6em 0.5em;
+	border-radius: 4px;
 }
 
 .simple-graph-search-modal .search-result-item:hover {
 	background: var(--background-modifier-hover);
 }
 
-.simple-graph-search-modal .search-result-link {
-	display: block;
+.simple-graph-search-modal .search-result-header {
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+}
+
+.simple-graph-search-modal .search-result-name {
 	font-weight: 500;
+	color: var(--text-normal);
+	flex-grow: 1;
+}
+
+.simple-graph-search-modal .search-result-score {
+	display: inline-block;
+	padding: 0.15em 0.5em;
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 3px;
+	font-size: 0.75em;
+	font-weight: 500;
+	color: var(--text-muted);
+	flex-shrink: 0;
+}
+
+.simple-graph-search-modal .search-result-notes {
+	margin-top: 0.35em;
+	font-size: 0.85em;
+	color: var(--text-muted);
+}
+
+.simple-graph-search-modal .search-result-notes-label {
+	color: var(--text-faint);
+}
+
+.simple-graph-search-modal .search-result-note-link {
 	color: var(--text-accent);
 	cursor: pointer;
 	text-decoration: none;
 }
 
-.simple-graph-search-modal .search-result-link:hover {
+.simple-graph-search-modal .search-result-note-link:hover {
 	text-decoration: underline;
 }
 
-.simple-graph-search-modal .search-result-meta {
+.simple-graph-search-modal .search-result-more {
+	color: var(--text-faint);
+	font-style: italic;
+}
+
+.simple-graph-search-modal .search-summary {
 	font-size: 0.85em;
 	color: var(--text-muted);
-	margin-top: 0.25em;
+	text-align: center;
+	margin-top: 1em;
+	padding-top: 0.75em;
+	border-top: 1px solid var(--background-modifier-border);
 }
 
 /* Neighborhood View */
@@ -308,4 +358,102 @@
 
 .neighborhood-popup-list li:hover {
 	background: var(--background-modifier-hover);
+}
+
+/* Smart Search Modal */
+.smart-search-modal {
+	min-width: 500px;
+	max-width: 700px;
+}
+
+.smart-search-section-title {
+	font-size: 1em;
+	font-weight: 600;
+	margin: 1.5em 0 0.5em 0;
+	color: var(--text-normal);
+	border-bottom: 1px solid var(--background-modifier-border);
+	padding-bottom: 0.25em;
+}
+
+.smart-search-answer {
+	padding: 0.75em;
+	background: var(--background-secondary);
+	border-radius: 6px;
+	line-height: 1.5;
+}
+
+.smart-search-nodes-list,
+.smart-search-notes-list {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.smart-search-node-item,
+.smart-search-note-item {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 0.5em;
+	padding: 0.5em 0;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.smart-search-node-item:last-child,
+.smart-search-note-item:last-child {
+	border-bottom: none;
+}
+
+.smart-search-node-name-container {
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+	flex-shrink: 0;
+}
+
+.smart-search-label-badge {
+	display: inline-block;
+	padding: 0.15em 0.5em;
+	border-radius: 3px;
+	font-size: 0.75em;
+	font-weight: 500;
+	color: white;
+	text-transform: uppercase;
+}
+
+.smart-search-node-link,
+.smart-search-note-link {
+	color: var(--text-accent);
+	text-decoration: none;
+	font-weight: 500;
+	cursor: pointer;
+}
+
+.smart-search-node-link:hover,
+.smart-search-note-link:hover {
+	text-decoration: underline;
+}
+
+.smart-search-separator {
+	color: var(--text-faint);
+	margin: 0 0.25em;
+}
+
+.smart-search-node-relevance,
+.smart-search-note-relevance {
+	color: var(--text-muted);
+	font-size: 0.9em;
+	font-style: italic;
+}
+
+.smart-search-error {
+	color: var(--text-error);
+	padding: 1em;
+}
+
+.smart-search-empty {
+	color: var(--text-muted);
+	font-style: italic;
+	text-align: center;
+	padding: 2em;
 }

@@ -1,8 +1,16 @@
 import { ItemView, WorkspaceLeaf, MarkdownView } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
-import { GraphNode } from '../types';
+import { OntologyNode, OntologyEdge } from '../types';
 
 export const NEIGHBORHOOD_VIEW_TYPE = 'simple-graph-neighborhood';
+
+/**
+ * Connection info for display in neighborhood view.
+ */
+interface ConnectionInfo {
+	node: OntologyNode;
+	edges: OntologyEdge[];
+}
 
 export class NeighborhoodView extends ItemView {
 	plugin: SimpleGraphBuilderPlugin;
@@ -64,9 +72,11 @@ export class NeighborhoodView extends ItemView {
 		}
 
 		const file = activeView.file;
-		const noteNode = this.plugin.graphCache.getNodeByNotePath(file.path);
 
-		if (!noteNode) {
+		// Get all nodes that have this note as a source
+		const nodesFromNote = this.plugin.graphCache.getNodesBySourceNote(file.path);
+
+		if (nodesFromNote.length === 0) {
 			this.neighborhoodContentEl.createEl('p', {
 				cls: 'neighborhood-empty',
 				text: 'This note has not been analyzed yet.',
@@ -83,36 +93,52 @@ export class NeighborhoodView extends ItemView {
 			return;
 		}
 
-		// Get connected nodes
-		const connectedNodes = this.plugin.graphCache.getConnectedNodes(noteNode.id);
-
-		// Group by type
-		const linkedNotes = connectedNodes.filter(n => n.type === 'note');
-		const entities = connectedNodes.filter(n => n.type === 'entity');
-		const keywords = connectedNodes.filter(n => n.type === 'keyword');
-
 		// Render current note info
 		const currentSection = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-section' });
 		currentSection.createEl('div', { cls: 'neighborhood-section-title', text: 'Current Note' });
 		currentSection.createEl('div', { cls: 'neighborhood-current-note', text: file.basename });
 
-		// Render linked notes
-		if (linkedNotes.length > 0) {
-			this.renderSection('Linked Notes', linkedNotes, 'note');
+		// Get all connected nodes (from this note's nodes)
+		const connectionMap = new Map<string, ConnectionInfo>();
+
+		for (const node of nodesFromNote) {
+			const edges = this.plugin.graphCache.getConnectedEdges(node.id);
+			for (const edge of edges) {
+				const connectedId = edge.source === node.id ? edge.target : edge.source;
+				const connectedNode = this.plugin.graphCache.getNodeById(connectedId);
+
+				if (connectedNode && !nodesFromNote.some(n => n.id === connectedId)) {
+					if (!connectionMap.has(connectedId)) {
+						connectionMap.set(connectedId, { node: connectedNode, edges: [] });
+					}
+					connectionMap.get(connectedId)!.edges.push(edge);
+				}
+			}
 		}
 
-		// Render entities
-		if (entities.length > 0) {
-			this.renderSection('Entities', entities, 'entity');
+		// Group connections by label
+		const connectionsByLabel = new Map<string, ConnectionInfo[]>();
+		for (const connection of connectionMap.values()) {
+			const label = connection.node.label;
+			if (!connectionsByLabel.has(label)) {
+				connectionsByLabel.set(label, []);
+			}
+			connectionsByLabel.get(label)!.push(connection);
 		}
 
-		// Render keywords
-		if (keywords.length > 0) {
-			this.renderSection('Keywords', keywords, 'keyword');
+		// Render nodes extracted from this note
+		this.renderExtractedNodes(nodesFromNote);
+
+		// Render connections by label (sorted by count)
+		const sortedLabels = Array.from(connectionsByLabel.entries())
+			.sort((a, b) => b[1].length - a[1].length);
+
+		for (const [label, connections] of sortedLabels) {
+			this.renderConnectionSection(label, connections);
 		}
 
 		// Show empty state if no connections
-		if (linkedNotes.length === 0 && entities.length === 0 && keywords.length === 0) {
+		if (connectionMap.size === 0 && nodesFromNote.length === 0) {
 			this.neighborhoodContentEl.createEl('p', {
 				cls: 'neighborhood-empty',
 				text: 'No connections found for this note.',
@@ -120,46 +146,66 @@ export class NeighborhoodView extends ItemView {
 		}
 	}
 
-	private renderSection(title: string, nodes: GraphNode[], type: 'note' | 'entity' | 'keyword'): void {
+	/**
+	 * Render nodes extracted from the current note.
+	 */
+	private renderExtractedNodes(nodes: OntologyNode[]): void {
+		if (!this.neighborhoodContentEl || nodes.length === 0) return;
+
+		const section = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-section' });
+		section.createEl('div', {
+			cls: 'neighborhood-section-title',
+			text: `Extracted Nodes (${nodes.length})`,
+		});
+
+		const list = section.createEl('ul', { cls: 'neighborhood-list' });
+		for (const node of nodes) {
+			const item = list.createEl('li', { cls: 'neighborhood-item neighborhood-item-extracted' });
+			const labelBadge = item.createEl('span', { cls: 'neighborhood-label-badge', text: node.label });
+			labelBadge.style.backgroundColor = this.getLabelColor(node.label);
+			item.createEl('span', { cls: 'neighborhood-link', text: node.properties.name });
+		}
+	}
+
+	/**
+	 * Render a section of connections grouped by label.
+	 */
+	private renderConnectionSection(label: string, connections: ConnectionInfo[]): void {
 		if (!this.neighborhoodContentEl) return;
 
 		const section = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-section' });
 		section.createEl('div', {
 			cls: 'neighborhood-section-title',
-			text: `${title} (${nodes.length})`,
+			text: `${label} (${connections.length})`,
 		});
 
 		const list = section.createEl('ul', { cls: 'neighborhood-list' });
-		for (const node of nodes) {
-			const item = list.createEl('li', { cls: `neighborhood-item neighborhood-item-${type}` });
-			const link = item.createEl('span', { cls: 'neighborhood-link', text: node.label });
+		for (const connection of connections) {
+			const item = list.createEl('li', { cls: 'neighborhood-item' });
 
-			if (type === 'note' && node.notePath) {
-				link.addClass('clickable');
-				link.addEventListener('click', () => {
-					if (node.notePath) {
-						this.app.workspace.openLinkText(node.notePath, '', false);
-					}
-				});
-			} else if (type === 'entity' || type === 'keyword') {
-				// Show connected notes count on hover
-				const connectedNotes = this.getConnectedNotes(node.id);
-				if (connectedNotes.length > 0) {
-					link.setAttr('aria-label', `Connected to ${connectedNotes.length} note(s)`);
-					link.addClass('clickable');
-					link.addEventListener('click', () => {
-						this.showConnectedNotesPopup(node, connectedNotes);
-					});
-				}
-			}
+			const link = item.createEl('span', {
+				cls: 'neighborhood-link clickable',
+				text: connection.node.properties.name,
+			});
+
+			// Show relationship info on hover
+			const edgeInfo = connection.edges
+				.map(e => `${e.type}: ${e.properties.detail}`)
+				.slice(0, 3)
+				.join('; ');
+			link.setAttr('aria-label', edgeInfo || 'Connected');
+
+			// Click to show connected notes
+			link.addEventListener('click', () => {
+				this.showNodeDetailsPopup(connection.node);
+			});
 		}
 	}
 
-	private getConnectedNotes(nodeId: string): GraphNode[] {
-		return this.plugin.graphCache.getConnectedNodes(nodeId).filter(n => n.type === 'note');
-	}
-
-	private showConnectedNotesPopup(node: GraphNode, connectedNotes: GraphNode[]): void {
+	/**
+	 * Show popup with node details and source notes.
+	 */
+	private showNodeDetailsPopup(node: OntologyNode): void {
 		if (!this.neighborhoodContentEl) return;
 
 		// Remove existing popup if any
@@ -171,21 +217,84 @@ export class NeighborhoodView extends ItemView {
 		const popup = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-popup' });
 
 		const header = popup.createDiv({ cls: 'neighborhood-popup-header' });
-		header.createEl('span', { text: `Notes with "${node.label}"` });
+		const labelBadge = header.createEl('span', { cls: 'neighborhood-label-badge', text: node.label });
+		labelBadge.style.backgroundColor = this.getLabelColor(node.label);
+		header.createEl('span', { text: node.properties.name });
 		const closeBtn = header.createEl('button', { cls: 'neighborhood-popup-close', text: '×' });
 		closeBtn.addEventListener('click', () => popup.remove());
 
-		const list = popup.createEl('ul', { cls: 'neighborhood-popup-list' });
-		for (const note of connectedNotes) {
-			const item = list.createEl('li');
-			const link = item.createEl('span', { cls: 'neighborhood-link clickable', text: note.label });
-			link.addEventListener('click', () => {
-				if (note.notePath) {
-					this.app.workspace.openLinkText(note.notePath, '', false);
+		// Show source notes
+		if (node.sourceNotes.length > 0) {
+			popup.createEl('div', { cls: 'neighborhood-popup-subtitle', text: 'Found in:' });
+			const list = popup.createEl('ul', { cls: 'neighborhood-popup-list' });
+			for (const notePath of node.sourceNotes) {
+				const item = list.createEl('li');
+				const title = notePath.replace(/\.md$/, '').split('/').pop() || notePath;
+				const link = item.createEl('span', { cls: 'neighborhood-link clickable', text: title });
+				link.addEventListener('click', () => {
+					this.app.workspace.openLinkText(notePath, '', false);
 					popup.remove();
-				}
-			});
+				});
+			}
 		}
+
+		// Show relationships
+		const edges = this.plugin.graphCache.getConnectedEdges(node.id);
+		if (edges.length > 0) {
+			popup.createEl('div', { cls: 'neighborhood-popup-subtitle', text: 'Relationships:' });
+			const relList = popup.createEl('ul', { cls: 'neighborhood-popup-list' });
+			for (const edge of edges.slice(0, 10)) {
+				const sourceNode = this.plugin.graphCache.getNodeById(edge.source);
+				const targetNode = this.plugin.graphCache.getNodeById(edge.target);
+				if (sourceNode && targetNode) {
+					const relItem = relList.createEl('li', { cls: 'neighborhood-relationship' });
+					relItem.innerHTML = `<span class="rel-from">${sourceNode.properties.name}</span>
+						<span class="rel-type">${edge.type}</span>
+						<span class="rel-to">${targetNode.properties.name}</span>
+						<span class="rel-detail">${edge.properties.detail}</span>`;
+				}
+			}
+		}
+	}
+
+	/**
+	 * Get color for a label (consistent with graph-view).
+	 */
+	private getLabelColor(label: string): string {
+		const LABEL_COLORS: Record<string, string> = {
+			Person: '#6366f1',
+			Organization: '#8b5cf6',
+			Team: '#a78bfa',
+			Concept: '#14b8a6',
+			Theory: '#2dd4bf',
+			Method: '#5eead4',
+			Technique: '#67e8f9',
+			Project: '#a855f7',
+			Product: '#c084fc',
+			System: '#d8b4fe',
+			Tool: '#f59e0b',
+			Library: '#fbbf24',
+			Framework: '#fcd34d',
+			Software: '#fde68a',
+			Event: '#f472b6',
+			Meeting: '#f9a8d4',
+			Conference: '#fbcfe8',
+			Document: '#60a5fa',
+			Paper: '#93c5fd',
+			Book: '#bfdbfe',
+			Place: '#4ade80',
+			Location: '#86efac',
+		};
+
+		if (LABEL_COLORS[label]) return LABEL_COLORS[label];
+
+		// Hash-based color generation for unknown labels
+		let hash = 0;
+		for (let i = 0; i < label.length; i++) {
+			hash = label.charCodeAt(i) + ((hash << 5) - hash);
+		}
+		const hue = Math.abs(hash) % 360;
+		return `hsl(${hue}, 70%, 60%)`;
 	}
 
 	async onClose() {

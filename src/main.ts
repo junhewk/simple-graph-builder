@@ -7,6 +7,7 @@ import { NeighborhoodView, NEIGHBORHOOD_VIEW_TYPE } from './ui/neighborhood-view
 import { GraphCache } from './graph/cache';
 import { analyzeCurrentNote, removeCurrentNoteFromGraph, clearAllGraphData, autoAnalyzeFile } from './commands/analyze';
 import { openSearchModal } from './commands/search';
+import { openSmartSearch } from './commands/smart-search';
 
 export default class SimpleGraphBuilderPlugin extends Plugin {
 	settings: Settings;
@@ -77,11 +78,17 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			callback: () => this.activateNeighborhoodView(),
 		});
 
+		this.addCommand({
+			id: 'smart-search',
+			name: 'Smart Search (AI-powered)',
+			callback: () => openSmartSearch(this),
+		});
+
 		// Add settings tab
 		this.addSettingTab(new SettingsTab(this.app, this));
 
 		// Add ribbon icon with menu
-		this.addRibbonIcon('git-fork', 'Simple Graph Builder', (evt) => {
+		this.addRibbonIcon('waypoints', 'Simple Graph Builder', (evt) => {
 			const menu = new Menu();
 
 			menu.addItem((item) =>
@@ -96,29 +103,6 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 					.setTitle('Open graph view')
 					.setIcon('git-fork')
 					.onClick(() => this.activateGraphView())
-			);
-
-			menu.addItem((item) =>
-				item
-					.setTitle('Search related notes')
-					.setIcon('search')
-					.onClick(() => openSearchModal(this))
-			);
-
-			menu.addItem((item) =>
-				item
-					.setTitle('Show note neighborhood')
-					.setIcon('network')
-					.onClick(() => this.activateNeighborhoodView())
-			);
-
-			menu.addSeparator();
-
-			menu.addItem((item) =>
-				item
-					.setTitle('Remove current note from graph')
-					.setIcon('trash')
-					.onClick(() => removeCurrentNoteFromGraph(this))
 			);
 
 			menu.showAtMouseEvent(evt);
@@ -139,11 +123,18 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		if (stats.nodes === 0) {
 			this.statusBarItem.setText('Graph: empty');
 		} else {
-			this.statusBarItem.setText(`Graph: ${stats.notes}N ${stats.entities}E ${stats.keywords}K`);
+			this.statusBarItem.setText(`Graph: ${stats.nodes} nodes, ${stats.edges} edges`);
+
+			// Build detailed tooltip
+			const labelDetails = Object.entries(stats.labels)
+				.sort((a: [string, number], b: [string, number]) => b[1] - a[1])
+				.map(([label, count]: [string, number]) => `  ${label}: ${count}`)
+				.join('\n');
+
+			this.statusBarItem.setAttr('aria-label',
+				`Knowledge Graph\nNodes: ${stats.nodes}\nEdges: ${stats.edges}\n\nBy label:\n${labelDetails}`
+			);
 		}
-		this.statusBarItem.setAttr('aria-label',
-			`Knowledge Graph\nNotes: ${stats.notes}\nEntities: ${stats.entities}\nKeywords: ${stats.keywords}\nConnections: ${stats.edges}`
-		);
 	}
 
 	async activateGraphView() {
@@ -151,9 +142,16 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 
 		let leaf = workspace.getLeavesOfType(GRAPH_VIEW_TYPE)[0];
 		if (!leaf) {
-			const rightLeaf = workspace.getRightLeaf(false);
-			if (rightLeaf) {
-				leaf = rightLeaf;
+			if (this.settings.openGraphInMain) {
+				leaf = workspace.getLeaf(true);
+			} else {
+				const rightLeaf = workspace.getRightLeaf(false);
+				if (rightLeaf) {
+					leaf = rightLeaf;
+				}
+			}
+
+			if (leaf) {
 				await leaf.setViewState({ type: GRAPH_VIEW_TYPE, active: true });
 			}
 		}
@@ -188,6 +186,13 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 				view.refresh();
 			}
 		}
+	}
+
+	/**
+	 * Open the search modal with a pre-filled query.
+	 */
+	openSearchWithQuery(query: string): void {
+		openSearchModal(this, query);
 	}
 
 	async onunload() {

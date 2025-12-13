@@ -1,279 +1,193 @@
-import { GraphData, GraphNode, GraphEdge, ExtractionResult, NodeType, EdgeType } from '../types';
+import { OntologyNode, OntologyEdge, OntologyExtractionResult, RelationshipType } from '../types';
 import type { GraphCache } from './cache';
 import type { App, TFile } from 'obsidian';
 import { getResolvedLinks } from './links';
 
 /**
- * Generate a unique node ID from type and label.
- * Uses lowercase normalized label for deduplication.
+ * Generate a unique node ID from label and name.
+ * Uses lowercase normalized name for deduplication.
  */
-export function generateNodeId(type: NodeType, label: string): string {
-	return `${type}:${label.toLowerCase().trim()}`;
+export function generateNodeId(label: string, name: string): string {
+	return `${label.toLowerCase()}:${name.toLowerCase().trim()}`;
 }
 
 /**
  * Generate a unique edge ID from source, target, and type.
  */
-export function generateEdgeId(source: string, target: string, type: EdgeType): string {
+export function generateEdgeId(source: string, target: string, type: RelationshipType): string {
 	return `${source}->${target}:${type}`;
 }
 
 /**
- * Normalize an entity label for consistent matching.
- * Trims whitespace and normalizes case.
+ * Normalize a node name for consistent matching.
+ * Trims whitespace.
  */
-export function normalizeLabel(label: string): string {
-	return label.trim();
+export function normalizeName(name: string): string {
+	return name.trim();
 }
 
 /**
- * Merge extraction results into the graph.
- * Handles deduplication and updates existing nodes/edges.
- */
-export function mergeExtractionResult(
-	graph: GraphData,
-	notePath: string,
-	noteLabel: string,
-	extraction: ExtractionResult
-): GraphData {
-	const now = Date.now();
-	const newNodes: GraphNode[] = [...graph.nodes];
-	const newEdges: GraphEdge[] = [...graph.edges];
-
-	// Helper to find or create node
-	const findOrCreateNode = (type: NodeType, label: string, extra?: Partial<GraphNode>): string => {
-		const normalizedLabel = normalizeLabel(label);
-		const id = generateNodeId(type, normalizedLabel);
-		const existingIndex = newNodes.findIndex(n => n.id === id);
-
-		if (existingIndex >= 0) {
-			// Update existing node
-			newNodes[existingIndex] = {
-				...newNodes[existingIndex],
-				updatedAt: now,
-			};
-		} else {
-			// Create new node
-			newNodes.push({
-				id,
-				type,
-				label: normalizedLabel,
-				createdAt: now,
-				updatedAt: now,
-				...extra,
-			});
-		}
-
-		return id;
-	};
-
-	// Helper to find or create edge
-	const findOrCreateEdge = (source: string, target: string, type: EdgeType): void => {
-		const id = generateEdgeId(source, target, type);
-		if (!newEdges.find(e => e.id === id)) {
-			newEdges.push({
-				id,
-				source,
-				target,
-				type,
-				createdAt: now,
-			});
-		}
-	};
-
-	// Add/update note node
-	const noteId = findOrCreateNode('note', notePath, {
-		label: noteLabel,
-		notePath: notePath,
-	});
-
-	// Update the note node's label (in case file was renamed)
-	const noteNode = newNodes.find(n => n.id === noteId);
-	if (noteNode) {
-		noteNode.label = noteLabel;
-		noteNode.notePath = notePath;
-	}
-
-	// Add entity nodes and mentions edges
-	const currentEntityIds = new Set<string>();
-	for (const entity of extraction.entities) {
-		const entityId = findOrCreateNode('entity', entity);
-		currentEntityIds.add(entityId);
-		findOrCreateEdge(noteId, entityId, 'mentions');
-	}
-
-	// Add keyword nodes and match edges
-	const currentKeywordIds = new Set<string>();
-	for (const keyword of extraction.keywordMatches) {
-		const keywordId = findOrCreateNode('keyword', keyword);
-		currentKeywordIds.add(keywordId);
-		findOrCreateEdge(noteId, keywordId, 'matches_keyword');
-	}
-
-	// Add entity-to-entity relationships
-	for (const rel of extraction.relationships) {
-		const sourceId = generateNodeId('entity', normalizeLabel(rel.source));
-		const targetId = generateNodeId('entity', normalizeLabel(rel.target));
-
-		// Only add if both entities exist
-		if (newNodes.find(n => n.id === sourceId) && newNodes.find(n => n.id === targetId)) {
-			findOrCreateEdge(sourceId, targetId, 'relates_to');
-		}
-	}
-
-	// Remove edges that no longer apply (entity was removed from note)
-	const currentTargetIds = new Set([...currentEntityIds, ...currentKeywordIds]);
-	const finalEdges = newEdges.filter(e => {
-		// Keep edges not from this note
-		if (e.source !== noteId) return true;
-		// Keep edges to current targets
-		if (currentTargetIds.has(e.target)) return true;
-		// Keep relates_to edges (entity-to-entity)
-		if (e.type === 'relates_to') return true;
-		// Remove stale edges
-		return false;
-	});
-
-	return {
-		nodes: newNodes,
-		edges: finalEdges,
-		version: graph.version,
-	};
-}
-
-/**
- * Get all unique entity labels from the graph.
- * Useful for providing context to LLM for entity normalization.
- */
-export function getExistingEntityLabels(graph: GraphData): string[] {
-	return graph.nodes
-		.filter(n => n.type === 'entity')
-		.map(n => n.label);
-}
-
-/**
- * Get all keyword labels from the graph.
- */
-export function getKeywordLabels(graph: GraphData): string[] {
-	return graph.nodes
-		.filter(n => n.type === 'keyword')
-		.map(n => n.label);
-}
-
-/**
- * Merge extraction results directly into GraphCache.
- * More efficient than mergeExtractionResult as it uses indexed lookups.
+ * Merge ontology extraction results into GraphCache.
+ * Nodes are merged by label:name combination.
+ * Edges are merged by source->target:type combination.
  */
 export function mergeExtractionIntoCache(
 	cache: GraphCache,
 	notePath: string,
-	noteLabel: string,
-	extraction: ExtractionResult
-): void {
+	extraction: OntologyExtractionResult
+): { nodesAdded: number; relationshipsAdded: number } {
 	const now = Date.now();
+	let nodesAdded = 0;
+	let relationshipsAdded = 0;
 
-	// Helper to find or create node in cache
-	const findOrCreateNode = (type: NodeType, label: string, extra?: Partial<GraphNode>): string => {
-		const normalizedLabel = normalizeLabel(label);
-		const id = generateNodeId(type, normalizedLabel);
-		const existing = cache.getNodeById(id);
+	// Map temporary extraction IDs to actual graph node IDs
+	const idMap = new Map<string, string>();
+
+	// Process nodes
+	for (const rawNode of extraction.nodes) {
+		const normalizedName = normalizeName(rawNode.properties.name);
+
+		// First check if a node with the same name already exists (regardless of label)
+		// This prevents duplicates like "concept:ai" vs "ai:ai"
+		const existingByName = cache.getNodeByName(normalizedName);
+
+		// Use existing node's ID if found, otherwise generate new ID
+		const nodeId = existingByName
+			? existingByName.id
+			: generateNodeId(rawNode.label, normalizedName);
+		idMap.set(rawNode.id, nodeId);
+
+		const existing = existingByName || cache.getNodeById(nodeId);
 
 		if (existing) {
-			// Update existing node
-			cache.addNode({ ...existing, updatedAt: now });
+			// Update existing node: add this note to sourceNotes if not already there
+			if (!existing.sourceNotes.includes(notePath)) {
+				existing.sourceNotes.push(notePath);
+			}
+			existing.updatedAt = now;
+			// Merge additional properties (but don't overwrite name)
+			for (const [key, value] of Object.entries(rawNode.properties)) {
+				if (key !== 'name' && !(key in existing.properties)) {
+					existing.properties[key] = value;
+				}
+			}
+			cache.updateNode(existing);
 		} else {
 			// Create new node
-			cache.addNode({
-				id,
-				type,
-				label: normalizedLabel,
+			const newNode: OntologyNode = {
+				id: nodeId,
+				label: rawNode.label,
+				properties: {
+					name: normalizedName,
+					...Object.fromEntries(
+						Object.entries(rawNode.properties).filter(([k]: [string, unknown]) => k !== 'name')
+					)
+				},
+				sourceNotes: [notePath],
 				createdAt: now,
 				updatedAt: now,
-				...extra,
-			});
+			};
+			cache.addNode(newNode);
+			nodesAdded++;
+		}
+	}
+
+	// Process relationships
+	for (const rawRel of extraction.relationships) {
+		const sourceId = idMap.get(rawRel.source);
+		const targetId = idMap.get(rawRel.target);
+
+		// Only add if both source and target nodes exist
+		if (!sourceId || !targetId) {
+			console.warn(`Skipping relationship: missing node mapping for ${rawRel.source} -> ${rawRel.target}`);
+			continue;
 		}
 
-		return id;
-	};
+		if (!cache.getNodeById(sourceId) || !cache.getNodeById(targetId)) {
+			console.warn(`Skipping relationship: node not found ${sourceId} -> ${targetId}`);
+			continue;
+		}
 
-	// Helper to find or create edge in cache
-	const findOrCreateEdge = (source: string, target: string, type: EdgeType): void => {
-		const id = generateEdgeId(source, target, type);
-		if (!cache.getEdgeById(id)) {
-			cache.addEdge({
-				id,
-				source,
-				target,
-				type,
+		const edgeId = generateEdgeId(sourceId, targetId, rawRel.type);
+
+		if (!cache.getEdgeById(edgeId)) {
+			const newEdge: OntologyEdge = {
+				id: edgeId,
+				source: sourceId,
+				target: targetId,
+				type: rawRel.type,
+				properties: {
+					detail: rawRel.properties.detail,
+					...Object.fromEntries(
+						Object.entries(rawRel.properties).filter(([k]: [string, unknown]) => k !== 'detail')
+					)
+				},
+				sourceNote: notePath,
 				createdAt: now,
-			});
-		}
-	};
-
-	// Add/update note node
-	const noteId = findOrCreateNode('note', notePath, {
-		label: noteLabel,
-		notePath: notePath,
-	});
-
-	// Ensure label and path are correct (in case file was renamed)
-	const noteNode = cache.getNodeById(noteId);
-	if (noteNode) {
-		cache.addNode({ ...noteNode, label: noteLabel, notePath: notePath });
-	}
-
-	// Track current targets for stale edge removal
-	const currentEntityIds = new Set<string>();
-	const currentKeywordIds = new Set<string>();
-
-	// Add entity nodes and mentions edges
-	for (const entity of extraction.entities) {
-		const entityId = findOrCreateNode('entity', entity);
-		currentEntityIds.add(entityId);
-		findOrCreateEdge(noteId, entityId, 'mentions');
-	}
-
-	// Add keyword nodes and match edges
-	for (const keyword of extraction.keywordMatches) {
-		const keywordId = findOrCreateNode('keyword', keyword);
-		currentKeywordIds.add(keywordId);
-		findOrCreateEdge(noteId, keywordId, 'matches_keyword');
-	}
-
-	// Add entity-to-entity relationships
-	for (const rel of extraction.relationships) {
-		const sourceId = generateNodeId('entity', normalizeLabel(rel.source));
-		const targetId = generateNodeId('entity', normalizeLabel(rel.target));
-
-		// Only add if both entities exist
-		if (cache.getNodeById(sourceId) && cache.getNodeById(targetId)) {
-			findOrCreateEdge(sourceId, targetId, 'relates_to');
+			};
+			cache.addEdge(newEdge);
+			relationshipsAdded++;
 		}
 	}
 
-	// Remove stale edges (edges from this note to entities/keywords no longer extracted)
-	const currentTargetIds = new Set([...currentEntityIds, ...currentKeywordIds]);
+	return { nodesAdded, relationshipsAdded };
+}
+
+/**
+ * Remove a note's contribution from the graph.
+ * Removes the note from all nodes' sourceNotes arrays.
+ * Removes nodes that have no remaining sourceNotes.
+ * Removes edges that were created from this note.
+ */
+export function removeNoteFromCache(cache: GraphCache, notePath: string): { nodesRemoved: number; edgesRemoved: number } {
+	let nodesRemoved = 0;
+	let edgesRemoved = 0;
+
+	// Find all edges created from this note and remove them
 	const edgesToRemove: string[] = [];
-
-	for (const edge of cache.getEdgesBySource(noteId)) {
-		// Keep edges to current targets
-		if (currentTargetIds.has(edge.target)) continue;
-		// Keep relates_to edges (entity-to-entity, not from note)
-		if (edge.type === 'relates_to') continue;
-		// Keep links_to edges (handled separately by mergeInternalLinksIntoCache)
-		if (edge.type === 'links_to') continue;
-		// Mark stale edge for removal
-		edgesToRemove.push(edge.id);
+	for (const edge of cache.getAllEdges()) {
+		if (edge.sourceNote === notePath) {
+			edgesToRemove.push(edge.id);
+		}
 	}
 
 	for (const edgeId of edgesToRemove) {
 		cache.removeEdge(edgeId);
+		edgesRemoved++;
 	}
+
+	// Find all nodes that reference this note
+	const nodesToCheck: string[] = [];
+	for (const node of cache.getAllNodes()) {
+		if (node.sourceNotes.includes(notePath)) {
+			nodesToCheck.push(node.id);
+		}
+	}
+
+	// Remove note from sourceNotes, delete node if orphaned
+	for (const nodeId of nodesToCheck) {
+		const node = cache.getNodeById(nodeId);
+		if (!node) continue;
+
+		node.sourceNotes = node.sourceNotes.filter(p => p !== notePath);
+
+		if (node.sourceNotes.length === 0) {
+			// Node is orphaned, remove it
+			cache.removeNode(nodeId);
+			nodesRemoved++;
+		} else {
+			// Update node with reduced sourceNotes
+			cache.updateNode(node);
+		}
+	}
+
+	return { nodesRemoved, edgesRemoved };
 }
 
 /**
- * Process internal links ([[wikilinks]]) and add links_to edges between notes.
- * This should be called after mergeExtractionIntoCache or independently.
+ * Process internal links ([[wikilinks]]) and add RELATED_TO edges.
+ * Links create edges between nodes that appear in both the source and target notes.
+ * If the target note hasn't been analyzed, no edge is created.
  */
 export function mergeInternalLinksIntoCache(
 	cache: GraphCache,
@@ -283,74 +197,59 @@ export function mergeInternalLinksIntoCache(
 ): number {
 	const now = Date.now();
 	const linkedPaths = getResolvedLinks(app, file, content);
-
-	// Get or create source note node
-	const sourceNoteId = generateNodeId('note', file.path);
-	let sourceNode = cache.getNodeById(sourceNoteId);
-
-	if (!sourceNode) {
-		// Create the source note node if it doesn't exist
-		sourceNode = {
-			id: sourceNoteId,
-			type: 'note',
-			label: file.basename,
-			notePath: file.path,
-			createdAt: now,
-			updatedAt: now,
-		};
-		cache.addNode(sourceNode);
-	}
-
-	// Track current links for stale edge removal
-	const currentLinkTargets = new Set<string>();
 	let linksAdded = 0;
 
+	// Get all nodes from the source note
+	const sourceNoteNodes = cache.getNodesBySourceNote(file.path);
+	if (sourceNoteNodes.length === 0) {
+		// Source note hasn't been analyzed yet
+		return 0;
+	}
+
 	for (const targetPath of linkedPaths) {
-		const targetNoteId = generateNodeId('note', targetPath);
-		currentLinkTargets.add(targetNoteId);
-
-		// Get or create target note node
-		let targetNode = cache.getNodeById(targetNoteId);
-		if (!targetNode) {
-			// Get the basename from the path
-			const targetBasename = targetPath.replace(/\.md$/, '').split('/').pop() || targetPath;
-			targetNode = {
-				id: targetNoteId,
-				type: 'note',
-				label: targetBasename,
-				notePath: targetPath,
-				createdAt: now,
-				updatedAt: now,
-			};
-			cache.addNode(targetNode);
+		// Get all nodes from the target note
+		const targetNoteNodes = cache.getNodesBySourceNote(targetPath);
+		if (targetNoteNodes.length === 0) {
+			// Target note hasn't been analyzed yet
+			continue;
 		}
 
-		// Create links_to edge if it doesn't exist
-		const edgeId = generateEdgeId(sourceNoteId, targetNoteId, 'links_to');
-		if (!cache.getEdgeById(edgeId)) {
-			cache.addEdge({
-				id: edgeId,
-				source: sourceNoteId,
-				target: targetNoteId,
-				type: 'links_to',
-				createdAt: now,
-			});
-			linksAdded++;
-		}
-	}
+		// Create RELATED_TO edges between nodes from source and target notes
+		// We connect each source node to each target node (cross-product)
+		// This represents the wikilink relationship at the entity level
+		for (const sourceNode of sourceNoteNodes) {
+			for (const targetNode of targetNoteNodes) {
+				// Don't create self-loops
+				if (sourceNode.id === targetNode.id) continue;
 
-	// Remove stale links_to edges (links that were removed from the note)
-	const edgesToRemove: string[] = [];
-	for (const edge of cache.getEdgesBySource(sourceNoteId)) {
-		if (edge.type !== 'links_to') continue;
-		if (!currentLinkTargets.has(edge.target)) {
-			edgesToRemove.push(edge.id);
-		}
-	}
+				const edgeId = generateEdgeId(sourceNode.id, targetNode.id, 'RELATED_TO');
 
-	for (const edgeId of edgesToRemove) {
-		cache.removeEdge(edgeId);
+				// Check if edge already exists (might have been created with different detail)
+				if (!cache.getEdgeById(edgeId)) {
+					cache.addEdge({
+						id: edgeId,
+						source: sourceNode.id,
+						target: targetNode.id,
+						type: 'RELATED_TO',
+						properties: {
+							detail: 'wikilink',
+						},
+						sourceNote: file.path,
+						createdAt: now,
+					});
+					linksAdded++;
+				}
+			}
+		}
 	}
 
 	return linksAdded;
+}
+
+/**
+ * Get all unique node names from the graph.
+ * Useful for providing context to LLM for name normalization.
+ */
+export function getExistingNodeNames(cache: GraphCache): string[] {
+	return cache.getAllNodes().map(n => n.properties.name);
 }
