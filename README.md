@@ -1,6 +1,6 @@
 # Simple Graph Builder
 
-Build a lightweight knowledge graph from your Obsidian notes using LLM-powered entity extraction with a simple yet expressive ontology model.
+This plugin builds a lightweight knowledge graph from users' Obsidian notes using LLM-powered entity extraction with a simple yet expressive ontology model to provide knowledge extraction, exploration, and RAG search. Since Obsidian provides wonderful links between notes, implementing ontology model would meet users' (especially researchers') needs.
 
 ![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
