@@ -3,7 +3,7 @@
 	"name": "Simple Graph Builder",
 	"version": "0.3.0",
 	"minAppVersion": "0.2.0",
-	"description": "Build a knowledge graph from your notes using LLM-powered entity extraction with ontology-based relationships. Features Smart Search (AI-powered natural language queries), interactive graph visualization, and Korean language support. Supports Claude, OpenAI, Gemini, and Ollama.",
+	"description": "Build a knowledge graph from your notes using LLM-powered entity extraction. Supports Claude, OpenAI, Gemini, and Ollama.",
 	"author": "Junhewk Kim",
 	"authorUrl": "https://github.com/junhewk",
 	"fundingUrl": "https://buymeacoffee.com/junhewkkim",
