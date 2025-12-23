@@ -108,6 +108,12 @@ A sidebar panel showing:
 2. Search for "Simple Graph Builder"
 3. Click Install, then Enable
 
+### Using BRAT (Recommended for Beta)
+1. Install [BRAT](https://github.com/TfTHacker/obsidian42-brat) from Community Plugins
+2. Open command palette → "BRAT: Add a beta plugin"
+3. Enter: `junhewk/simple-graph-builder`
+4. Enable the plugin in Settings → Community plugins
+
 ### Manual Installation
 1. Download `main.js`, `styles.css`, and `manifest.json` from the latest release
 2. Create folder: `VaultFolder/.obsidian/plugins/simple-graph-builder/`
