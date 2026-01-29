@@ -5,9 +5,9 @@ import { App, Modal } from 'obsidian';
  */
 export class ConfirmModal extends Modal {
 	private message: string;
-	private onConfirm: () => void;
+	private onConfirm: () => void | Promise<void>;
 
-	constructor(app: App, message: string, onConfirm: () => void) {
+	constructor(app: App, message: string, onConfirm: () => void | Promise<void>) {
 		super(app);
 		this.message = message;
 		this.onConfirm = onConfirm;

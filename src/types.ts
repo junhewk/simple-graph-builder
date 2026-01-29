@@ -154,15 +154,6 @@ export function getEdgeRelationship(edge: { relationship?: string; type?: string
 	return 'relates to';
 }
 
-// ============================================
-// Legacy Types (kept for migration)
-// ============================================
-
-/**
- * @deprecated Use EntityType instead. Kept for v2 data migration.
- */
-export type RelationshipType = 'HAS_PART' | 'LEADS_TO' | 'ACTED_ON' | 'CITES' | 'RELATED_TO';
-
 /**
  * Ontology node with fixed entity types.
  */
@@ -189,8 +180,7 @@ export interface OntologyEdge {
 	source: string;          // source node ID
 	target: string;          // target node ID
 	relationship: string;    // free-form verb (e.g., "develops", "uses", "causes")
-	// eslint-disable-next-line deprecation/deprecation
-	type?: RelationshipType; // Legacy: kept for backwards compatibility
+	type?: string; // Legacy: kept for backwards compatibility
 	properties: {
 		detail?: string;       // optional: additional context
 		[key: string]: unknown;  // additional properties
@@ -233,8 +223,7 @@ export interface RawExtractionRelationship {
 	source: string;          // temporary ID from extraction
 	target: string;          // temporary ID from extraction
 	relationship: string;    // free-form verb (e.g., "develops", "uses")
-	// eslint-disable-next-line deprecation/deprecation
-	type?: RelationshipType; // Legacy: kept for backwards compatibility
+	type?: string; // Legacy: kept for backwards compatibility
 	properties: {
 		detail?: string;       // optional description
 		[key: string]: unknown;
@@ -264,8 +253,7 @@ export interface RelationshipResult {
 	from: string;
 	to: string;
 	relationship: string;    // free-form verb
-	// eslint-disable-next-line deprecation/deprecation
-	type?: RelationshipType; // Legacy: for backwards compatibility
+	type?: string; // Legacy: for backwards compatibility
 	detail?: string;
 }
 
@@ -420,31 +408,6 @@ export interface PluginData {
 	embeddingIndex?: EmbeddingIndex;     // Metadata for embeddings.bin
 }
 
-// ============================================
-// Legacy Utility Types
-// ============================================
-
-/**
- * @deprecated Use free-form relationship verbs instead. Kept for v2 data migration.
- */
-// eslint-disable-next-line deprecation/deprecation
-export const VALID_RELATIONSHIP_TYPES: readonly RelationshipType[] = [
-	'HAS_PART',
-	'LEADS_TO',
-	'ACTED_ON',
-	'CITES',
-	'RELATED_TO'
-] as const;
-
-/**
- * @deprecated Use free-form relationship verbs instead. Kept for v2 data migration.
- */
-// eslint-disable-next-line deprecation/deprecation
-export function isValidRelationshipType(type: string): type is RelationshipType {
-	// eslint-disable-next-line deprecation/deprecation
-	return VALID_RELATIONSHIP_TYPES.includes(type as RelationshipType);
-}
-
 /**
  * Map legacy label to EntityType for migration.
  */
@@ -484,21 +447,6 @@ export function labelToEntityType(label: string): EntityType {
 
 	// Default to CONCEPT for unknown labels
 	return 'CONCEPT';
-}
-
-/**
- * Map legacy RelationshipType to free-form verb.
- */
-// eslint-disable-next-line deprecation/deprecation
-export function relationshipTypeToVerb(type: RelationshipType): string {
-	switch (type) {
-		case 'HAS_PART': return 'contains';
-		case 'LEADS_TO': return 'leads to';
-		case 'ACTED_ON': return 'acts on';
-		case 'CITES': return 'cites';
-		case 'RELATED_TO': return 'relates to';
-		default: return 'relates to';
-	}
 }
 
 /**

@@ -43,7 +43,7 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		return;
 	}
 	if (apiProvider === 'ollama' && !ollamaModel) {
-		new Notice('Please configure your Ollama model in settings');
+		new Notice('Set the Ollama model in settings first');
 		return;
 	}
 
@@ -152,7 +152,7 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		} else if (err.type === 'config_error') {
 			new Notice(err.message, 5000);
 		} else if (err.type === 'parse_error') {
-			new Notice('Failed to parse LLM response. Please try again.', 5000);
+			new Notice('Failed to parse the response. Please try again.', 5000);
 		} else if (err.type === 'api_error') {
 			new Notice(`API error: ${err.message}`, 5000);
 		} else {
@@ -311,7 +311,7 @@ export async function analyzeEntireVault(
 		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	}
 	if (apiProvider === 'ollama' && !ollamaModel) {
-		new Notice('Please configure your Ollama model in settings');
+		new Notice('Set the Ollama model in settings first');
 		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	}
 

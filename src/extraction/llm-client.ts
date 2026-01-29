@@ -560,7 +560,7 @@ export async function saveEmbeddingsBinary(
 			const filePath = `${pluginDir}/${EMBEDDINGS_FILENAME}`;
 			const existingFile = vault.getAbstractFileByPath(filePath);
 			if (existingFile) {
-				await vault.delete(existingFile);
+				await vault.delete(existingFile, true);
 			}
 		} catch {
 			// Ignore if file doesn't exist

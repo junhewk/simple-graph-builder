@@ -20,18 +20,18 @@ export class SettingsTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName('General').setHeading();
+		new Setting(containerEl).setName('Provider').setHeading();
 
 		// API Provider
 		new Setting(containerEl)
 			.setName('API provider')
-			.setDesc('Select the LLM provider for entity extraction')
+			.setDesc('Select the provider for entity extraction')
 			.addDropdown(dropdown => {
 				dropdown
 					.addOption('claude', 'Claude (Anthropic)')
 					.addOption('openai', 'OpenAI')
 					.addOption('gemini', 'Gemini (Google)')
-					.addOption('ollama', 'Ollama (Local)')
+					.addOption('ollama', 'Ollama (local)')
 					.setValue(this.plugin.settings.apiProvider)
 					.onChange(async (value) => {
 						this.plugin.settings.apiProvider = value as ApiProvider;
@@ -43,7 +43,7 @@ export class SettingsTab extends PluginSettingTab {
 		// Claude settings
 		this.providerSettingsEls.claude = containerEl.createDiv();
 		new Setting(this.providerSettingsEls.claude)
-			.setName('API Key')
+			.setName('API key')
 			.setDesc('Your Anthropic API key')
 			.addText(text => {
 				text
@@ -85,7 +85,7 @@ export class SettingsTab extends PluginSettingTab {
 		// OpenAI settings
 		this.providerSettingsEls.openai = containerEl.createDiv();
 		new Setting(this.providerSettingsEls.openai)
-			.setName('API Key')
+			.setName('API key')
 			.setDesc('Your OpenAI API key')
 			.addText(text => {
 				text
@@ -127,7 +127,7 @@ export class SettingsTab extends PluginSettingTab {
 		// Gemini settings
 		this.providerSettingsEls.gemini = containerEl.createDiv();
 		new Setting(this.providerSettingsEls.gemini)
-			.setName('API Key')
+			.setName('API key')
 			.setDesc('Your Google AI API key')
 			.addText(text => {
 				text
@@ -170,7 +170,7 @@ export class SettingsTab extends PluginSettingTab {
 		this.providerSettingsEls.ollama = containerEl.createDiv();
 		new Setting(this.providerSettingsEls.ollama)
 			.setName('Host')
-			.setDesc('URL of your Ollama server')
+			.setDesc('Ollama server address')
 			.addText(text => {
 				text
 					.setPlaceholder('http://localhost:11434')
@@ -311,12 +311,12 @@ export class SettingsTab extends PluginSettingTab {
 			// Embedding provider
 			new Setting(containerEl)
 				.setName('Embedding provider')
-				.setDesc('Select the provider for embeddings. Note: Claude does not offer embeddings.')
+				.setDesc('Select the provider for embeddings. Claude does not offer embeddings.')
 				.addDropdown(dropdown => {
 					dropdown
 						.addOption('openai', 'OpenAI')
 						.addOption('gemini', 'Gemini (Google)')
-						.addOption('ollama', 'Ollama (Local)')
+						.addOption('ollama', 'Ollama (local)')
 						.setValue(this.plugin.settings.embeddingProvider)
 						.onChange(async (value) => {
 							this.plugin.settings.embeddingProvider = value as EmbeddingProvider;
@@ -405,8 +405,8 @@ export class SettingsTab extends PluginSettingTab {
 
 			// LLM verification toggle
 			new Setting(containerEl)
-				.setName('Enable LLM verification')
-				.setDesc('Use LLM to verify ambiguous matches. Adds extra API calls but improves accuracy.')
+				.setName('Enable verification')
+				.setDesc('Use the model to verify ambiguous matches. Adds extra API calls but improves accuracy.')
 				.addToggle(toggle => {
 					toggle
 						.setValue(this.plugin.settings.enableLLMVerification)
@@ -541,7 +541,7 @@ export class SettingsTab extends PluginSettingTab {
 			.setDesc('If you find this plugin useful, consider supporting its development!')
 			.addButton(button => {
 				button
-					.setButtonText('Buy Me a Coffee')
+					.setButtonText('Buy me a coffee')
 					.setCta()
 					.onClick(() => {
 						window.open('https://buymeacoffee.com/junhewkkim', '_blank');

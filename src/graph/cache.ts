@@ -1,4 +1,4 @@
-import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, ResolutionCache, EmbeddingIndex, labelToEntityType, relationshipTypeToVerb, isValidRelationshipType } from '../types';
+import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, ResolutionCache, EmbeddingIndex, labelToEntityType } from '../types';
 import { DEFAULT_SETTINGS, getEmbeddingDimensions } from '../settings';
 import { loadEmbeddingsBinary, saveEmbeddingsBinary, cosineSimilarity } from '../extraction/llm-client';
 import type SimpleGraphBuilderPlugin from '../main';
@@ -123,13 +123,20 @@ export class GraphCache {
 		}
 
 		// Migrate edges: populate relationship from type if missing
+		// Legacy type to verb mapping (inline to avoid deprecated imports)
+		const legacyTypeToVerb: Record<string, string> = {
+			'HAS_PART': 'contains',
+			'LEADS_TO': 'leads to',
+			'ACTED_ON': 'acts on',
+			'CITES': 'cites',
+			'RELATED_TO': 'relates to',
+		};
 		for (const edge of this.edges) {
 			if (!edge.relationship && edge.type) {
 				const edgeType = edge.type;
-				// eslint-disable-next-line deprecation/deprecation
-				if (isValidRelationshipType(edgeType)) {
-					// eslint-disable-next-line deprecation/deprecation
-					edge.relationship = relationshipTypeToVerb(edgeType);
+				const verb = legacyTypeToVerb[edgeType];
+				if (verb) {
+					edge.relationship = verb;
 				} else {
 					edge.relationship = String(edgeType).toLowerCase().replace(/_/g, ' ');
 				}
