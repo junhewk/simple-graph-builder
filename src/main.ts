@@ -1,4 +1,4 @@
-import { Plugin, TFile, debounce, Menu } from 'obsidian';
+import { Plugin, TFile, debounce, Menu, WorkspaceLeaf } from 'obsidian';
 import { Settings, PluginData } from './types';
 import { DEFAULT_SETTINGS } from './settings';
 import { SettingsTab } from './ui/settings-tab';
@@ -80,7 +80,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'smart-search',
-			name: 'Smart Search (AI-powered)',
+			name: 'Smart search (AI-powered)',
 			callback: () => openSmartSearch(this),
 		});
 
@@ -88,7 +88,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		this.addSettingTab(new SettingsTab(this.app, this));
 
 		// Add ribbon icon with menu
-		this.addRibbonIcon('waypoints', 'Simple Graph Builder', (evt) => {
+		this.addRibbonIcon('waypoints', 'Simple graph builder', (evt) => {
 			const menu = new Menu();
 
 			menu.addItem((item) =>
@@ -140,16 +140,11 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	async activateGraphView() {
 		const { workspace } = this.app;
 
-		let leaf = workspace.getLeavesOfType(GRAPH_VIEW_TYPE)[0];
+		let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(GRAPH_VIEW_TYPE)[0] ?? null;
 		if (!leaf) {
-			if (this.settings.openGraphInMain) {
-				leaf = workspace.getLeaf(true);
-			} else {
-				const rightLeaf = workspace.getRightLeaf(false);
-				if (rightLeaf) {
-					leaf = rightLeaf;
-				}
-			}
+			leaf = this.settings.openGraphInMain
+				? workspace.getLeaf(true)
+				: workspace.getRightLeaf(false);
 
 			if (leaf) {
 				await leaf.setViewState({ type: GRAPH_VIEW_TYPE, active: true });
@@ -157,8 +152,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		}
 
 		if (leaf) {
-			workspace.revealLeaf(leaf);
-			// Refresh the graph view with latest data
+			await workspace.revealLeaf(leaf);
 			const view = leaf.view;
 			if (view instanceof GraphView) {
 				await view.refresh();
@@ -169,18 +163,16 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	async activateNeighborhoodView() {
 		const { workspace } = this.app;
 
-		let leaf = workspace.getLeavesOfType(NEIGHBORHOOD_VIEW_TYPE)[0];
+		let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(NEIGHBORHOOD_VIEW_TYPE)[0] ?? null;
 		if (!leaf) {
-			const rightLeaf = workspace.getRightLeaf(false);
-			if (rightLeaf) {
-				leaf = rightLeaf;
+			leaf = workspace.getRightLeaf(false);
+			if (leaf) {
 				await leaf.setViewState({ type: NEIGHBORHOOD_VIEW_TYPE, active: true });
 			}
 		}
 
 		if (leaf) {
-			workspace.revealLeaf(leaf);
-			// Refresh the neighborhood view
+			await workspace.revealLeaf(leaf);
 			const view = leaf.view;
 			if (view instanceof NeighborhoodView) {
 				view.refresh();

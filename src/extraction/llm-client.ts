@@ -716,6 +716,22 @@ function extractJsonFromResponse(response: string): string {
 }
 
 /**
+ * Safely convert a value to a string ID.
+ */
+function toStringId(value: unknown, fallback: string): string {
+	if (value === undefined || value === null) {
+		return fallback;
+	}
+	if (typeof value === 'string') {
+		return value;
+	}
+	if (typeof value === 'number') {
+		return String(value);
+	}
+	return fallback;
+}
+
+/**
  * Parse entities from parsed JSON object.
  * Handles both new schema (entities) and legacy schema (nodes).
  */
@@ -738,7 +754,7 @@ function parseEntities(parsed: Record<string, unknown>): RawExtractionNode[] {
 		if (rawType && typeof rawType === 'string') {
 			const upperType = rawType.toUpperCase();
 			if (isValidEntityType(upperType)) {
-				entityType = upperType as EntityType;
+				entityType = upperType;
 			}
 		}
 
@@ -746,17 +762,48 @@ function parseEntities(parsed: Record<string, unknown>): RawExtractionNode[] {
 		const description = entity.description || props?.description;
 
 		nodes.push({
-			id: entity.id ? String(entity.id) : String(idCounter++),
+			id: toStringId(entity.id, String(idCounter++)),
 			entityType,
 			properties: {
-				name: String(name).trim(),
-				description: description ? String(description) : undefined,
+				name: name.trim(),
+				description: typeof description === 'string' ? description : undefined,
 			}
 		});
 	}
 
 	return nodes;
 }
+
+/**
+ * Resolve an ID string, trying name lookup if not found directly.
+ */
+function resolveId(
+	rawId: unknown,
+	nodes: RawExtractionNode[],
+	nameToId: Map<string, string>
+): string {
+	const id = toStringId(rawId, '');
+	if (!id) return '';
+
+	// Check if it's a direct node ID
+	if (nodes.some(n => n.id === id)) {
+		return id;
+	}
+
+	// Try to resolve as a name
+	return nameToId.get(id.toLowerCase()) || id;
+}
+
+/**
+ * Convert legacy relationship type to verb.
+ */
+const LEGACY_TYPE_TO_VERB: Record<string, string> = {
+	'HAS_PART': 'contains',
+	'LEADS_TO': 'leads to',
+	'ACTED_ON': 'acts on',
+	'CITES': 'cites',
+	'RELATED_TO': 'relates to',
+};
 
 /**
  * Parse relationships from parsed JSON object.
@@ -773,37 +820,20 @@ function parseRelationships(
 	for (const rel of rawRelationships) {
 		if (!rel || typeof rel !== 'object') continue;
 
-		// Source can be an ID or a name
-		let sourceId = rel.source ? String(rel.source) : '';
-		let targetId = rel.target ? String(rel.target) : '';
-
-		// Try to resolve names to IDs
-		if (sourceId && !nodes.find(n => n.id === sourceId)) {
-			const resolvedId = nameToId.get(sourceId.toLowerCase());
-			if (resolvedId) sourceId = resolvedId;
-		}
-		if (targetId && !nodes.find(n => n.id === targetId)) {
-			const resolvedId = nameToId.get(targetId.toLowerCase());
-			if (resolvedId) targetId = resolvedId;
-		}
+		const sourceId = resolveId(rel.source, nodes, nameToId);
+		const targetId = resolveId(rel.target, nodes, nameToId);
 
 		if (!sourceId || !targetId) continue;
 
 		// Get relationship verb - try relationship, then type with conversion
-		let relationship = rel.relationship ? String(rel.relationship) : '';
-		if (!relationship && rel.type) {
-			// Convert legacy type to verb
-			const legacyTypeMap: Record<string, string> = {
-				'HAS_PART': 'contains',
-				'LEADS_TO': 'leads to',
-				'ACTED_ON': 'acts on',
-				'CITES': 'cites',
-				'RELATED_TO': 'relates to',
-			};
-			relationship = legacyTypeMap[String(rel.type).toUpperCase()] || String(rel.type);
+		let relationship = typeof rel.relationship === 'string' ? rel.relationship : '';
+		if (!relationship && rel.type !== undefined && rel.type !== null) {
+			const typeStr = typeof rel.type === 'string' ? rel.type : '';
+			relationship = LEGACY_TYPE_TO_VERB[typeStr.toUpperCase()] || typeStr;
 		}
-
-		if (!relationship) relationship = 'relates to';
+		if (!relationship) {
+			relationship = 'relates to';
+		}
 
 		const props = rel.properties as Record<string, unknown> | undefined;
 		const detail = rel.description || props?.detail;
@@ -813,7 +843,7 @@ function parseRelationships(
 			target: targetId,
 			relationship: relationship.toLowerCase(),
 			properties: {
-				detail: detail ? String(detail) : undefined,
+				detail: typeof detail === 'string' ? detail : undefined,
 			}
 		});
 	}

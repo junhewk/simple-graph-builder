@@ -26,7 +26,7 @@ export class NeighborhoodView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return 'Note Neighborhood';
+		return 'Note neighborhood';
 	}
 
 	getIcon(): string {
@@ -122,10 +122,12 @@ export class NeighborhoodView extends ItemView {
 		const connectionsByType = new Map<string, ConnectionInfo[]>();
 		for (const connection of connectionMap.values()) {
 			const entityType = connection.node.entityType || connection.node.label || 'CONCEPT';
-			if (!connectionsByType.has(entityType)) {
-				connectionsByType.set(entityType, []);
+			const typeConnections = connectionsByType.get(entityType);
+			if (typeConnections) {
+				typeConnections.push(connection);
+			} else {
+				connectionsByType.set(entityType, [connection]);
 			}
-			connectionsByType.get(entityType)!.push(connection);
 		}
 
 		// Render nodes extracted from this note
@@ -236,7 +238,7 @@ export class NeighborhoodView extends ItemView {
 				const title = notePath.replace(/\.md$/, '').split('/').pop() || notePath;
 				const link = item.createEl('span', { cls: 'neighborhood-link clickable', text: title });
 				link.addEventListener('click', () => {
-					this.app.workspace.openLinkText(notePath, '', false);
+					void this.app.workspace.openLinkText(notePath, '', false);
 					popup.remove();
 				});
 			}

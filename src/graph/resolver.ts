@@ -267,6 +267,7 @@ export class EntityResolver {
 			);
 
 			for (const candidate of candidates) {
+				const candidateDescription = candidate.node.properties.description;
 				const isMatch = await verifyEntityMatch(
 					settingsToExtractionOptions(this.settings),
 					{
@@ -277,7 +278,7 @@ export class EntityResolver {
 					{
 						name: candidate.node.properties.name,
 						label: getNodeEntityType(candidate.node),
-						description: candidate.node.properties.description as string | undefined,
+						description: typeof candidateDescription === 'string' ? candidateDescription : undefined,
 					}
 				);
 

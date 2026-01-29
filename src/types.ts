@@ -99,20 +99,23 @@ export const ENTITY_TYPE_COLORS: Record<EntityType, string> = {
 /**
  * Get color for entity type with fallback for legacy labels.
  */
-export function getEntityTypeColor(entityType: EntityType | string | undefined): string {
-	if (entityType && ENTITY_TYPE_COLORS[entityType as EntityType]) {
-		return ENTITY_TYPE_COLORS[entityType as EntityType];
+export function getEntityTypeColor(entityType: string | undefined): string {
+	if (!entityType) {
+		return '#94a3b8'; // default gray
 	}
+
+	const knownColor = ENTITY_TYPE_COLORS[entityType as EntityType];
+	if (knownColor) {
+		return knownColor;
+	}
+
 	// Fallback for legacy labels - use hash-based color
-	if (entityType) {
-		let hash = 0;
-		for (let i = 0; i < entityType.length; i++) {
-			hash = entityType.charCodeAt(i) + ((hash << 5) - hash);
-		}
-		const hue = Math.abs(hash) % 360;
-		return `hsl(${hue}, 70%, 60%)`;
+	let hash = 0;
+	for (let i = 0; i < entityType.length; i++) {
+		hash = entityType.charCodeAt(i) + ((hash << 5) - hash);
 	}
-	return '#94a3b8'; // default gray
+	const hue = Math.abs(hash) % 360;
+	return `hsl(${hue}, 70%, 60%)`;
 }
 
 /**
@@ -186,6 +189,7 @@ export interface OntologyEdge {
 	source: string;          // source node ID
 	target: string;          // target node ID
 	relationship: string;    // free-form verb (e.g., "develops", "uses", "causes")
+	// eslint-disable-next-line deprecation/deprecation
 	type?: RelationshipType; // Legacy: kept for backwards compatibility
 	properties: {
 		detail?: string;       // optional: additional context
@@ -229,6 +233,7 @@ export interface RawExtractionRelationship {
 	source: string;          // temporary ID from extraction
 	target: string;          // temporary ID from extraction
 	relationship: string;    // free-form verb (e.g., "develops", "uses")
+	// eslint-disable-next-line deprecation/deprecation
 	type?: RelationshipType; // Legacy: kept for backwards compatibility
 	properties: {
 		detail?: string;       // optional description
@@ -259,6 +264,7 @@ export interface RelationshipResult {
 	from: string;
 	to: string;
 	relationship: string;    // free-form verb
+	// eslint-disable-next-line deprecation/deprecation
 	type?: RelationshipType; // Legacy: for backwards compatibility
 	detail?: string;
 }
@@ -320,6 +326,7 @@ export interface Settings {
 	autoAnalyzeOnSave: boolean;  // Analyze notes automatically when saved
 	// View settings
 	openGraphInMain: boolean;    // Open graph view in main window instead of sidebar
+	graphMinDegree: number;      // Minimum connections to show node in graph (default: 0)
 	// Embedding-based entity resolution (opt-in)
 	enableEmbeddings: boolean;            // default: false - embeddings are opt-in to avoid API costs
 	embeddingProvider: EmbeddingProvider; // default: 'openai'
@@ -420,6 +427,7 @@ export interface PluginData {
 /**
  * @deprecated Use free-form relationship verbs instead. Kept for v2 data migration.
  */
+// eslint-disable-next-line deprecation/deprecation
 export const VALID_RELATIONSHIP_TYPES: readonly RelationshipType[] = [
 	'HAS_PART',
 	'LEADS_TO',
@@ -431,7 +439,9 @@ export const VALID_RELATIONSHIP_TYPES: readonly RelationshipType[] = [
 /**
  * @deprecated Use free-form relationship verbs instead. Kept for v2 data migration.
  */
+// eslint-disable-next-line deprecation/deprecation
 export function isValidRelationshipType(type: string): type is RelationshipType {
+	// eslint-disable-next-line deprecation/deprecation
 	return VALID_RELATIONSHIP_TYPES.includes(type as RelationshipType);
 }
 
@@ -479,6 +489,7 @@ export function labelToEntityType(label: string): EntityType {
 /**
  * Map legacy RelationshipType to free-form verb.
  */
+// eslint-disable-next-line deprecation/deprecation
 export function relationshipTypeToVerb(type: RelationshipType): string {
 	switch (type) {
 		case 'HAS_PART': return 'contains';

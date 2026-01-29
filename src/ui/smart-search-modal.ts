@@ -78,7 +78,7 @@ export class SmartSearchModal extends Modal {
 		this.inputEl.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
 				e.preventDefault();
-				this.performSearch();
+				void this.performSearch();
 			}
 		});
 
@@ -226,19 +226,14 @@ export class SmartSearchModal extends Modal {
 	 * Get the current model name based on provider.
 	 */
 	private getCurrentModelName(): string {
-		const { apiProvider } = this.plugin.settings;
-		switch (apiProvider) {
-			case 'claude':
-				return this.plugin.settings.claudeModel;
-			case 'openai':
-				return this.plugin.settings.openaiModel;
-			case 'gemini':
-				return this.plugin.settings.geminiModel;
-			case 'ollama':
-				return this.plugin.settings.ollamaModel;
-			default:
-				return 'unknown';
-		}
+		const { apiProvider, claudeModel, openaiModel, geminiModel, ollamaModel } = this.plugin.settings;
+		const modelMap: Record<string, string> = {
+			claude: claudeModel,
+			openai: openaiModel,
+			gemini: geminiModel,
+			ollama: ollamaModel,
+		};
+		return modelMap[apiProvider] || 'unknown';
 	}
 
 	onClose() {

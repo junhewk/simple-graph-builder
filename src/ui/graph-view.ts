@@ -3,7 +3,7 @@ import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import SimpleGraphBuilderPlugin from '../main';
 import { openSearchModal } from '../commands/search';
-import { OntologyNode, OntologyEdge, getEntityTypeColor } from '../types';
+import { getEntityTypeColor } from '../types';
 
 // Register fCoSE layout extension
 cytoscape.use(fcose);
@@ -44,12 +44,12 @@ const GRAPH_STYLES: cytoscape.StylesheetStyle[] = [
 		selector: 'edge',
 		style: {
 			'width': 1,
-			'line-color': '#94a3b8',
+			'line-color': '#cbd5e1',
 			'curve-style': 'bezier',
-			'opacity': 0.7,
+			'opacity': 0.4,
 			'line-style': 'solid',
 			'target-arrow-shape': 'triangle',
-			'target-arrow-color': '#94a3b8',
+			'target-arrow-color': '#cbd5e1',
 			'arrow-scale': 0.5,
 		},
 	},
@@ -114,7 +114,7 @@ export class GraphView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return 'Knowledge Graph';
+		return 'Knowledge graph';
 	}
 
 	getIcon(): string {
@@ -125,17 +125,14 @@ export class GraphView extends ItemView {
 		const container = this.containerEl.children[1] as HTMLElement;
 		container.empty();
 		container.addClass('simple-graph-container');
-		container.style.position = 'relative';
+		container.addClass('sgb-graph-container-relative');
 
 		// Create graph container first (full height)
 		this.graphContainer = container.createDiv({ cls: 'cytoscape-container' });
 
 		// Create tooltip element (positioned absolutely, won't affect layout)
+		// Styles defined in styles.css via .graph-tooltip class
 		this.tooltipEl = container.createDiv({ cls: 'graph-tooltip' });
-		this.tooltipEl.style.position = 'absolute';
-		this.tooltipEl.style.zIndex = '1000';
-		this.tooltipEl.style.pointerEvents = 'none';
-		this.tooltipEl.style.display = 'none';
 
 		await this.renderGraph();
 	}
@@ -186,29 +183,41 @@ export class GraphView extends ItemView {
 			loadingEl.remove();
 		}
 
+		// Calculate connection count for all nodes (needed for filtering and large graph handling)
+		const connectionCount = new Map<string, number>();
+		for (const edge of graph.edges) {
+			connectionCount.set(edge.source, (connectionCount.get(edge.source) || 0) + 1);
+			connectionCount.set(edge.target, (connectionCount.get(edge.target) || 0) + 1);
+		}
+
 		// For very large graphs, limit what we render
-		let nodesToRender = graph.nodes as OntologyNode[];
-		let edgesToRender = graph.edges as OntologyEdge[];
+		let nodesToRender = graph.nodes;
+		let edgesToRender = graph.edges;
 
 		if (totalElements > MAX_RENDER_ELEMENTS) {
-			// Prioritize nodes with more connections
-			const connectionCount = new Map<string, number>();
-			for (const edge of graph.edges) {
-				connectionCount.set(edge.source, (connectionCount.get(edge.source) || 0) + 1);
-				connectionCount.set(edge.target, (connectionCount.get(edge.target) || 0) + 1);
-			}
-
 			// Sort by connection count and take top nodes
 			nodesToRender = [...graph.nodes]
 				.sort((a, b) => (connectionCount.get(b.id) || 0) - (connectionCount.get(a.id) || 0))
-				.slice(0, MAX_RENDER_ELEMENTS / 2) as OntologyNode[];
+				.slice(0, MAX_RENDER_ELEMENTS / 2);
 
 			const nodeIds = new Set(nodesToRender.map(n => n.id));
-			edgesToRender = (graph.edges as OntologyEdge[]).filter(
+			edgesToRender = graph.edges.filter(
 				e => nodeIds.has(e.source) && nodeIds.has(e.target)
 			);
 
 			new Notice(`Large graph: showing ${nodesToRender.length} most connected nodes`);
+		}
+
+		// Apply minimum degree filter from settings
+		const minDegree = this.plugin.settings.graphMinDegree;
+		if (minDegree > 0) {
+			nodesToRender = nodesToRender.filter(node =>
+				(connectionCount.get(node.id) || 0) >= minDegree
+			);
+			const filteredNodeIds = new Set(nodesToRender.map(n => n.id));
+			edgesToRender = edgesToRender.filter(
+				e => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target)
+			);
 		}
 
 		const elements: cytoscape.ElementDefinition[] = [];
@@ -320,7 +329,7 @@ export class GraphView extends ItemView {
 
 		this.tooltipEl.style.left = `${position.x + 15}px`;
 		this.tooltipEl.style.top = `${position.y + 15}px`;
-		this.tooltipEl.style.display = 'block';
+		this.tooltipEl.addClass('visible');
 	}
 
 	private showEdgeTooltip(edge: cytoscape.EdgeSingular, position: { x: number; y: number }): void {
@@ -337,12 +346,12 @@ export class GraphView extends ItemView {
 
 		this.tooltipEl.style.left = `${position.x + 15}px`;
 		this.tooltipEl.style.top = `${position.y + 15}px`;
-		this.tooltipEl.style.display = 'block';
+		this.tooltipEl.addClass('visible');
 	}
 
 	private hideTooltip(): void {
 		if (this.tooltipEl) {
-			this.tooltipEl.style.display = 'none';
+			this.tooltipEl.removeClass('visible');
 		}
 	}
 
@@ -350,58 +359,56 @@ export class GraphView extends ItemView {
 	 * Get layout configuration based on graph size.
 	 */
 	private getLayoutConfig(elementCount: number, isLarge: boolean): cytoscape.LayoutOptions {
+		// Base config shared across all sizes
+		const baseConfig = {
+			name: 'fcose',
+			animate: false,
+			randomize: true,
+			edgeElasticity: () => 0.45,
+			nestingFactor: 0.1,
+			numIter: 2500,
+			tile: true,
+		};
+
+		// Large graph (1000+ elements or flagged as large)
 		if (isLarge || elementCount > 1000) {
 			return {
-				name: 'fcose',
-				animate: false,
+				...baseConfig,
 				quality: 'default',
-				randomize: true,
 				nodeDimensionsIncludeLabels: false,
 				nodeRepulsion: () => 20000,
 				idealEdgeLength: () => 120,
-				edgeElasticity: () => 0.45,
-				nestingFactor: 0.1,
 				gravity: 0.1,
-				numIter: 2500,
-				tile: true,
 				tilingPaddingVertical: 30,
 				tilingPaddingHorizontal: 30,
 			} as cytoscape.LayoutOptions;
-		} else if (elementCount > 300) {
+		}
+
+		// Medium graph (300-1000 elements)
+		if (elementCount > 300) {
 			return {
-				name: 'fcose',
-				animate: false,
+				...baseConfig,
 				quality: 'default',
-				randomize: true,
 				nodeDimensionsIncludeLabels: true,
 				nodeRepulsion: () => 25000,
 				idealEdgeLength: () => 150,
-				edgeElasticity: () => 0.45,
-				nestingFactor: 0.1,
 				gravity: 0.15,
-				numIter: 2500,
-				tile: true,
 				tilingPaddingVertical: 40,
 				tilingPaddingHorizontal: 40,
 			} as cytoscape.LayoutOptions;
-		} else {
-			return {
-				name: 'fcose',
-				animate: false,
-				quality: 'proof',
-				randomize: true,
-				nodeDimensionsIncludeLabels: true,
-				nodeRepulsion: () => 30000,
-				idealEdgeLength: () => 200,
-				edgeElasticity: () => 0.45,
-				nestingFactor: 0.1,
-				gravity: 0.1,
-				numIter: 2500,
-				tile: true,
-				tilingPaddingVertical: 50,
-				tilingPaddingHorizontal: 50,
-			} as cytoscape.LayoutOptions;
 		}
+
+		// Small graph (<300 elements)
+		return {
+			...baseConfig,
+			quality: 'proof',
+			nodeDimensionsIncludeLabels: true,
+			nodeRepulsion: () => 30000,
+			idealEdgeLength: () => 200,
+			gravity: 0.1,
+			tilingPaddingVertical: 50,
+			tilingPaddingHorizontal: 50,
+		} as cytoscape.LayoutOptions;
 	}
 
 	private highlightConnected(node: cytoscape.NodeSingular): void {

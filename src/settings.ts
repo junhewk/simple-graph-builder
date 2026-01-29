@@ -55,6 +55,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	extractionMode: 'standard',
 	autoAnalyzeOnSave: false,
 	openGraphInMain: false,
+	graphMinDegree: 0,
 	// Embedding-based resolution (opt-in)
 	enableEmbeddings: false,
 	embeddingProvider: 'openai',

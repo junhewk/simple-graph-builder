@@ -126,7 +126,9 @@ export class GraphCache {
 		for (const edge of this.edges) {
 			if (!edge.relationship && edge.type) {
 				const edgeType = edge.type;
+				// eslint-disable-next-line deprecation/deprecation
 				if (isValidRelationshipType(edgeType)) {
+					// eslint-disable-next-line deprecation/deprecation
 					edge.relationship = relationshipTypeToVerb(edgeType);
 				} else {
 					edge.relationship = String(edgeType).toLowerCase().replace(/_/g, ' ');
@@ -139,7 +141,7 @@ export class GraphCache {
 		}
 
 		if (migrated) {
-			console.log('Migrated graph data from v2 to v3 schema');
+			console.debug('Migrated graph data from v2 to v3 schema');
 			this.dirty = true;
 		}
 	}
@@ -169,6 +171,18 @@ export class GraphCache {
 	}
 
 	/**
+	 * Add node to a map index, creating the array if needed.
+	 */
+	private addToMapIndex(map: Map<string, OntologyNode[]>, key: string, node: OntologyNode): void {
+		const arr = map.get(key);
+		if (arr) {
+			arr.push(node);
+		} else {
+			map.set(key, [node]);
+		}
+	}
+
+	/**
 	 * Add a node to all indexes.
 	 */
 	private indexNode(node: OntologyNode): void {
@@ -176,24 +190,15 @@ export class GraphCache {
 
 		// Index by entity type
 		const entityType = node.entityType || 'CONCEPT';
-		if (!this.nodesByEntityType.has(entityType)) {
-			this.nodesByEntityType.set(entityType, []);
-		}
-		this.nodesByEntityType.get(entityType)!.push(node);
+		this.addToMapIndex(this.nodesByEntityType, entityType, node);
 
 		// Index by label (legacy support)
 		const label = node.label || entityType;
-		if (!this.nodesByLabel.has(label)) {
-			this.nodesByLabel.set(label, []);
-		}
-		this.nodesByLabel.get(label)!.push(node);
+		this.addToMapIndex(this.nodesByLabel, label, node);
 
 		// Index by source notes
 		for (const notePath of node.sourceNotes) {
-			if (!this.nodesBySourceNote.has(notePath)) {
-				this.nodesBySourceNote.set(notePath, []);
-			}
-			this.nodesBySourceNote.get(notePath)!.push(node);
+			this.addToMapIndex(this.nodesBySourceNote, notePath, node);
 		}
 
 		// Index by name (lowercase for case-insensitive lookup)
@@ -254,26 +259,27 @@ export class GraphCache {
 	}
 
 	/**
+	 * Add edge to a map index, creating the array if needed.
+	 */
+	private addEdgeToMapIndex(map: Map<string, OntologyEdge[]>, key: string, edge: OntologyEdge): void {
+		const arr = map.get(key);
+		if (arr) {
+			arr.push(edge);
+		} else {
+			map.set(key, [edge]);
+		}
+	}
+
+	/**
 	 * Add an edge to all indexes.
 	 */
 	private indexEdge(edge: OntologyEdge): void {
 		this.edgeById.set(edge.id, edge);
-
-		if (!this.edgesBySource.has(edge.source)) {
-			this.edgesBySource.set(edge.source, []);
-		}
-		this.edgesBySource.get(edge.source)!.push(edge);
-
-		if (!this.edgesByTarget.has(edge.target)) {
-			this.edgesByTarget.set(edge.target, []);
-		}
-		this.edgesByTarget.get(edge.target)!.push(edge);
+		this.addEdgeToMapIndex(this.edgesBySource, edge.source, edge);
+		this.addEdgeToMapIndex(this.edgesByTarget, edge.target, edge);
 
 		if (edge.sourceNote) {
-			if (!this.edgesBySourceNote.has(edge.sourceNote)) {
-				this.edgesBySourceNote.set(edge.sourceNote, []);
-			}
-			this.edgesBySourceNote.get(edge.sourceNote)!.push(edge);
+			this.addEdgeToMapIndex(this.edgesBySourceNote, edge.sourceNote, edge);
 		}
 	}
 
@@ -488,10 +494,9 @@ export class GraphCache {
 	 * Get all edges connected to a node (both directions).
 	 */
 	getConnectedEdges(nodeId: string): OntologyEdge[] {
-		const edges: OntologyEdge[] = [];
-		edges.push(...(this.edgesBySource.get(nodeId) || []));
-		edges.push(...(this.edgesByTarget.get(nodeId) || []));
-		return edges;
+		const sourceEdges = this.edgesBySource.get(nodeId) || [];
+		const targetEdges = this.edgesByTarget.get(nodeId) || [];
+		return [...sourceEdges, ...targetEdges];
 	}
 
 	addEdge(edge: OntologyEdge): void {

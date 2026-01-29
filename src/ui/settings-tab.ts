@@ -20,11 +20,11 @@ export class SettingsTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		new Setting(containerEl).setName('Simple Graph Builder settings').setHeading();
+		new Setting(containerEl).setName('General').setHeading();
 
 		// API Provider
 		new Setting(containerEl)
-			.setName('API Provider')
+			.setName('API provider')
 			.setDesc('Select the LLM provider for entity extraction')
 			.addDropdown(dropdown => {
 				dropdown
@@ -209,7 +209,7 @@ export class SettingsTab extends PluginSettingTab {
 
 		// Tool calling warning for Ollama
 		const ollamaWarning = this.providerSettingsEls.ollama.createEl('div', { cls: 'setting-item-description sgb-ollama-warning' });
-		ollamaWarning.createEl('strong', { text: 'Smart Search compatibility:' });
+		ollamaWarning.createEl('strong', { text: 'Smart search compatibility:' });
 		ollamaWarning.appendText(' Some models have limited tool calling support.');
 		ollamaWarning.createEl('br');
 		ollamaWarning.createEl('code', { text: 'deepseek-r1:*' });
@@ -226,8 +226,8 @@ export class SettingsTab extends PluginSettingTab {
 		// Update visibility based on current provider
 		this.updateProviderSettings();
 
-		// Analysis Settings section
-		new Setting(containerEl).setName('Analysis settings').setHeading();
+		// Analysis section
+		new Setting(containerEl).setName('Analysis').setHeading();
 
 		// Extraction mode
 		new Setting(containerEl)
@@ -257,8 +257,8 @@ export class SettingsTab extends PluginSettingTab {
 					});
 			});
 
-		// View Settings section
-		new Setting(containerEl).setName('View settings').setHeading();
+		// View section
+		new Setting(containerEl).setName('View').setHeading();
 
 		new Setting(containerEl)
 			.setName('Open graph in main window')
@@ -268,6 +268,20 @@ export class SettingsTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.openGraphInMain)
 					.onChange(async (value) => {
 						this.plugin.settings.openGraphInMain = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('Minimum connections')
+			.setDesc(`Hide nodes with fewer than this many connections (current: ${this.plugin.settings.graphMinDegree})`)
+			.addSlider(slider => {
+				slider
+					.setLimits(0, 10, 1)
+					.setValue(this.plugin.settings.graphMinDegree)
+					.setDynamicTooltip()
+					.onChange(async (value) => {
+						this.plugin.settings.graphMinDegree = value;
 						await this.plugin.saveSettings();
 					});
 			});
@@ -425,7 +439,7 @@ export class SettingsTab extends PluginSettingTab {
 				.setDesc(`${cacheSize} cached resolutions. Clearing will re-resolve entities on next analysis.`)
 				.addButton(button => {
 					button
-						.setButtonText('Clear Cache')
+						.setButtonText('Clear cache')
 						.setWarning()
 						.onClick(async () => {
 							this.plugin.graphCache.clearResolutionCache();
@@ -458,7 +472,7 @@ export class SettingsTab extends PluginSettingTab {
 					if (isAnalyzingVault()) {
 						button.setButtonText('Cancel').setWarning();
 					} else {
-						button.setButtonText('Start Analysis').removeCta().setClass('mod-cta');
+						button.setButtonText('Start analysis').removeCta().setClass('mod-cta');
 					}
 				};
 
@@ -477,7 +491,7 @@ export class SettingsTab extends PluginSettingTab {
 							`Estimated API calls: up to ${fileCount}\n\n` +
 							`You can cancel at any time.`;
 
-						new ConfirmModal(this.app, message, async () => {
+						void new ConfirmModal(this.app, message, async () => {
 							updateButtonState();
 							await analyzeEntireVault(this.plugin);
 							updateButtonState();
@@ -500,7 +514,7 @@ export class SettingsTab extends PluginSettingTab {
 			.setDesc('Remove all nodes, edges, and analysis history. This cannot be undone.')
 			.addButton(button => {
 				button
-					.setButtonText('Clear All Data')
+					.setButtonText('Clear all data')
 					.setWarning()
 					.onClick(() => {
 						const message = 'Are you sure you want to clear all graph data?\n\n' +
@@ -509,7 +523,7 @@ export class SettingsTab extends PluginSettingTab {
 							'- All note connections\n' +
 							'- Analysis history (notes will be re-analyzed)\n\n' +
 							'This action cannot be undone.';
-						new ConfirmModal(this.app, message, async () => {
+						void new ConfirmModal(this.app, message, async () => {
 							this.plugin.graphCache.clear();
 							await this.plugin.graphCache.flush();
 							await clearHashes(this.plugin);
