@@ -55,6 +55,14 @@ export const DEFAULT_SETTINGS: Settings = {
 	extractionMode: 'simple',
 	autoAnalyzeOnSave: false,
 	openGraphInMain: false,
+	// Embedding-based resolution (opt-in)
+	enableEmbeddings: false,
+	embeddingProvider: 'openai',
+	embeddingApiKey: '',
+	embeddingModel: 'text-embedding-3-small',
+	resolutionThresholdHigh: 0.90,
+	resolutionThresholdLow: 0.80,
+	enableLLMVerification: true,
 };
 
 // Common model options for each provider (for reference in UI)
@@ -70,6 +78,7 @@ export const MODEL_OPTIONS = {
 		'gpt-4.1',
 		'gpt-4.1-mini',
 		'gpt-4o',
+		'gpt-4o-mini',
 	],
 	gemini: [
 		'gemini-3-pro-preview',
@@ -93,3 +102,33 @@ export const MODEL_OPTIONS = {
 		'qwen3:32b'
 	],
 };
+
+// Default embedding dimensions (OpenAI text-embedding-3-small)
+export const DEFAULT_EMBEDDING_DIMENSIONS = 1536;
+
+// Embedding model options per provider
+export const EMBEDDING_MODEL_OPTIONS = {
+	openai: [
+		{ id: 'text-embedding-3-small', name: 'text-embedding-3-small (1536 dims)', dimensions: 1536 },
+		{ id: 'text-embedding-3-large', name: 'text-embedding-3-large (3072 dims)', dimensions: 3072 },
+		{ id: 'text-embedding-ada-002', name: 'text-embedding-ada-002 (1536 dims)', dimensions: 1536 },
+	],
+	gemini: [
+		{ id: 'text-embedding-004', name: 'text-embedding-004 (768 dims)', dimensions: 768 },
+	],
+	ollama: [
+		{ id: 'nomic-embed-text', name: 'nomic-embed-text (768 dims)', dimensions: 768 },
+		{ id: 'mxbai-embed-large', name: 'mxbai-embed-large (1024 dims)', dimensions: 1024 },
+		{ id: 'all-minilm', name: 'all-minilm (384 dims)', dimensions: 384 },
+	],
+};
+
+/**
+ * Get embedding dimensions for a given provider and model.
+ */
+export function getEmbeddingDimensions(provider: string, model: string): number {
+	const providerOptions = EMBEDDING_MODEL_OPTIONS[provider as keyof typeof EMBEDDING_MODEL_OPTIONS];
+	if (!providerOptions) return DEFAULT_EMBEDDING_DIMENSIONS;
+	const modelOption = providerOptions.find(m => m.id === model);
+	return modelOption?.dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
+}

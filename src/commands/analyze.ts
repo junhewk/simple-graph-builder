@@ -1,13 +1,15 @@
 import { Notice, MarkdownView, TFile } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
 import { loadHashes, saveHashes, computeHash, hasNoteChanged, updateNoteHash, removeNoteHash, clearHashes } from '../graph/hashes';
-import { mergeExtractionIntoCache, mergeInternalLinksIntoCache, removeNoteFromCache } from '../graph/merge';
+import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeInternalLinksIntoCache, removeNoteFromCache } from '../graph/merge';
 import { buildExtractionPrompt, truncateContent } from '../extraction/prompts';
 import { extractOntology, settingsToExtractionOptions, ExtractionError } from '../extraction/llm-client';
 
-// Track if vault analysis is running (to prevent multiple concurrent runs)
-let isVaultAnalysisRunning = false;
-let vaultAnalysisCancelled = false;
+// Vault analysis state (encapsulated to avoid module-level mutable variables)
+const vaultAnalysisState = {
+	isRunning: false,
+	isCancelled: false,
+};
 
 export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Promise<void> {
 	const activeView = plugin.app.workspace.getActiveViewOfType(MarkdownView);
@@ -61,12 +63,45 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		// Hide loading notice
 		loadingNotice.hide();
 
-		// Merge results into graph cache (indexed, debounced save)
-		const { nodesAdded, relationshipsAdded } = mergeExtractionIntoCache(
-			plugin.graphCache,
-			file.path,
-			result
-		);
+		// Merge results into graph cache with resolution if embeddings enabled
+		let nodesAdded: number;
+		let nodesMerged = 0;
+		let relationshipsAdded: number;
+		let resolutionInfo = '';
+
+		if (plugin.settings.enableEmbeddings) {
+			// Use advanced resolution with embeddings
+			const mergeResult = await mergeExtractionIntoCacheWithResolution(
+				plugin.graphCache,
+				file.path,
+				result,
+				plugin.settings
+			);
+			nodesAdded = mergeResult.nodesAdded;
+			nodesMerged = mergeResult.nodesMerged;
+			relationshipsAdded = mergeResult.relationshipsAdded;
+
+			// Build resolution stats info
+			const stats = mergeResult.resolutionStats;
+			const resolvedParts: string[] = [];
+			if (stats.cached > 0) resolvedParts.push(`${stats.cached} cached`);
+			if (stats.exact > 0) resolvedParts.push(`${stats.exact} exact`);
+			if (stats.alias > 0) resolvedParts.push(`${stats.alias} alias`);
+			if (stats.embeddingHigh > 0) resolvedParts.push(`${stats.embeddingHigh} embedding`);
+			if (stats.embeddingVerified > 0) resolvedParts.push(`${stats.embeddingVerified} verified`);
+			if (resolvedParts.length > 0) {
+				resolutionInfo = `\nResolution: ${resolvedParts.join(', ')}`;
+			}
+		} else {
+			// Use basic merge without embeddings
+			const mergeResult = mergeExtractionIntoCache(
+				plugin.graphCache,
+				file.path,
+				result
+			);
+			nodesAdded = mergeResult.nodesAdded;
+			relationshipsAdded = mergeResult.relationshipsAdded;
+		}
 
 		// Process internal links ([[wikilinks]])
 		const linksAdded = mergeInternalLinksIntoCache(plugin.graphCache, plugin.app, file, content);
@@ -80,6 +115,9 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		if (nodesAdded > 0) {
 			parts.push(`${nodesAdded} nodes`);
 		}
+		if (nodesMerged > 0) {
+			parts.push(`${nodesMerged} merged`);
+		}
 		if (relationshipsAdded > 0) {
 			parts.push(`${relationshipsAdded} relationships`);
 		}
@@ -92,9 +130,9 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		const totalRels = result.relationships.length;
 
 		if (parts.length > 0) {
-			new Notice(`Added: ${parts.join(', ')}\n(Extracted: ${totalNodes} nodes, ${totalRels} relationships)`);
+			new Notice(`Added: ${parts.join(', ')}\n(Extracted: ${totalNodes} nodes, ${totalRels} relationships)${resolutionInfo}`);
 		} else if (totalNodes > 0 || totalRels > 0) {
-			new Notice(`Extracted ${totalNodes} nodes, ${totalRels} relationships (all merged with existing)`);
+			new Notice(`Extracted ${totalNodes} nodes, ${totalRels} relationships (all merged with existing)${resolutionInfo}`);
 		} else {
 			new Notice('No entities or relationships found in this note');
 		}
@@ -168,7 +206,7 @@ export async function analyzeFile(
 	file: TFile,
 	hashes: { hashes: Array<{ path: string; hash: string; analyzedAt: number }> },
 	options?: { skipUnchanged?: boolean }
-): Promise<{ success: boolean; skipped: boolean; nodesAdded: number; relationshipsAdded: number; error?: string }> {
+): Promise<{ success: boolean; skipped: boolean; nodesAdded: number; nodesMerged: number; relationshipsAdded: number; error?: string }> {
 	const { skipUnchanged = true } = options ?? {};
 
 	try {
@@ -176,13 +214,13 @@ export async function analyzeFile(
 
 		// Check if content is too short
 		if (content.trim().length < 50) {
-			return { success: false, skipped: true, nodesAdded: 0, relationshipsAdded: 0 };
+			return { success: false, skipped: true, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 		}
 
 		// Check if note has changed
 		const currentHash = computeHash(content);
 		if (skipUnchanged && !hasNoteChanged(hashes, file.path, currentHash)) {
-			return { success: false, skipped: true, nodesAdded: 0, relationshipsAdded: 0 };
+			return { success: false, skipped: true, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 		}
 
 		// Get existing node names for context
@@ -194,12 +232,30 @@ export async function analyzeFile(
 		const extractionOptions = settingsToExtractionOptions(plugin.settings);
 		const result = await extractOntology(extractionOptions, prompt);
 
-		// Merge results into graph cache
-		const { nodesAdded, relationshipsAdded } = mergeExtractionIntoCache(
-			plugin.graphCache,
-			file.path,
-			result
-		);
+		// Merge results into graph cache with resolution if embeddings enabled
+		let nodesAdded: number;
+		let nodesMerged = 0;
+		let relationshipsAdded: number;
+
+		if (plugin.settings.enableEmbeddings) {
+			const mergeResult = await mergeExtractionIntoCacheWithResolution(
+				plugin.graphCache,
+				file.path,
+				result,
+				plugin.settings
+			);
+			nodesAdded = mergeResult.nodesAdded;
+			nodesMerged = mergeResult.nodesMerged;
+			relationshipsAdded = mergeResult.relationshipsAdded;
+		} else {
+			const mergeResult = mergeExtractionIntoCache(
+				plugin.graphCache,
+				file.path,
+				result
+			);
+			nodesAdded = mergeResult.nodesAdded;
+			relationshipsAdded = mergeResult.relationshipsAdded;
+		}
 
 		// Process internal links ([[wikilinks]])
 		mergeInternalLinksIntoCache(plugin.graphCache, plugin.app, file, content);
@@ -213,10 +269,10 @@ export async function analyzeFile(
 			hashes.hashes.push(hashRecord);
 		}
 
-		return { success: true, skipped: false, nodesAdded, relationshipsAdded };
+		return { success: true, skipped: false, nodesAdded, nodesMerged, relationshipsAdded };
 	} catch (error) {
 		const err = error as Error & ExtractionError;
-		return { success: false, skipped: false, nodesAdded: 0, relationshipsAdded: 0, error: err.message };
+		return { success: false, skipped: false, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0, error: err.message };
 	}
 }
 
@@ -224,14 +280,14 @@ export async function analyzeFile(
  * Check if vault analysis is currently running.
  */
 export function isAnalyzingVault(): boolean {
-	return isVaultAnalysisRunning;
+	return vaultAnalysisState.isRunning;
 }
 
 /**
  * Cancel the current vault analysis.
  */
 export function cancelVaultAnalysis(): void {
-	vaultAnalysisCancelled = true;
+	vaultAnalysisState.isCancelled = true;
 }
 
 /**
@@ -241,25 +297,25 @@ export function cancelVaultAnalysis(): void {
 export async function analyzeEntireVault(
 	plugin: SimpleGraphBuilderPlugin,
 	onProgress?: (current: number, total: number, currentFile: string) => void
-): Promise<{ analyzed: number; skipped: number; errors: number; nodesAdded: number; relationshipsAdded: number }> {
-	if (isVaultAnalysisRunning) {
+): Promise<{ analyzed: number; skipped: number; errors: number; nodesAdded: number; nodesMerged: number; relationshipsAdded: number }> {
+	if (vaultAnalysisState.isRunning) {
 		new Notice('Vault analysis is already running');
-		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, relationshipsAdded: 0 };
+		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	}
 
 	// Check API configuration
 	const { apiProvider, apiKey, ollamaModel } = plugin.settings;
 	if (apiProvider !== 'ollama' && !apiKey) {
 		new Notice('Please configure your API key in settings');
-		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, relationshipsAdded: 0 };
+		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	}
 	if (apiProvider === 'ollama' && !ollamaModel) {
 		new Notice('Please configure your Ollama model in settings');
-		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, relationshipsAdded: 0 };
+		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	}
 
-	isVaultAnalysisRunning = true;
-	vaultAnalysisCancelled = false;
+	vaultAnalysisState.isRunning = true;
+	vaultAnalysisState.isCancelled = false;
 
 	// Get all markdown files
 	const files = plugin.app.vault.getMarkdownFiles();
@@ -268,6 +324,7 @@ export async function analyzeEntireVault(
 	let skipped = 0;
 	let errors = 0;
 	let totalNodesAdded = 0;
+	let totalNodesMerged = 0;
 	let totalRelationshipsAdded = 0;
 
 	// Load hashes once
@@ -277,9 +334,9 @@ export async function analyzeEntireVault(
 
 	try {
 		for (let i = 0; i < files.length; i++) {
-			if (vaultAnalysisCancelled) {
+			if (vaultAnalysisState.isCancelled) {
 				progressNotice.hide();
-				new Notice(`Vault analysis cancelled.\nAnalyzed: ${analyzed}, Nodes: ${totalNodesAdded}, Relationships: ${totalRelationshipsAdded}`);
+				new Notice(`Vault analysis cancelled.\nAnalyzed: ${analyzed}, Nodes: ${totalNodesAdded}, Merged: ${totalNodesMerged}, Relationships: ${totalRelationshipsAdded}`);
 				break;
 			}
 
@@ -294,6 +351,7 @@ export async function analyzeEntireVault(
 			if (result.success) {
 				analyzed++;
 				totalNodesAdded += result.nodesAdded;
+				totalNodesMerged += result.nodesMerged;
 				totalRelationshipsAdded += result.relationshipsAdded;
 			} else if (result.skipped) {
 				skipped++;
@@ -314,22 +372,23 @@ export async function analyzeEntireVault(
 
 		progressNotice.hide();
 
-		if (!vaultAnalysisCancelled) {
+		if (!vaultAnalysisState.isCancelled) {
+			const mergedInfo = totalNodesMerged > 0 ? `, Merged: ${totalNodesMerged}` : '';
 			new Notice(
 				`Vault analysis complete!\n` +
 				`Analyzed: ${analyzed}, Skipped: ${skipped}, Errors: ${errors}\n` +
-				`Added: ${totalNodesAdded} nodes, ${totalRelationshipsAdded} relationships`
+				`Added: ${totalNodesAdded} nodes${mergedInfo}, ${totalRelationshipsAdded} relationships`
 			);
 		}
 
 		// Update status bar
 		plugin.updateStatusBar();
 	} finally {
-		isVaultAnalysisRunning = false;
-		vaultAnalysisCancelled = false;
+		vaultAnalysisState.isRunning = false;
+		vaultAnalysisState.isCancelled = false;
 	}
 
-	return { analyzed, skipped, errors, nodesAdded: totalNodesAdded, relationshipsAdded: totalRelationshipsAdded };
+	return { analyzed, skipped, errors, nodesAdded: totalNodesAdded, nodesMerged: totalNodesMerged, relationshipsAdded: totalRelationshipsAdded };
 }
 
 /**
@@ -351,7 +410,7 @@ export async function autoAnalyzeFile(plugin: SimpleGraphBuilderPlugin, file: TF
 	}
 
 	// Don't auto-analyze during vault analysis
-	if (isVaultAnalysisRunning) {
+	if (vaultAnalysisState.isRunning) {
 		return;
 	}
 

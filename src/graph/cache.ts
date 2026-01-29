@@ -1,5 +1,6 @@
-import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData } from '../types';
-import { DEFAULT_SETTINGS } from '../settings';
+import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, ResolutionCache, EmbeddingIndex } from '../types';
+import { DEFAULT_SETTINGS, getEmbeddingDimensions } from '../settings';
+import { loadEmbeddingsBinary, saveEmbeddingsBinary, cosineSimilarity } from '../extraction/llm-client';
 import type SimpleGraphBuilderPlugin from '../main';
 
 const SAVE_DEBOUNCE_MS = 1000;
@@ -24,10 +25,21 @@ export class GraphCache {
 	private nodesByLabel: Map<string, OntologyNode[]> = new Map();
 	private nodesBySourceNote: Map<string, OntologyNode[]> = new Map();
 	private nodeByName: Map<string, OntologyNode> = new Map(); // lowercase name -> node
+	private nodeByAlias: Map<string, OntologyNode> = new Map(); // lowercase alias -> node
 	private edgeById: Map<string, OntologyEdge> = new Map();
 	private edgesBySource: Map<string, OntologyEdge[]> = new Map();
 	private edgesByTarget: Map<string, OntologyEdge[]> = new Map();
 	private edgesBySourceNote: Map<string, OntologyEdge[]> = new Map();
+
+	// Resolution cache (persistent across sessions)
+	private resolutionCache: Map<string, string> = new Map(); // lowercase token -> node ID
+	private resolutionCacheDirty = false;
+
+	// Embeddings (lazy loaded from binary file)
+	private embeddings: Map<string, Float32Array> = new Map(); // node ID -> embedding
+	private embeddingsLoaded = false;
+	private embeddingsDirty = false;
+	private embeddingIndex: EmbeddingIndex | null = null;
 
 	constructor(plugin: SimpleGraphBuilderPlugin) {
 		this.plugin = plugin;
@@ -66,6 +78,16 @@ export class GraphCache {
 			this.version = GRAPH_SCHEMA_VERSION;
 		}
 
+		// Load resolution cache
+		if (data?.resolutionCache) {
+			for (const [token, nodeId] of Object.entries(data.resolutionCache)) {
+				this.resolutionCache.set(token, nodeId);
+			}
+		}
+
+		// Load embedding index (embeddings are loaded lazily)
+		this.embeddingIndex = data?.embeddingIndex || null;
+
 		this.rebuildIndexes();
 		this.loaded = true;
 	}
@@ -85,6 +107,7 @@ export class GraphCache {
 		this.nodesByLabel.clear();
 		this.nodesBySourceNote.clear();
 		this.nodeByName.clear();
+		this.nodeByAlias.clear();
 		this.edgeById.clear();
 		this.edgesBySource.clear();
 		this.edgesByTarget.clear();
@@ -121,6 +144,16 @@ export class GraphCache {
 
 		// Index by name (lowercase for case-insensitive lookup)
 		this.nodeByName.set(node.properties.name.toLowerCase(), node);
+
+		// Index by aliases
+		const aliases = node.properties.aliases;
+		if (aliases && Array.isArray(aliases)) {
+			for (const alias of aliases) {
+				if (typeof alias === 'string') {
+					this.nodeByAlias.set(alias.toLowerCase(), node);
+				}
+			}
+		}
 	}
 
 	/**
@@ -129,6 +162,16 @@ export class GraphCache {
 	private unindexNode(node: OntologyNode): void {
 		this.nodeById.delete(node.id);
 		this.nodeByName.delete(node.properties.name.toLowerCase());
+
+		// Remove from alias index
+		const aliases = node.properties.aliases;
+		if (aliases && Array.isArray(aliases)) {
+			for (const alias of aliases) {
+				if (typeof alias === 'string') {
+					this.nodeByAlias.delete(alias.toLowerCase());
+				}
+			}
+		}
 
 		// Remove from label index
 		const labelArr = this.nodesByLabel.get(node.label);
@@ -225,6 +268,54 @@ export class GraphCache {
 
 	getNodeByName(name: string): OntologyNode | undefined {
 		return this.nodeByName.get(name.toLowerCase());
+	}
+
+	/**
+	 * Get node by alias (O(1) lookup).
+	 */
+	getNodeByAlias(alias: string): OntologyNode | undefined {
+		return this.nodeByAlias.get(alias.toLowerCase());
+	}
+
+	/**
+	 * Get node by name or alias (O(1) lookup).
+	 * Checks exact name first, then aliases.
+	 */
+	getNodeByNameOrAlias(nameOrAlias: string): OntologyNode | undefined {
+		const lower = nameOrAlias.toLowerCase();
+		return this.nodeByName.get(lower) || this.nodeByAlias.get(lower);
+	}
+
+	/**
+	 * Add an alias to an existing node.
+	 */
+	addAliasToNode(nodeId: string, alias: string): boolean {
+		const node = this.nodeById.get(nodeId);
+		if (!node) return false;
+
+		const lowerAlias = alias.toLowerCase();
+
+		// Don't add if it's the same as the node's name
+		if (lowerAlias === node.properties.name.toLowerCase()) return false;
+
+		// Don't add if alias already exists on this node
+		const existingAliases = node.properties.aliases || [];
+		if (existingAliases.some(a => a.toLowerCase() === lowerAlias)) return false;
+
+		// Don't add if alias belongs to another node
+		const existingNode = this.nodeByAlias.get(lowerAlias) || this.nodeByName.get(lowerAlias);
+		if (existingNode && existingNode.id !== nodeId) return false;
+
+		// Add alias
+		if (!node.properties.aliases) {
+			node.properties.aliases = [];
+		}
+		node.properties.aliases.push(alias);
+		this.nodeByAlias.set(lowerAlias, node);
+		node.updatedAt = Date.now();
+
+		this.markDirty();
+		return true;
 	}
 
 	getAllNodes(): OntologyNode[] {
@@ -386,6 +477,214 @@ export class GraphCache {
 		return result;
 	}
 
+	// --- Resolution Cache ---
+
+	/**
+	 * Get the resolved node ID for a token from persistent cache.
+	 * Returns undefined if not cached.
+	 */
+	getResolvedNodeId(token: string): string | undefined {
+		return this.resolutionCache.get(token.toLowerCase());
+	}
+
+	/**
+	 * Cache a resolution decision (token -> node ID).
+	 * This persists across sessions.
+	 */
+	cacheResolution(token: string, nodeId: string): void {
+		this.resolutionCache.set(token.toLowerCase(), nodeId);
+		this.resolutionCacheDirty = true;
+		this.scheduleSave();
+	}
+
+	/**
+	 * Remove a resolution from the cache.
+	 */
+	uncacheResolution(token: string): void {
+		if (this.resolutionCache.delete(token.toLowerCase())) {
+			this.resolutionCacheDirty = true;
+			this.scheduleSave();
+		}
+	}
+
+	/**
+	 * Clear all resolution cache entries.
+	 */
+	clearResolutionCache(): void {
+		this.resolutionCache.clear();
+		this.resolutionCacheDirty = true;
+		this.scheduleSave();
+	}
+
+	/**
+	 * Get the number of entries in the resolution cache.
+	 */
+	getResolutionCacheSize(): number {
+		return this.resolutionCache.size;
+	}
+
+	// --- Embeddings ---
+
+	/**
+	 * Load embeddings from binary file if not already loaded.
+	 */
+	async ensureEmbeddingsLoaded(): Promise<void> {
+		if (this.embeddingsLoaded) return;
+
+		// Load embedding index from plugin data
+		const data: PluginData | null = await this.plugin.loadData();
+		this.embeddingIndex = data?.embeddingIndex || null;
+
+		if (!this.embeddingIndex || this.embeddingIndex.nodeIds.length === 0) {
+			this.embeddingsLoaded = true;
+			return;
+		}
+
+		// Load embeddings from binary file
+		const pluginDir = this.plugin.manifest.dir || '';
+		this.embeddings = await loadEmbeddingsBinary(
+			this.plugin.app.vault,
+			pluginDir,
+			this.embeddingIndex.nodeIds,
+			this.embeddingIndex.dimensions
+		);
+
+		this.embeddingsLoaded = true;
+	}
+
+	/**
+	 * Save embeddings to binary file.
+	 * Note: The embedding index is saved as part of flush(), not here.
+	 */
+	async saveEmbeddings(): Promise<void> {
+		if (!this.embeddingsDirty) return;
+
+		const settings = this.plugin.settings;
+		const dimensions = getEmbeddingDimensions(settings.embeddingProvider, settings.embeddingModel);
+
+		// Build ordered list of node IDs
+		const nodeIds = Array.from(this.embeddings.keys());
+
+		// Update embedding index (will be saved by flush())
+		this.embeddingIndex = {
+			nodeIds,
+			model: settings.embeddingModel,
+			dimensions,
+			updatedAt: Date.now(),
+		};
+
+		// Save binary file only
+		const pluginDir = this.plugin.manifest.dir || '';
+		await saveEmbeddingsBinary(
+			this.plugin.app.vault,
+			pluginDir,
+			this.embeddings,
+			nodeIds,
+			dimensions
+		);
+
+		this.embeddingsDirty = false;
+	}
+
+	/**
+	 * Get embedding for a node.
+	 */
+	getEmbedding(nodeId: string): Float32Array | undefined {
+		return this.embeddings.get(nodeId);
+	}
+
+	/**
+	 * Set embedding for a node.
+	 */
+	setEmbedding(nodeId: string, embedding: Float32Array): void {
+		this.embeddings.set(nodeId, embedding);
+		this.embeddingsDirty = true;
+	}
+
+	/**
+	 * Remove embedding for a node.
+	 */
+	removeEmbedding(nodeId: string): void {
+		if (this.embeddings.delete(nodeId)) {
+			this.embeddingsDirty = true;
+		}
+	}
+
+	/**
+	 * Check if a node has an embedding.
+	 */
+	hasEmbedding(nodeId: string): boolean {
+		return this.embeddings.has(nodeId);
+	}
+
+	/**
+	 * Get all nodes that have embeddings.
+	 */
+	getNodesWithEmbeddings(): string[] {
+		return Array.from(this.embeddings.keys());
+	}
+
+	/**
+	 * Get count of nodes with embeddings.
+	 */
+	getEmbeddingsCount(): number {
+		return this.embeddings.size;
+	}
+
+	/**
+	 * Find nodes similar to the given embedding.
+	 * Returns nodes with similarity above threshold, sorted by similarity.
+	 * Optionally filter by label.
+	 */
+	findSimilarByEmbedding(
+		query: Float32Array,
+		threshold: number,
+		label?: string
+	): Array<{ node: OntologyNode; similarity: number }> {
+		const results: Array<{ node: OntologyNode; similarity: number }> = [];
+
+		for (const [nodeId, embedding] of this.embeddings) {
+			const node = this.nodeById.get(nodeId);
+			if (!node) continue;
+			if (label && node.label !== label) continue;
+
+			const sim = cosineSimilarity(query, embedding);
+			if (sim >= threshold) {
+				results.push({ node, similarity: sim });
+			}
+		}
+
+		// Sort by similarity descending
+		return results.sort((a, b) => b.similarity - a.similarity);
+	}
+
+	/**
+	 * Find candidates for entity resolution in a similarity range.
+	 * Used for finding ambiguous matches that need LLM verification.
+	 */
+	findCandidatesInRange(
+		query: Float32Array,
+		minThreshold: number,
+		maxThreshold: number,
+		label?: string
+	): Array<{ node: OntologyNode; similarity: number }> {
+		const results: Array<{ node: OntologyNode; similarity: number }> = [];
+
+		for (const [nodeId, embedding] of this.embeddings) {
+			const node = this.nodeById.get(nodeId);
+			if (!node) continue;
+			if (label && node.label !== label) continue;
+
+			const sim = cosineSimilarity(query, embedding);
+			if (sim >= minThreshold && sim < maxThreshold) {
+				results.push({ node, similarity: sim });
+			}
+		}
+
+		// Sort by similarity descending
+		return results.sort((a, b) => b.similarity - a.similarity);
+	}
+
 	// --- Persistence ---
 
 	private markDirty(): void {
@@ -411,7 +710,13 @@ export class GraphCache {
 			this.saveTimeout = null;
 		}
 
-		if (!this.dirty) return;
+		// Save embeddings binary first (updates embeddingIndex)
+		if (this.embeddingsDirty) {
+			await this.saveEmbeddings();
+		}
+
+		const needsSave = this.dirty || this.resolutionCacheDirty || this.embeddingIndex;
+		if (!needsSave) return;
 
 		const data: PluginData = (await this.plugin.loadData()) ?? {
 			settings: DEFAULT_SETTINGS,
@@ -419,14 +724,31 @@ export class GraphCache {
 			hashes: { hashes: [] },
 		};
 
-		data.graph = {
-			nodes: this.nodes,
-			edges: this.edges,
-			version: this.version,
-		};
+		if (this.dirty) {
+			data.graph = {
+				nodes: this.nodes,
+				edges: this.edges,
+				version: this.version,
+			};
+		}
+
+		if (this.resolutionCacheDirty) {
+			// Convert Map to object for JSON storage
+			const cacheObj: ResolutionCache = {};
+			for (const [token, nodeId] of this.resolutionCache) {
+				cacheObj[token] = nodeId;
+			}
+			data.resolutionCache = cacheObj;
+		}
+
+		// Include embedding index if present
+		if (this.embeddingIndex) {
+			data.embeddingIndex = this.embeddingIndex;
+		}
 
 		await this.plugin.saveData(data);
 		this.dirty = false;
+		this.resolutionCacheDirty = false;
 	}
 
 	/**
@@ -435,8 +757,14 @@ export class GraphCache {
 	clear(): void {
 		this.nodes = [];
 		this.edges = [];
+		this.resolutionCache.clear();
+		this.embeddings.clear();
+		this.embeddingIndex = null;
 		this.rebuildIndexes();
-		this.markDirty();
+		this.dirty = true;
+		this.resolutionCacheDirty = true;
+		this.embeddingsDirty = true;
+		this.scheduleSave();
 	}
 
 	/**

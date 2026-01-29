@@ -51,6 +51,7 @@ export interface OntologyNode {
 	label: string;           // LLM-determined (Person, Concept, Tool, Event, etc.) - unlimited
 	properties: {
 		name: string;          // display name (required)
+		aliases?: string[];    // alternative names for this entity (for resolution)
 		[key: string]: unknown;  // additional properties
 	};
 	sourceNotes: string[];   // note paths that reference this node
@@ -166,6 +167,12 @@ export interface SourceNoteResult {
 export type ApiProvider = 'claude' | 'openai' | 'gemini' | 'ollama';
 
 /**
+ * Embedding provider options.
+ * Note: Claude doesn't have an embeddings API, so it's not included here.
+ */
+export type EmbeddingProvider = 'openai' | 'gemini' | 'ollama';
+
+/**
  * Extraction mode controls how thorough the entity extraction is.
  * - simple: Max 15 entities, 20 relationships (fast, low cost)
  * - advanced: Max 30 entities, 50 relationships (balanced)
@@ -188,6 +195,14 @@ export interface Settings {
 	autoAnalyzeOnSave: boolean;  // Analyze notes automatically when saved
 	// View settings
 	openGraphInMain: boolean;    // Open graph view in main window instead of sidebar
+	// Embedding-based entity resolution (opt-in)
+	enableEmbeddings: boolean;            // default: false - embeddings are opt-in to avoid API costs
+	embeddingProvider: EmbeddingProvider; // default: 'openai'
+	embeddingApiKey: string;              // separate key for embeddings (can differ from main provider)
+	embeddingModel: string;               // default: 'text-embedding-3-small'
+	resolutionThresholdHigh: number;      // default: 0.90 - auto-merge above this
+	resolutionThresholdLow: number;       // default: 0.80 - LLM verification between low and high
+	enableLLMVerification: boolean;       // default: true - use LLM for ambiguous matches
 }
 
 // Legacy type for compatibility with GraphNode references
@@ -216,6 +231,52 @@ export interface HashData {
 // Plugin Data Structure
 // ============================================
 
+// ============================================
+// Entity Resolution Types
+// ============================================
+
+/**
+ * Index metadata for binary embedding storage.
+ * The actual embeddings are stored in a separate binary file.
+ */
+export interface EmbeddingIndex {
+	nodeIds: string[];       // Ordered list of node IDs (index i corresponds to embedding i in binary file)
+	model: string;           // e.g., "text-embedding-3-small"
+	dimensions: number;      // 1536 for OpenAI, 768 for Gemini
+	updatedAt: number;       // timestamp of last update
+}
+
+/**
+ * Persistent resolution cache: maps raw tokens to canonical node IDs.
+ * Used to remember previous resolution decisions across sessions.
+ */
+export interface ResolutionCache {
+	[rawToken: string]: string;  // raw token (lowercase) → canonical node ID
+}
+
+/**
+ * Result of entity resolution attempt.
+ */
+export interface ResolutionResult {
+	nodeId: string;          // The resolved or newly created node ID
+	matchType: 'cached' | 'session' | 'exact' | 'alias' | 'embedding_high' | 'embedding_verified' | 'new';
+	confidence: number;      // 0.0 to 1.0
+	mergedInto?: string;     // If merged, the name of the target node
+}
+
+/**
+ * Stats from resolution during merge operation.
+ */
+export interface ResolutionStats {
+	cached: number;          // resolved via persistent cache
+	session: number;         // resolved via session cache
+	exact: number;           // resolved via exact name match
+	alias: number;           // resolved via alias match
+	embeddingHigh: number;   // resolved via high-confidence embedding (auto-merge)
+	embeddingVerified: number; // resolved via LLM-verified embedding match
+	new: number;             // created as new entity
+}
+
 /**
  * Plugin data structure (stored via loadData/saveData)
  */
@@ -223,6 +284,8 @@ export interface PluginData {
 	settings: Settings;
 	graph: GraphData;
 	hashes: HashData;
+	resolutionCache?: ResolutionCache;   // Persistent token → node ID mappings
+	embeddingIndex?: EmbeddingIndex;     // Metadata for embeddings.bin
 }
 
 // ============================================

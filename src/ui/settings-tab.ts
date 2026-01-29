@@ -1,16 +1,14 @@
 import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
-import { ApiProvider, ExtractionMode } from '../types';
-import { MODEL_OPTIONS } from '../settings';
+import { ApiProvider, EmbeddingProvider, ExtractionMode } from '../types';
+import { MODEL_OPTIONS, EMBEDDING_MODEL_OPTIONS } from '../settings';
 import { clearHashes } from '../graph/hashes';
 import { analyzeEntireVault, isAnalyzingVault, cancelVaultAnalysis } from '../commands/analyze';
+import { getEmbeddings, settingsToEmbeddingOptions } from '../extraction/llm-client';
 
 export class SettingsTab extends PluginSettingTab {
 	plugin: SimpleGraphBuilderPlugin;
-	private claudeSettingsEl: HTMLElement | null = null;
-	private openaiSettingsEl: HTMLElement | null = null;
-	private geminiSettingsEl: HTMLElement | null = null;
-	private ollamaSettingsEl: HTMLElement | null = null;
+	private providerSettingsEls: Partial<Record<ApiProvider, HTMLElement>> = {};
 
 	constructor(app: App, plugin: SimpleGraphBuilderPlugin) {
 		super(app, plugin);
@@ -42,8 +40,8 @@ export class SettingsTab extends PluginSettingTab {
 			});
 
 		// Claude settings
-		this.claudeSettingsEl = containerEl.createDiv();
-		new Setting(this.claudeSettingsEl)
+		this.providerSettingsEls.claude = containerEl.createDiv();
+		new Setting(this.providerSettingsEls.claude)
 			.setName('API Key')
 			.setDesc('Your Anthropic API key')
 			.addText(text => {
@@ -56,7 +54,7 @@ export class SettingsTab extends PluginSettingTab {
 					});
 				text.inputEl.type = 'password';
 			});
-		new Setting(this.claudeSettingsEl)
+		new Setting(this.providerSettingsEls.claude)
 			.setName('Model')
 			.setDesc('Claude model to use')
 			.addDropdown(dropdown => {
@@ -84,8 +82,8 @@ export class SettingsTab extends PluginSettingTab {
 			});
 
 		// OpenAI settings
-		this.openaiSettingsEl = containerEl.createDiv();
-		new Setting(this.openaiSettingsEl)
+		this.providerSettingsEls.openai = containerEl.createDiv();
+		new Setting(this.providerSettingsEls.openai)
 			.setName('API Key')
 			.setDesc('Your OpenAI API key')
 			.addText(text => {
@@ -98,7 +96,7 @@ export class SettingsTab extends PluginSettingTab {
 					});
 				text.inputEl.type = 'password';
 			});
-		new Setting(this.openaiSettingsEl)
+		new Setting(this.providerSettingsEls.openai)
 			.setName('Model')
 			.setDesc('OpenAI model to use')
 			.addDropdown(dropdown => {
@@ -126,8 +124,8 @@ export class SettingsTab extends PluginSettingTab {
 			});
 
 		// Gemini settings
-		this.geminiSettingsEl = containerEl.createDiv();
-		new Setting(this.geminiSettingsEl)
+		this.providerSettingsEls.gemini = containerEl.createDiv();
+		new Setting(this.providerSettingsEls.gemini)
 			.setName('API Key')
 			.setDesc('Your Google AI API key')
 			.addText(text => {
@@ -140,7 +138,7 @@ export class SettingsTab extends PluginSettingTab {
 					});
 				text.inputEl.type = 'password';
 			});
-		new Setting(this.geminiSettingsEl)
+		new Setting(this.providerSettingsEls.gemini)
 			.setName('Model')
 			.setDesc('Gemini model to use')
 			.addDropdown(dropdown => {
@@ -168,8 +166,8 @@ export class SettingsTab extends PluginSettingTab {
 			});
 
 		// Ollama settings
-		this.ollamaSettingsEl = containerEl.createDiv();
-		new Setting(this.ollamaSettingsEl)
+		this.providerSettingsEls.ollama = containerEl.createDiv();
+		new Setting(this.providerSettingsEls.ollama)
 			.setName('Host')
 			.setDesc('URL of your Ollama server')
 			.addText(text => {
@@ -181,7 +179,7 @@ export class SettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
-		new Setting(this.ollamaSettingsEl)
+		new Setting(this.providerSettingsEls.ollama)
 			.setName('Model')
 			.setDesc('Ollama model to use')
 			.addDropdown(dropdown => {
@@ -209,7 +207,7 @@ export class SettingsTab extends PluginSettingTab {
 			});
 
 		// Tool calling warning for Ollama
-		const ollamaWarning = this.ollamaSettingsEl.createEl('div', { cls: 'setting-item-description' });
+		const ollamaWarning = this.providerSettingsEls.ollama.createEl('div', { cls: 'setting-item-description' });
 		ollamaWarning.style.marginTop = '8px';
 		ollamaWarning.style.padding = '8px';
 		ollamaWarning.style.backgroundColor = 'var(--background-modifier-message)';
@@ -269,6 +267,174 @@ export class SettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
+
+		// Entity Resolution section
+		containerEl.createEl('h3', { text: 'Entity Resolution (Advanced)' });
+
+		const resolutionInfo = containerEl.createEl('div', { cls: 'setting-item-description' });
+		resolutionInfo.style.marginBottom = '12px';
+		resolutionInfo.innerHTML = `
+			Entity resolution uses embeddings to detect semantically similar entities (e.g., "AI" and "Artificial Intelligence")
+			and merge them automatically. This is optional and incurs additional API costs.
+		`;
+
+		// Enable embeddings toggle
+		new Setting(containerEl)
+			.setName('Enable embedding-based resolution')
+			.setDesc('Use embeddings to find and merge similar entities. Requires an embedding API key.')
+			.addToggle(toggle => {
+				toggle
+					.setValue(this.plugin.settings.enableEmbeddings)
+					.onChange(async (value) => {
+						this.plugin.settings.enableEmbeddings = value;
+						await this.plugin.saveSettings();
+						this.display(); // Refresh to show/hide related settings
+					});
+			});
+
+		// Only show embedding settings if enabled
+		if (this.plugin.settings.enableEmbeddings) {
+			// Embedding provider
+			new Setting(containerEl)
+				.setName('Embedding provider')
+				.setDesc('Select the provider for embeddings. Note: Claude does not offer embeddings.')
+				.addDropdown(dropdown => {
+					dropdown
+						.addOption('openai', 'OpenAI')
+						.addOption('gemini', 'Gemini (Google)')
+						.addOption('ollama', 'Ollama (Local)')
+						.setValue(this.plugin.settings.embeddingProvider)
+						.onChange(async (value) => {
+							this.plugin.settings.embeddingProvider = value as EmbeddingProvider;
+							// Set default model for the provider
+							const models = EMBEDDING_MODEL_OPTIONS[value as keyof typeof EMBEDDING_MODEL_OPTIONS];
+							if (models && models.length > 0) {
+								this.plugin.settings.embeddingModel = models[0].id;
+							}
+							await this.plugin.saveSettings();
+							this.display(); // Refresh to update model options
+						});
+				});
+
+			// Embedding API key (separate from main key)
+			const embeddingProvider = this.plugin.settings.embeddingProvider;
+			if (embeddingProvider !== 'ollama') {
+				new Setting(containerEl)
+					.setName('Embedding API key')
+					.setDesc('API key for embeddings. Leave blank to use the main API key.')
+					.addText(text => {
+						text
+							.setPlaceholder('Leave blank to use main key')
+							.setValue(this.plugin.settings.embeddingApiKey)
+							.onChange(async (value) => {
+								this.plugin.settings.embeddingApiKey = value;
+								await this.plugin.saveSettings();
+							});
+						text.inputEl.type = 'password';
+					});
+			}
+
+			// Embedding model
+			const embeddingModels = EMBEDDING_MODEL_OPTIONS[embeddingProvider as keyof typeof EMBEDDING_MODEL_OPTIONS] || [];
+			new Setting(containerEl)
+				.setName('Embedding model')
+				.setDesc('Select the embedding model to use.')
+				.addDropdown(dropdown => {
+					for (const model of embeddingModels) {
+						dropdown.addOption(model.id, model.name);
+					}
+					dropdown
+						.setValue(this.plugin.settings.embeddingModel)
+						.onChange(async (value) => {
+							this.plugin.settings.embeddingModel = value;
+							await this.plugin.saveSettings();
+						});
+				});
+
+			// High confidence threshold
+			new Setting(containerEl)
+				.setName('Auto-merge threshold')
+				.setDesc(`Similarity above this threshold will auto-merge (current: ${this.plugin.settings.resolutionThresholdHigh.toFixed(2)})`)
+				.addSlider(slider => {
+					slider
+						.setLimits(0.85, 0.99, 0.01)
+						.setValue(this.plugin.settings.resolutionThresholdHigh)
+						.setDynamicTooltip()
+						.onChange(async (value) => {
+							this.plugin.settings.resolutionThresholdHigh = value;
+							// Ensure low threshold is lower than high
+							if (this.plugin.settings.resolutionThresholdLow >= value) {
+								this.plugin.settings.resolutionThresholdLow = value - 0.05;
+							}
+							await this.plugin.saveSettings();
+						});
+				});
+
+			// Low confidence threshold
+			new Setting(containerEl)
+				.setName('Verification threshold')
+				.setDesc(`Similarity above this but below auto-merge will use LLM verification (current: ${this.plugin.settings.resolutionThresholdLow.toFixed(2)})`)
+				.addSlider(slider => {
+					slider
+						.setLimits(0.70, 0.90, 0.01)
+						.setValue(this.plugin.settings.resolutionThresholdLow)
+						.setDynamicTooltip()
+						.onChange(async (value) => {
+							this.plugin.settings.resolutionThresholdLow = value;
+							// Ensure high threshold is higher than low
+							if (this.plugin.settings.resolutionThresholdHigh <= value) {
+								this.plugin.settings.resolutionThresholdHigh = value + 0.05;
+							}
+							await this.plugin.saveSettings();
+						});
+				});
+
+			// LLM verification toggle
+			new Setting(containerEl)
+				.setName('Enable LLM verification')
+				.setDesc('Use LLM to verify ambiguous matches. Adds extra API calls but improves accuracy.')
+				.addToggle(toggle => {
+					toggle
+						.setValue(this.plugin.settings.enableLLMVerification)
+						.onChange(async (value) => {
+							this.plugin.settings.enableLLMVerification = value;
+							await this.plugin.saveSettings();
+						});
+				});
+
+			// Compute embeddings button
+			const embeddingsCount = this.plugin.graphCache.getEmbeddingsCount();
+			const nodesCount = this.plugin.graphCache.getStats().nodes;
+			const missingEmbeddings = nodesCount - embeddingsCount;
+
+			new Setting(containerEl)
+				.setName('Compute embeddings for existing nodes')
+				.setDesc(`${embeddingsCount}/${nodesCount} nodes have embeddings.${missingEmbeddings > 0 ? ` ${missingEmbeddings} missing.` : ''}`)
+				.addButton(button => {
+					button
+						.setButtonText(missingEmbeddings > 0 ? 'Compute Missing' : 'Recompute All')
+						.onClick(async () => {
+							await this.computeEmbeddings(missingEmbeddings > 0);
+						});
+				});
+
+			// Clear resolution cache button
+			const cacheSize = this.plugin.graphCache.getResolutionCacheSize();
+			new Setting(containerEl)
+				.setName('Clear resolution cache')
+				.setDesc(`${cacheSize} cached resolutions. Clearing will re-resolve entities on next analysis.`)
+				.addButton(button => {
+					button
+						.setButtonText('Clear Cache')
+						.setWarning()
+						.onClick(async () => {
+							this.plugin.graphCache.clearResolutionCache();
+							await this.plugin.graphCache.flush();
+							new Notice('Resolution cache cleared');
+							this.display();
+						});
+				});
+		}
 
 		// Vault analysis section
 		containerEl.createEl('h3', { text: 'Vault Analysis' });
@@ -385,9 +551,9 @@ export class SettingsTab extends PluginSettingTab {
 		} else {
 			// Build label breakdown
 			const labelCounts = Object.entries(stats.labels)
-				.sort((a: [string, number], b: [string, number]) => b[1] - a[1])
+				.sort((a, b) => b[1] - a[1])
 				.slice(0, 5)
-				.map(([label, count]: [string, number]) => `${count} ${label}`)
+				.map(([label, count]) => `${count} ${label}`)
 				.join(', ');
 
 			statsText.setText(
@@ -398,19 +564,73 @@ export class SettingsTab extends PluginSettingTab {
 	}
 
 	private updateProviderSettings() {
-		const provider = this.plugin.settings.apiProvider;
+		const currentProvider = this.plugin.settings.apiProvider;
+		const providers: ApiProvider[] = ['claude', 'openai', 'gemini', 'ollama'];
 
-		if (this.claudeSettingsEl) {
-			this.claudeSettingsEl.style.display = provider === 'claude' ? 'block' : 'none';
+		for (const provider of providers) {
+			const el = this.providerSettingsEls[provider];
+			if (el) {
+				el.style.display = provider === currentProvider ? 'block' : 'none';
+			}
 		}
-		if (this.openaiSettingsEl) {
-			this.openaiSettingsEl.style.display = provider === 'openai' ? 'block' : 'none';
+	}
+
+	/**
+	 * Compute embeddings for existing nodes.
+	 * @param onlyMissing If true, only compute for nodes without embeddings.
+	 */
+	private async computeEmbeddings(onlyMissing: boolean): Promise<void> {
+		const nodes = this.plugin.graphCache.getAllNodes();
+		const embeddingOptions = settingsToEmbeddingOptions(this.plugin.settings);
+
+		// Filter nodes if only computing missing
+		const nodesToProcess = onlyMissing
+			? nodes.filter(n => !this.plugin.graphCache.hasEmbedding(n.id))
+			: nodes;
+
+		if (nodesToProcess.length === 0) {
+			new Notice('All nodes already have embeddings');
+			return;
 		}
-		if (this.geminiSettingsEl) {
-			this.geminiSettingsEl.style.display = provider === 'gemini' ? 'block' : 'none';
-		}
-		if (this.ollamaSettingsEl) {
-			this.ollamaSettingsEl.style.display = provider === 'ollama' ? 'block' : 'none';
+
+		const progressNotice = new Notice(`Computing embeddings: 0/${nodesToProcess.length}...`, 0);
+
+		try {
+			// Process in batches to avoid API limits
+			const batchSize = 50;
+			let processed = 0;
+
+			for (let i = 0; i < nodesToProcess.length; i += batchSize) {
+				const batch = nodesToProcess.slice(i, i + batchSize);
+				const names = batch.map(n => n.properties.name);
+
+				progressNotice.setMessage(`Computing embeddings: ${processed}/${nodesToProcess.length}...`);
+
+				const embeddings = await getEmbeddings(embeddingOptions, names);
+
+				for (let j = 0; j < batch.length; j++) {
+					this.plugin.graphCache.setEmbedding(batch[j].id, embeddings[j]);
+				}
+
+				processed += batch.length;
+
+				// Small delay between batches
+				if (i + batchSize < nodesToProcess.length) {
+					await new Promise(resolve => setTimeout(resolve, 100));
+				}
+			}
+
+			// Save embeddings
+			await this.plugin.graphCache.saveEmbeddings();
+
+			progressNotice.hide();
+			new Notice(`Computed embeddings for ${processed} nodes`);
+			this.display(); // Refresh to update counts
+
+		} catch (error) {
+			progressNotice.hide();
+			console.error('Failed to compute embeddings:', error);
+			new Notice(`Failed to compute embeddings: ${(error as Error).message}`);
 		}
 	}
 }

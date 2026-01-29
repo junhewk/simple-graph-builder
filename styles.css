@@ -457,3 +457,138 @@
 	text-align: center;
 	padding: 2em;
 }
+
+/* Entity Merge Modal */
+.entity-merge-modal {
+	min-width: 450px;
+	max-width: 600px;
+}
+
+.entity-merge-source,
+.entity-merge-target {
+	margin-bottom: 1.5em;
+}
+
+.entity-merge-source h4,
+.entity-merge-target h4 {
+	margin: 0 0 0.5em 0;
+	font-size: 1em;
+	color: var(--text-muted);
+}
+
+.entity-merge-modal .entity-info {
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+	padding: 0.75em;
+	background: var(--background-secondary);
+	border-radius: 6px;
+}
+
+.entity-merge-modal .entity-info.selected {
+	border: 2px solid var(--interactive-accent);
+}
+
+.entity-merge-modal .entity-name {
+	font-weight: 600;
+	font-size: 1.1em;
+}
+
+.entity-merge-modal .entity-label {
+	display: inline-block;
+	padding: 0.15em 0.5em;
+	border-radius: 3px;
+	font-size: 0.75em;
+	font-weight: 500;
+	color: white;
+	background: var(--text-muted);
+	text-transform: uppercase;
+}
+
+.entity-merge-modal .entity-aliases,
+.entity-merge-modal .entity-sources {
+	font-size: 0.85em;
+	color: var(--text-muted);
+	margin-top: 0.5em;
+}
+
+.entity-merge-modal .alias-list {
+	font-style: italic;
+}
+
+.entity-merge-modal .entity-search-results {
+	margin-top: 0.75em;
+	max-height: 200px;
+	overflow-y: auto;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+}
+
+.entity-merge-modal .entity-search-result {
+	padding: 0.5em 0.75em;
+	cursor: pointer;
+	display: flex;
+	align-items: center;
+	gap: 0.5em;
+	border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.entity-merge-modal .entity-search-result:last-child {
+	border-bottom: none;
+}
+
+.entity-merge-modal .entity-search-result:hover {
+	background: var(--background-modifier-hover);
+}
+
+.entity-merge-modal .entity-search-result.selected {
+	background: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.entity-merge-modal .entity-search-result.selected .entity-label {
+	background: rgba(255, 255, 255, 0.3);
+}
+
+.entity-merge-modal .alias-preview {
+	color: var(--text-muted);
+	font-size: 0.85em;
+}
+
+.entity-merge-modal .search-hint,
+.entity-merge-modal .select-hint {
+	color: var(--text-muted);
+	font-style: italic;
+	padding: 1em;
+	text-align: center;
+}
+
+.entity-merge-modal .entity-selected-target {
+	margin-top: 1em;
+	padding-top: 1em;
+	border-top: 1px solid var(--background-modifier-border);
+}
+
+.entity-merge-modal .entity-selected-target h5 {
+	margin: 0 0 0.5em 0;
+	font-size: 0.9em;
+	color: var(--text-muted);
+}
+
+.entity-merge-modal .merge-preview {
+	margin-top: 0.75em;
+	padding: 0.75em;
+	background: var(--background-modifier-message);
+	border-radius: 4px;
+	font-size: 0.9em;
+}
+
+.entity-merge-modal .merge-preview p {
+	margin: 0;
+}
+
+.entity-merge-modal .entity-merge-buttons {
+	margin-top: 1.5em;
+	padding-top: 1em;
+	border-top: 1px solid var(--background-modifier-border);
+}

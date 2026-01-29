@@ -17,6 +17,7 @@ This design provides **80% of the expressiveness with 20% of the complexity**, m
 ## Features
 
 - **Lightweight Ontology Model**: Simple but expressive - flexible node labels + 5 fixed relationship types with detail annotations
+- **Hybrid Entity Resolution**: Multi-stage deduplication pipeline combining fast lookups with embedding similarity and LLM verification (inspired by KGGen [3])
 - **Smart Search**: AI-powered natural language queries over your knowledge graph with multi-path exploration
 - **Entity Extraction**: Automatically extract entities from your notes using AI (configurable extraction depth)
 - **Internal Link Support**: Automatically processes `[[wikilinks]]` to build note-to-note connections
@@ -25,8 +26,27 @@ This design provides **80% of the expressiveness with 20% of the complexity**, m
 - **Interactive Graph View**: Visualize your knowledge graph with fCoSE force-directed layout
 - **Large Graph Support**: Optimized for thousands of nodes with fast rendering
 - **Note Neighborhood Panel**: See connections for the current note in a sidebar
+- **Manual Entity Merge**: Merge duplicate entities via graph view context menu
 - **Quick Access**: Ribbon icon menu for common actions
 - **Status Bar**: Real-time graph statistics display
+
+## Entity Resolution
+
+A key insight from recent knowledge graph research is that **entity resolution is critical** for quality knowledge graphs [3]. Without proper deduplication, "AI", "artificial intelligence", and "Artificial Intelligence" appear as separate nodes, fragmenting your knowledge.
+
+Simple Graph Builder uses a hybrid resolution pipeline (opt-in feature):
+
+| Stage | Method | Speed |
+|-------|--------|-------|
+| 1. Persistent cache | Previously resolved tokens | O(1) |
+| 2. Session cache | Same name resolved this session | O(1) |
+| 3. Exact name | Hash lookup on canonical name | O(1) |
+| 4. Alias match | Hash lookup on stored aliases | O(1) |
+| 5. Embedding similarity | Cosine similarity > 0.90 = auto-merge | O(n) |
+| 6. LLM verification | Ambiguous matches (0.80-0.90) verified by LLM | API call |
+| 7. Create new | No match found | - |
+
+This approach resolves most entities via fast hash lookups, reserving expensive embedding searches and LLM calls for genuinely ambiguous cases.
 
 ## Commands
 
@@ -79,6 +99,10 @@ A sidebar panel showing:
 - **Relationships**: Shows relationship type and detail for each connection
 - Click nodes to see source notes and relationship details
 
+### Graph View Context Menu
+Right-click a node to:
+- **Merge into...**: Manually merge duplicate entities (source becomes alias of target)
+
 ## Settings
 
 ### API Configuration
@@ -93,6 +117,21 @@ A sidebar panel showing:
   - *Maximum*: No limits (thorough extraction)
 - **Auto-analyze on save**: Automatically analyze notes when you save them (2-second debounce)
 - **Analyze entire vault**: Batch analyze all notes with progress tracking and cancellation support
+
+### Entity Resolution (Opt-in)
+Enable embedding-based entity resolution for intelligent deduplication:
+- **Enable embeddings**: Turn on the hybrid resolution pipeline
+- **Embedding provider**: OpenAI, Gemini, or Ollama (can differ from main LLM provider)
+- **Embedding API key**: Separate key for embedding API calls
+- **Embedding model**:
+  - OpenAI: `text-embedding-3-small` (1536 dims), `text-embedding-3-large` (3072 dims)
+  - Gemini: `text-embedding-004` (768 dims)
+  - Ollama: `nomic-embed-text` (768 dims), `mxbai-embed-large` (1024 dims)
+- **High confidence threshold**: Auto-merge above this similarity (default: 0.90)
+- **Low confidence threshold**: LLM verification range floor (default: 0.80)
+- **Enable LLM verification**: Verify ambiguous matches with LLM calls
+- **Compute embeddings**: Generate embeddings for existing nodes
+- **Clear resolution cache**: Reset learned token mappings
 
 ### View Settings
 - **Open graph in main window**: Toggle to open the graph visualization in a main tab instead of the right sidebar
@@ -130,6 +169,7 @@ A sidebar panel showing:
 ### Graph View
 - **Click** a node to highlight its connections
 - **Double-click** a node to open search with that term
+- **Right-click** a node to access merge options
 - **Hover** on edges to see relationship type and detail
 - **Click** the background to reset highlights
 - **Scroll** to zoom in/out
@@ -162,6 +202,11 @@ This plugin makes API calls to extract entities from your notes.
 - **Claude, OpenAI, Gemini**: Each note analysis and Smart Search query will incur API costs based on your provider's pricing
 - **Ollama**: Free (runs locally on your machine)
 
+### Embedding Costs (if enabled)
+- **OpenAI**: ~$0.02 per 1M tokens for `text-embedding-3-small`
+- **Gemini**: Free tier available for `text-embedding-004`
+- **Ollama**: Free (local models like `nomic-embed-text`)
+
 Consider using Ollama for cost-free operation, or batch analyze during off-peak hours to manage costs.
 
 ## Privacy
@@ -169,6 +214,29 @@ Consider using Ollama for cost-free operation, or batch analyze during off-peak 
 - Your notes are sent to the configured LLM provider for entity extraction
 - No data is stored externally; all graph data stays in your vault
 - Consider using Ollama for fully local, private processing
+- Embeddings are stored locally in binary format (`embeddings.bin`)
+
+## Technical Background
+
+This plugin's entity resolution approach is inspired by recent advances in knowledge graph construction:
+
+- **LightRAG** [1] demonstrated lightweight graph-based RAG but lacks entity resolution
+- **Microsoft GraphRAG** [2] provides comprehensive extraction but at high cost ($50-100+ per corpus)
+- **KGGen** [3] introduced the insight that entity resolution is critical for quality knowledge graphs
+
+Simple Graph Builder combines the simplicity of LightRAG with KGGen's hybrid resolution approach, adapted for Obsidian's local-first architecture.
+
+## References
+
+[1] Guo, Z., et al. (2024). "LightRAG: Simple and Fast Retrieval-Augmented Generation." https://github.com/HKUDS/LightRAG
+
+[2] Edge, D., et al. (2024). "From Local to Global: A Graph RAG Approach to Query-Focused Summarization." arXiv:2404.16130. https://github.com/microsoft/graphrag
+
+[3] Shu, Y., et al. (2025). "KGGen: Extracting Knowledge Graphs from Plain Text with Language Models." NeurIPS 2025. arXiv:2502.09956. https://github.com/stair-lab/kggen
+
+[4] Neo4j, Inc. (2024). "Neo4j GraphRAG Package for Python." https://neo4j.com/docs/neo4j-graphrag-python/current/
+
+[5] Veen, A. (2024). "pgvector: Open-source vector similarity search for Postgres." https://github.com/pgvector/pgvector
 
 ## Support
 
