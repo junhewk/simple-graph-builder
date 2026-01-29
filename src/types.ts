@@ -1,7 +1,7 @@
 // ============================================
 // Schema Version
 // ============================================
-export const GRAPH_SCHEMA_VERSION = 2;
+export const GRAPH_SCHEMA_VERSION = 3;
 
 // ============================================
 // Legacy Types (v1) - kept for migration detection
@@ -33,25 +33,144 @@ export interface LegacyGraphData {
 }
 
 // ============================================
-// Ontology Model (v2)
+// Ontology Model (v3)
 // ============================================
 
 /**
- * Relationship types - STRICTLY limited to these 5 types.
- * Use the `detail` property on edges for nuance.
+ * Entity types - STRICTLY limited to these 10 types.
+ * LLM must choose one of these for each entity.
+ */
+export type EntityType =
+	| 'PERSON'        // People, individuals, authors, researchers
+	| 'ORGANIZATION'  // Companies, institutions, teams, communities
+	| 'CONCEPT'       // Ideas, theories, principles, abstract notions
+	| 'PROJECT'       // Projects, products, initiatives, goals
+	| 'TOOL'          // Software, hardware, instruments, utilities
+	| 'EVENT'         // Meetings, conferences, milestones, dates
+	| 'PLACE'         // Locations, venues, geography
+	| 'DOCUMENT'      // Papers, books, articles, notes, creative works
+	| 'METHOD'        // Techniques, approaches, processes, workflows
+	| 'TOPIC';        // Subjects, themes, fields, domains
+
+/**
+ * All valid entity types for validation
+ */
+export const VALID_ENTITY_TYPES: readonly EntityType[] = [
+	'PERSON',
+	'ORGANIZATION',
+	'CONCEPT',
+	'PROJECT',
+	'TOOL',
+	'EVENT',
+	'PLACE',
+	'DOCUMENT',
+	'METHOD',
+	'TOPIC'
+] as const;
+
+/**
+ * Check if a string is a valid entity type
+ */
+export function isValidEntityType(type: string): type is EntityType {
+	return VALID_ENTITY_TYPES.includes(type as EntityType);
+}
+
+// ============================================
+// Entity Type Colors (shared across UI components)
+// ============================================
+
+/**
+ * Color mapping for entity types.
+ * Used in graph-view and neighborhood-view.
+ */
+export const ENTITY_TYPE_COLORS: Record<EntityType, string> = {
+	PERSON: '#6366f1',       // indigo
+	ORGANIZATION: '#8b5cf6', // violet
+	CONCEPT: '#14b8a6',      // teal
+	PROJECT: '#a855f7',      // purple
+	TOOL: '#f59e0b',         // amber
+	EVENT: '#ec4899',        // pink
+	PLACE: '#22c55e',        // green
+	DOCUMENT: '#3b82f6',     // blue
+	METHOD: '#f97316',       // orange
+	TOPIC: '#06b6d4',        // cyan
+};
+
+/**
+ * Get color for entity type with fallback for legacy labels.
+ */
+export function getEntityTypeColor(entityType: EntityType | string | undefined): string {
+	if (entityType && ENTITY_TYPE_COLORS[entityType as EntityType]) {
+		return ENTITY_TYPE_COLORS[entityType as EntityType];
+	}
+	// Fallback for legacy labels - use hash-based color
+	if (entityType) {
+		let hash = 0;
+		for (let i = 0; i < entityType.length; i++) {
+			hash = entityType.charCodeAt(i) + ((hash << 5) - hash);
+		}
+		const hue = Math.abs(hash) % 360;
+		return `hsl(${hue}, 70%, 60%)`;
+	}
+	return '#94a3b8'; // default gray
+}
+
+/**
+ * Get entity type from a node with consistent fallback logic.
+ * Handles both new (entityType) and legacy (label) fields.
+ */
+export function getNodeEntityType(node: { entityType?: EntityType; label?: string }): EntityType {
+	if (node.entityType && isValidEntityType(node.entityType)) {
+		return node.entityType;
+	}
+	if (node.label) {
+		return labelToEntityType(node.label);
+	}
+	return 'CONCEPT';
+}
+
+/**
+ * Get relationship verb from an edge with consistent fallback logic.
+ * Handles both new (relationship) and legacy (type) fields.
+ */
+export function getEdgeRelationship(edge: { relationship?: string; type?: string }): string {
+	if (edge.relationship) {
+		return edge.relationship;
+	}
+	if (edge.type) {
+		// Try to convert legacy type to verb
+		const legacyTypeMap: Record<string, string> = {
+			'HAS_PART': 'contains',
+			'LEADS_TO': 'leads to',
+			'ACTED_ON': 'acts on',
+			'CITES': 'cites',
+			'RELATED_TO': 'relates to',
+		};
+		return legacyTypeMap[edge.type.toUpperCase()] || edge.type;
+	}
+	return 'relates to';
+}
+
+// ============================================
+// Legacy Types (kept for migration)
+// ============================================
+
+/**
+ * @deprecated Use EntityType instead. Kept for v2 data migration.
  */
 export type RelationshipType = 'HAS_PART' | 'LEADS_TO' | 'ACTED_ON' | 'CITES' | 'RELATED_TO';
 
 /**
- * Ontology node with flexible LLM-determined labels.
- * Labels can be: Person, Concept, Tool, Event, Project, Method, etc.
+ * Ontology node with fixed entity types.
  */
 export interface OntologyNode {
 	id: string;
-	label: string;           // LLM-determined (Person, Concept, Tool, Event, etc.) - unlimited
+	entityType: EntityType;  // MUST be one of the 10 types
+	label?: string;          // Legacy: kept for backwards compatibility
 	properties: {
 		name: string;          // display name (required)
 		aliases?: string[];    // alternative names for this entity (for resolution)
+		description?: string;  // brief description from LLM
 		[key: string]: unknown;  // additional properties
 	};
 	sourceNotes: string[];   // note paths that reference this node
@@ -60,15 +179,16 @@ export interface OntologyNode {
 }
 
 /**
- * Ontology edge with fixed relationship types and detail for nuance.
+ * Ontology edge with free-form relationship verbs.
  */
 export interface OntologyEdge {
 	id: string;
 	source: string;          // source node ID
 	target: string;          // target node ID
-	type: RelationshipType;  // MUST be one of the 5 types
+	relationship: string;    // free-form verb (e.g., "develops", "uses", "causes")
+	type?: RelationshipType; // Legacy: kept for backwards compatibility
 	properties: {
-		detail: string;        // required: explains specific nuance
+		detail?: string;       // optional: additional context
 		[key: string]: unknown;  // additional properties
 	};
 	sourceNote?: string;     // note path that created this relationship
@@ -93,9 +213,11 @@ export interface GraphData {
  */
 export interface RawExtractionNode {
 	id: string;              // temporary ID used within extraction
-	label: string;
+	entityType: EntityType;  // MUST be one of the 10 types
+	label?: string;          // Legacy: kept for backwards compatibility
 	properties: {
 		name: string;
+		description?: string;
 		[key: string]: unknown;
 	};
 }
@@ -106,9 +228,10 @@ export interface RawExtractionNode {
 export interface RawExtractionRelationship {
 	source: string;          // temporary ID from extraction
 	target: string;          // temporary ID from extraction
-	type: RelationshipType;
+	relationship: string;    // free-form verb (e.g., "develops", "uses")
+	type?: RelationshipType; // Legacy: kept for backwards compatibility
 	properties: {
-		detail: string;
+		detail?: string;       // optional description
 		[key: string]: unknown;
 	};
 }
@@ -127,26 +250,29 @@ export interface OntologyExtractionResult {
 
 export interface SearchNodeResult {
 	name: string;
-	label: string;
+	entityType: EntityType;
+	label?: string;          // Legacy: for backwards compatibility
 	score: number;
 }
 
 export interface RelationshipResult {
 	from: string;
 	to: string;
-	type: RelationshipType;
-	detail: string;
+	relationship: string;    // free-form verb
+	type?: RelationshipType; // Legacy: for backwards compatibility
+	detail?: string;
 }
 
 export interface ConnectedNodeResult {
 	name: string;
-	label: string;
+	entityType: EntityType;
+	label?: string;          // Legacy: for backwards compatibility
 	path: string[];
 }
 
 export interface PathStep {
 	node: string;
-	via?: RelationshipType;
+	via?: string;            // free-form relationship verb
 	detail?: string;
 }
 
@@ -174,11 +300,10 @@ export type EmbeddingProvider = 'openai' | 'gemini' | 'ollama';
 
 /**
  * Extraction mode controls how thorough the entity extraction is.
- * - simple: Max 15 entities, 20 relationships (fast, low cost)
- * - advanced: Max 30 entities, 50 relationships (balanced)
- * - maximum: No limits (thorough, higher cost)
+ * - standard: Max 15 entities per chunk (fast, low cost)
+ * - thorough: No limits on entities per chunk (comprehensive)
  */
-export type ExtractionMode = 'simple' | 'advanced' | 'maximum';
+export type ExtractionMode = 'standard' | 'thorough';
 
 export interface Settings {
 	apiProvider: ApiProvider;
@@ -289,11 +414,11 @@ export interface PluginData {
 }
 
 // ============================================
-// Utility Types
+// Legacy Utility Types
 // ============================================
 
 /**
- * Valid relationship types for validation
+ * @deprecated Use free-form relationship verbs instead. Kept for v2 data migration.
  */
 export const VALID_RELATIONSHIP_TYPES: readonly RelationshipType[] = [
 	'HAS_PART',
@@ -304,10 +429,65 @@ export const VALID_RELATIONSHIP_TYPES: readonly RelationshipType[] = [
 ] as const;
 
 /**
- * Check if a string is a valid relationship type
+ * @deprecated Use free-form relationship verbs instead. Kept for v2 data migration.
  */
 export function isValidRelationshipType(type: string): type is RelationshipType {
 	return VALID_RELATIONSHIP_TYPES.includes(type as RelationshipType);
+}
+
+/**
+ * Map legacy label to EntityType for migration.
+ */
+export function labelToEntityType(label: string): EntityType {
+	const labelLower = label.toLowerCase();
+
+	// Person-related
+	if (['person', 'author', 'researcher', 'individual'].includes(labelLower)) return 'PERSON';
+	if (['team', 'group'].includes(labelLower)) return 'ORGANIZATION';
+
+	// Organization-related
+	if (['organization', 'company', 'institution', 'community'].includes(labelLower)) return 'ORGANIZATION';
+
+	// Concept-related
+	if (['concept', 'theory', 'principle', 'idea'].includes(labelLower)) return 'CONCEPT';
+
+	// Project-related
+	if (['project', 'product', 'system', 'initiative', 'application'].includes(labelLower)) return 'PROJECT';
+
+	// Tool-related
+	if (['tool', 'library', 'framework', 'software', 'hardware', 'instrument'].includes(labelLower)) return 'TOOL';
+
+	// Event-related
+	if (['event', 'meeting', 'conference', 'milestone'].includes(labelLower)) return 'EVENT';
+
+	// Place-related
+	if (['place', 'location', 'venue', 'geography'].includes(labelLower)) return 'PLACE';
+
+	// Document-related
+	if (['document', 'paper', 'book', 'article', 'note'].includes(labelLower)) return 'DOCUMENT';
+
+	// Method-related
+	if (['method', 'technique', 'approach', 'process', 'workflow'].includes(labelLower)) return 'METHOD';
+
+	// Topic-related
+	if (['topic', 'subject', 'theme', 'field', 'domain'].includes(labelLower)) return 'TOPIC';
+
+	// Default to CONCEPT for unknown labels
+	return 'CONCEPT';
+}
+
+/**
+ * Map legacy RelationshipType to free-form verb.
+ */
+export function relationshipTypeToVerb(type: RelationshipType): string {
+	switch (type) {
+		case 'HAS_PART': return 'contains';
+		case 'LEADS_TO': return 'leads to';
+		case 'ACTED_ON': return 'acts on';
+		case 'CITES': return 'cites';
+		case 'RELATED_TO': return 'relates to';
+		default: return 'relates to';
+	}
 }
 
 /**

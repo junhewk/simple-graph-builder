@@ -1,88 +1,101 @@
-import { RelationshipType, ExtractionMode } from '../types';
+import { ExtractionMode, VALID_ENTITY_TYPES } from '../types';
+
+// ============================================
+// Content Chunking
+// ============================================
+
+/**
+ * Split content into chunks for parallel processing.
+ * Target ~500 tokens per chunk (~3 chars per token as compromise between EN ~4 and KR ~2).
+ */
+export function chunkContent(content: string, targetTokens = 500): string[] {
+	const chunkSize = targetTokens * 3; // ~1500 chars per chunk
+
+	const paragraphs = content.split(/\n\n+/);
+	const chunks: string[] = [];
+	let current = '';
+
+	for (const para of paragraphs) {
+		if (current.length + para.length > chunkSize && current) {
+			chunks.push(current.trim());
+			current = para;
+		} else {
+			current += (current ? '\n\n' : '') + para;
+		}
+	}
+
+	if (current.trim()) {
+		chunks.push(current.trim());
+	}
+
+	// Ensure at least one chunk
+	return chunks.length > 0 ? chunks : [content];
+}
 
 /**
  * Get extraction limits based on mode.
+ * - standard: Max 15 entities per chunk
+ * - thorough: No limits
  */
-function getExtractionLimits(mode: ExtractionMode): { maxNodes: number | null; maxRelationships: number | null } {
+function getExtractionLimits(mode: ExtractionMode): { maxEntities: number | null } {
 	switch (mode) {
-		case 'simple':
-			return { maxNodes: 15, maxRelationships: 20 };
-		case 'advanced':
-			return { maxNodes: 30, maxRelationships: 50 };
-		case 'maximum':
-			return { maxNodes: null, maxRelationships: null };
+		case 'standard':
+			return { maxEntities: 15 };
+		case 'thorough':
+			return { maxEntities: null };
 	}
 }
 
 /**
  * Build the ontology extraction prompt for the LLM.
- * Extracts nodes with flexible labels and relationships with fixed types.
+ * Extracts entities with fixed types and relationships as free-form verbs.
  */
 export function buildExtractionPrompt(
 	noteContent: string,
 	existingNodeNames: string[],
-	extractionMode: ExtractionMode = 'simple'
+	extractionMode: ExtractionMode = 'standard'
 ): string {
 	const existingSection = existingNodeNames.length > 0
-		? `**Existing nodes in knowledge graph (reuse these exact names when the same concept appears):**\n${existingNodeNames.slice(0, 100).join(', ')}${existingNodeNames.length > 100 ? ` ... and ${existingNodeNames.length - 100} more` : ''}`
-		: '**Existing nodes:** (none yet - this is the first note)';
+		? `## Existing Entities (reuse exact names when applicable)
+${existingNodeNames.slice(0, 100).join(', ')}${existingNodeNames.length > 100 ? ` ... and ${existingNodeNames.length - 100} more` : ''}`
+		: '';
 
 	const limits = getExtractionLimits(extractionMode);
-	const constraintsSection = limits.maxNodes !== null
-		? `**OUTPUT CONSTRAINTS (IMPORTANT):**
-- Extract MAX ${limits.maxNodes} nodes and MAX ${limits.maxRelationships} relationships
-- Keep node names SHORT (1-4 words)
-- Keep detail property SHORT (1-3 words)
-- No explanations, no markdown - JSON only
-- Skip trivial terms (e.g., "thing", "item", "data", "information")`
-		: `**OUTPUT CONSTRAINTS (IMPORTANT):**
-- Extract ALL meaningful entities and relationships from the note
-- Keep node names SHORT (1-4 words)
-- Keep detail property SHORT (1-3 words)
-- No explanations, no markdown - JSON only
-- Skip trivial terms (e.g., "thing", "item", "data", "information")`;
+	const limitInstruction = limits.maxEntities !== null
+		? `Extract up to ${limits.maxEntities} most significant entities.`
+		: `Extract ALL significant entities.`;
 
-	return `You are a Knowledge Graph Architect. Convert the note content into a structured JSON graph.
+	const entityTypesList = VALID_ENTITY_TYPES.join(', ');
 
-**Node Labels (choose appropriate labels - NOT limited to these examples):**
-- Person, Organization, Team (for people and groups)
-- Concept, Theory, Method, Technique (for ideas and approaches)
-- Project, Product, System, Application (for work items)
-- Tool, Library, Framework, Software (for technical tools)
-- Event, Meeting, Conference (for occurrences)
-- Place, Location (for geography)
-- Document, Paper, Book, Article (for written works)
-- Use any other appropriate label that best describes the entity
+	return `You are a knowledge graph builder. Extract entities and relationships from the text below.
 
-**Relationship Types (STRICTLY use ONLY these 5 types):**
-- HAS_PART: Parent/Child, Inclusion, Sub-components ("member of", "contains", "subtopic of")
-- LEADS_TO: Causality, Sequence, Dependency ("causes", "blocks", "enables", "results in")
-- ACTED_ON: Creation, Modification, Usage, Ownership ("created", "maintains", "uses", "authored")
-- CITES: Reference, Source, Evidence ("references", "based on", "according to", "quotes")
-- RELATED_TO: Loose association, Similarity ("similar to", "see also", "compared with")
+## Entity Types (use ONLY these 10)
+- PERSON: People, individuals, authors, researchers
+- ORGANIZATION: Companies, institutions, teams, communities
+- CONCEPT: Ideas, theories, principles, abstract notions
+- PROJECT: Projects, products, initiatives, goals
+- TOOL: Software, hardware, instruments, utilities
+- EVENT: Meetings, conferences, milestones, dates
+- PLACE: Locations, venues, geography
+- DOCUMENT: Papers, books, articles, notes, creative works
+- METHOD: Techniques, approaches, processes, workflows
+- TOPIC: Subjects, themes, fields, domains
 
-**CRITICAL RULES:**
-1. Node labels are FLEXIBLE - use whatever label best fits the entity
-2. Relationship types are FIXED - must be one of the 5 types above
-3. Add "detail" property to EVERY relationship (1-3 words only)
-4. Normalize names: merge synonyms/variants into a single canonical form
-5. **Korean specific:** Remove Josa/particles from node names (e.g., "사람은" → "사람", "기술을" → "기술")
-6. Korean preferred for Korean concepts: "ML"/"Machine Learning"/"머신러닝"/"기계학습" → "머신러닝"
-7. English preferred for English-origin terms: "API"/"에이피아이" → "API"
-8. Reuse existing node names when the same concept appears
-9. Focus on domain-specific concepts, not generic words
-
-${constraintsSection}
+## Guidelines
+1. ${limitInstruction}
+2. Use canonical names (expand acronyms except well-known: API, AI, ML)
+3. Relationships: use active verbs ("develops", "uses", "causes", "cites", "contains")
+4. Korean: Remove particles (Josa), prefer Korean for Korean concepts
+5. Keep names SHORT (1-4 words)
+6. Skip trivial terms ("thing", "item", "data", "information")
 
 ${existingSection}
 
-**Note content:**
----
+## Text
 ${noteContent}
----
 
-**Output JSON (no markdown, no explanation):**
-{"nodes":[{"id":"1","label":"Person","properties":{"name":"Alice"}},{"id":"2","label":"Project","properties":{"name":"Project Alpha"}}],"relationships":[{"source":"1","target":"2","type":"ACTED_ON","properties":{"detail":"lead architect"}}]}`;
+## Output (JSON only, no markdown)
+{"entities":[{"name":"...","entity_type":"${entityTypesList.split(', ')[0]}","description":"..."}],"relationships":[{"source":"...","target":"...","relationship":"develops","description":"..."}]}`;
 }
 
 /**
@@ -93,20 +106,19 @@ export function buildSmartSearchSystemPrompt(): string {
 	return `You are a Knowledge Graph Query Assistant. Answer the user's question by thoroughly exploring the knowledge graph using the provided tools.
 
 **Available Tools:**
-1. search_nodes(query, label?) - Search nodes by name (fuzzy match with Bigram Jaccard similarity for Korean support), optionally filter by label. Returns up to 20 results sorted by match score.
+1. search_nodes(query, entity_type?) - Search nodes by name (fuzzy match with Bigram Jaccard similarity for Korean support), optionally filter by entity type. Returns up to 20 results sorted by match score.
 2. get_node(name) - Get a specific node with its properties and source notes
-3. get_relationships(node_name, direction?, type?) - Get relationships for a node
+3. get_relationships(node_name, direction?) - Get relationships for a node
    - direction: "outgoing" | "incoming" | "both" (default: "both")
-   - type: "HAS_PART" | "LEADS_TO" | "ACTED_ON" | "CITES" | "RELATED_TO" (optional filter)
+   - Relationships are free-form verbs like "develops", "uses", "causes", "cites"
 4. get_connected_nodes(node_name, hops?) - Get nodes connected within N hops (default: 2)
 5. get_source_notes(node_name) - Get source notes where this node was extracted from
 
-**Relationship Type Meanings:**
-- HAS_PART: Parent/Child, Inclusion, Sub-components
-- LEADS_TO: Causality, Sequence, Dependency
-- ACTED_ON: Creation, Modification, Usage, Ownership
-- CITES: Reference, Source, Evidence
-- RELATED_TO: Loose association, Similarity
+**Entity Types:**
+PERSON, ORGANIZATION, CONCEPT, PROJECT, TOOL, EVENT, PLACE, DOCUMENT, METHOD, TOPIC
+
+**Relationships:**
+Relationships are expressed as active verbs describing how entities connect (e.g., "develops", "uses", "causes", "cites", "contains", "manages").
 
 **CRITICAL: Multi-Path Exploration Strategy**
 You MUST explore multiple paths to provide comprehensive answers. Follow this process:
@@ -139,7 +151,7 @@ You MUST explore multiple paths to provide comprehensive answers. Follow this pr
 After thorough exploration, provide your final answer as JSON:
 {
   "answer": "Comprehensive natural language answer. Mention ALL relevant connections found, not just one path. If multiple entities are connected to the query, list them all.",
-  "relevantNodes": [{"name": "...", "label": "...", "relevance": "why this is relevant"}],
+  "relevantNodes": [{"name": "...", "entityType": "...", "relevance": "why this is relevant"}],
   "sourceNotes": [{"path": "...", "title": "...", "relevance": "what info came from this note"}]
 }
 
@@ -162,9 +174,9 @@ export function getSmartSearchTools(): SmartSearchToolDefinition[] {
 						type: 'string',
 						description: 'The search query to match against node names. Works with Korean (handles particles/spacing) and English.'
 					},
-					label: {
+					entity_type: {
 						type: 'string',
-						description: 'Optional: filter results to nodes with this label (e.g., "Person", "Concept", "Tool")'
+						description: 'Optional: filter results to nodes with this entity type (PERSON, ORGANIZATION, CONCEPT, PROJECT, TOOL, EVENT, PLACE, DOCUMENT, METHOD, TOPIC)'
 					}
 				},
 				required: ['query']
@@ -186,7 +198,7 @@ export function getSmartSearchTools(): SmartSearchToolDefinition[] {
 		},
 		{
 			name: 'get_relationships',
-			description: 'Get relationships connected to a node, optionally filtered by direction and type.',
+			description: 'Get relationships connected to a node, optionally filtered by direction. Relationships are free-form verbs like "develops", "uses", "causes".',
 			parameters: {
 				type: 'object',
 				properties: {
@@ -198,11 +210,6 @@ export function getSmartSearchTools(): SmartSearchToolDefinition[] {
 						type: 'string',
 						enum: ['outgoing', 'incoming', 'both'],
 						description: 'Filter by relationship direction (default: both)'
-					},
-					type: {
-						type: 'string',
-						enum: ['HAS_PART', 'LEADS_TO', 'ACTED_ON', 'CITES', 'RELATED_TO'],
-						description: 'Filter by relationship type'
 					}
 				},
 				required: ['node_name']
@@ -260,16 +267,6 @@ export interface SmartSearchToolDefinition {
 	};
 }
 
-/**
- * Valid relationship types for validation
- */
-export const RELATIONSHIP_TYPES: RelationshipType[] = [
-	'HAS_PART',
-	'LEADS_TO',
-	'ACTED_ON',
-	'CITES',
-	'RELATED_TO'
-];
 
 /**
  * Truncate note content if too long for API limits.

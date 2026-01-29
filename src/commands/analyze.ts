@@ -2,8 +2,8 @@ import { Notice, MarkdownView, TFile } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
 import { loadHashes, saveHashes, computeHash, hasNoteChanged, updateNoteHash, removeNoteHash, clearHashes } from '../graph/hashes';
 import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeInternalLinksIntoCache, removeNoteFromCache } from '../graph/merge';
-import { buildExtractionPrompt, truncateContent } from '../extraction/prompts';
-import { extractOntology, settingsToExtractionOptions, ExtractionError } from '../extraction/llm-client';
+import { truncateContent } from '../extraction/prompts';
+import { extractOntologyChunked, settingsToExtractionOptions, ExtractionError } from '../extraction/llm-client';
 
 // Vault analysis state (encapsulated to avoid module-level mutable variables)
 const vaultAnalysisState = {
@@ -54,11 +54,11 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		// Get existing node names for context (O(1) via cache)
 		const existingNodeNames = plugin.graphCache.getExistingNodeNames();
 
-		// Build prompt and call LLM
+		// Use chunked extraction for better handling of long notes
 		const truncatedContent = truncateContent(content);
-		const prompt = buildExtractionPrompt(truncatedContent, existingNodeNames, plugin.settings.extractionMode || 'simple');
 		const options = settingsToExtractionOptions(plugin.settings);
-		const result = await extractOntology(options, prompt);
+		const mode = plugin.settings.extractionMode || 'standard';
+		const { result, chunkCount } = await extractOntologyChunked(options, truncatedContent, existingNodeNames, mode);
 
 		// Hide loading notice
 		loadingNotice.hide();
@@ -128,11 +128,12 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		// Also show total extracted (even if merged with existing)
 		const totalNodes = result.nodes.length;
 		const totalRels = result.relationships.length;
+		const chunkInfo = chunkCount > 1 ? ` in ${chunkCount} chunks` : '';
 
 		if (parts.length > 0) {
-			new Notice(`Added: ${parts.join(', ')}\n(Extracted: ${totalNodes} nodes, ${totalRels} relationships)${resolutionInfo}`);
+			new Notice(`Added: ${parts.join(', ')}\n(Extracted: ${totalNodes} nodes, ${totalRels} relationships${chunkInfo})${resolutionInfo}`);
 		} else if (totalNodes > 0 || totalRels > 0) {
-			new Notice(`Extracted ${totalNodes} nodes, ${totalRels} relationships (all merged with existing)${resolutionInfo}`);
+			new Notice(`Extracted ${totalNodes} nodes, ${totalRels} relationships${chunkInfo} (all merged with existing)${resolutionInfo}`);
 		} else {
 			new Notice('No entities or relationships found in this note');
 		}
@@ -226,11 +227,11 @@ export async function analyzeFile(
 		// Get existing node names for context
 		const existingNodeNames = plugin.graphCache.getExistingNodeNames();
 
-		// Build prompt and call LLM
+		// Use chunked extraction
 		const truncatedContent = truncateContent(content);
-		const prompt = buildExtractionPrompt(truncatedContent, existingNodeNames, plugin.settings.extractionMode || 'simple');
 		const extractionOptions = settingsToExtractionOptions(plugin.settings);
-		const result = await extractOntology(extractionOptions, prompt);
+		const mode = plugin.settings.extractionMode || 'standard';
+		const { result } = await extractOntologyChunked(extractionOptions, truncatedContent, existingNodeNames, mode);
 
 		// Merge results into graph cache with resolution if embeddings enabled
 		let nodesAdded: number;

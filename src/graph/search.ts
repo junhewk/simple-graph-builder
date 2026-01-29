@@ -1,17 +1,17 @@
-import { GraphData, OntologyNode } from '../types';
+import { GraphData, OntologyNode, getNodeEntityType } from '../types';
 import type { GraphCache } from './cache';
 
 export interface SearchResult {
 	nodeName: string;
-	nodeLabel: string;
+	nodeLabel: string;       // entityType or legacy label
 	sourceNotes: string[];
 	score: number;
-	matchedOn: 'name' | 'label';
+	matchedOn: 'name' | 'type';
 }
 
 export interface SearchOptions {
 	exactMatch?: boolean;
-	labelFilter?: string;
+	labelFilter?: string;    // Filter by entityType or legacy label
 }
 
 /**
@@ -28,16 +28,18 @@ export function searchGraphCache(cache: GraphCache, query: string, options?: Sea
 	const results: SearchResult[] = [];
 
 	for (const node of cache.getAllNodes()) {
+		const entityType = getNodeEntityType(node);
+
 		// Apply label filter if specified
-		if (labelFilter && node.label !== labelFilter) {
+		if (labelFilter && entityType !== labelFilter) {
 			continue;
 		}
 
 		const nameLower = node.properties.name.toLowerCase();
-		const labelLower = node.label.toLowerCase();
+		const typeLower = entityType.toLowerCase();
 
 		let score = 0;
-		let matchedOn: 'name' | 'label' = 'name';
+		let matchedOn: 'name' | 'type' = 'name';
 
 		if (exactMatch) {
 			// Exact match: name must equal query exactly
@@ -59,17 +61,17 @@ export function searchGraphCache(cache: GraphCache, query: string, options?: Sea
 				// Query contains name
 				score = nameLower.length / queryLower.length * 0.8;
 				matchedOn = 'name';
-			} else if (labelLower.includes(queryLower) || queryLower.includes(labelLower)) {
-				// Label match (lower priority)
+			} else if (typeLower.includes(queryLower) || queryLower.includes(typeLower)) {
+				// Type match (lower priority)
 				score = 0.3;
-				matchedOn = 'label';
+				matchedOn = 'type';
 			}
 		}
 
 		if (score > 0) {
 			results.push({
 				nodeName: node.properties.name,
-				nodeLabel: node.label,
+				nodeLabel: entityType,
 				sourceNotes: [...node.sourceNotes],
 				score,
 				matchedOn,
@@ -94,16 +96,18 @@ export function searchGraph(graph: GraphData, query: string, options?: SearchOpt
 	const results: SearchResult[] = [];
 
 	for (const node of graph.nodes) {
+		const entityType = getNodeEntityType(node);
+
 		// Apply label filter if specified
-		if (labelFilter && node.label !== labelFilter) {
+		if (labelFilter && entityType !== labelFilter) {
 			continue;
 		}
 
 		const nameLower = node.properties.name.toLowerCase();
-		const labelLower = node.label.toLowerCase();
+		const typeLower = entityType.toLowerCase();
 
 		let score = 0;
-		let matchedOn: 'name' | 'label' = 'name';
+		let matchedOn: 'name' | 'type' = 'name';
 
 		if (exactMatch) {
 			if (nameLower === queryLower) {
@@ -120,16 +124,16 @@ export function searchGraph(graph: GraphData, query: string, options?: SearchOpt
 			} else if (queryLower.includes(nameLower)) {
 				score = nameLower.length / queryLower.length * 0.8;
 				matchedOn = 'name';
-			} else if (labelLower.includes(queryLower) || queryLower.includes(labelLower)) {
+			} else if (typeLower.includes(queryLower) || queryLower.includes(typeLower)) {
 				score = 0.3;
-				matchedOn = 'label';
+				matchedOn = 'type';
 			}
 		}
 
 		if (score > 0) {
 			results.push({
 				nodeName: node.properties.name,
-				nodeLabel: node.label,
+				nodeLabel: entityType,
 				sourceNotes: [...node.sourceNotes],
 				score,
 				matchedOn,

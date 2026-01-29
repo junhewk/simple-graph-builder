@@ -6,17 +6,17 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ## Why Lightweight Ontology?
 
-Traditional knowledge graphs often require complex schemas with dozens of relationship types, making them difficult to maintain and query. Simple Graph Builder takes a different approach:
+Traditional knowledge graphs often require complex schemas with dozens of entity and relationship types, making them difficult to maintain and query. Simple Graph Builder takes a different approach:
 
-- **Flexible Node Labels**: The LLM determines the most appropriate label for each entity (Person, Concept, Tool, Project, etc.) - no predefined restrictions
-- **Fixed Relationship Types**: Only 5 universal relationship types that cover most knowledge connections
+- **10 Fixed Entity Types**: PERSON, ORGANIZATION, CONCEPT, PROJECT, TOOL, EVENT, PLACE, DOCUMENT, METHOD, TOPIC - covering all common knowledge domains
+- **Free-form Relationship Verbs**: Express relationships naturally with active verbs like "develops", "uses", "causes", "cites"
 - **Detail Property**: Each relationship includes a `detail` field for nuanced descriptions without schema explosion
 
-This design provides **80% of the expressiveness with 20% of the complexity**, making it easy to build, query, and maintain your personal knowledge graph.
+This design provides **structured entity classification with expressive relationships**, making it easy to build, query, and maintain your personal knowledge graph.
 
 ## Features
 
-- **Lightweight Ontology Model**: Simple but expressive - flexible node labels + 5 fixed relationship types with detail annotations
+- **Lightweight Ontology Model**: Simple but expressive - 10 fixed entity types + free-form relationship verbs with detail annotations
 - **Hybrid Entity Resolution**: Multi-stage deduplication pipeline combining fast lookups with embedding similarity and LLM verification (inspired by KGGen [3])
 - **Smart Search**: AI-powered natural language queries over your knowledge graph with multi-path exploration
 - **Entity Extraction**: Automatically extract entities from your notes using AI (configurable extraction depth)
@@ -62,25 +62,35 @@ This approach resolves most entities via fast hash lookups, reserving expensive 
 
 ## Data Model
 
-### Node Labels (Flexible)
-The LLM determines appropriate labels for each entity:
-- **Person, Organization, Team** - People and groups
-- **Concept, Theory, Method, Technique** - Ideas and approaches
-- **Project, Product, System** - Work items
-- **Tool, Library, Framework, Software** - Technical tools
-- **Event, Meeting, Conference** - Occurrences
-- **Document, Paper, Book** - Written works
-- **Place, Location** - Geography
-- Any other appropriate label
+### Entity Types (10 Fixed Types)
+The LLM must classify each entity into one of these types:
 
-### Relationship Types (Fixed)
-| Type | Meaning | Example Details |
-|------|---------|-----------------|
-| `HAS_PART` | Parent/Child, Inclusion | "member of", "contains", "subtopic" |
-| `LEADS_TO` | Causality, Sequence, Dependency | "causes", "blocks", "enables" |
-| `ACTED_ON` | Creation, Modification, Usage | "created", "maintains", "uses" |
-| `CITES` | Reference, Source, Evidence | "references", "based on", "quotes" |
-| `RELATED_TO` | Loose association, Similarity | "similar to", "see also", "wikilink" |
+| Type | Description | Examples |
+|------|-------------|----------|
+| `PERSON` | People, individuals | Authors, researchers, team members |
+| `ORGANIZATION` | Companies, institutions | Google, MIT, research labs |
+| `CONCEPT` | Ideas, theories, principles | Machine learning, API design |
+| `PROJECT` | Projects, products, initiatives | Obsidian, GraphRAG |
+| `TOOL` | Software, hardware, instruments | Python, VS Code, Docker |
+| `EVENT` | Meetings, conferences, milestones | NeurIPS 2024, sprint review |
+| `PLACE` | Locations, venues, geography | San Francisco, AWS us-east-1 |
+| `DOCUMENT` | Papers, books, articles, notes | "Attention Is All You Need" |
+| `METHOD` | Techniques, approaches, workflows | Agile, TDD, fine-tuning |
+| `TOPIC` | Subjects, themes, fields, domains | NLP, distributed systems |
+
+### Relationships (Free-form Verbs)
+Relationships are expressed as active verbs describing how entities relate:
+
+| Verb Examples | Meaning |
+|--------------|---------|
+| `develops`, `creates`, `builds` | Creation, authorship |
+| `uses`, `applies`, `implements` | Usage, application |
+| `causes`, `leads to`, `enables` | Causality, dependency |
+| `contains`, `includes`, `has` | Composition, membership |
+| `cites`, `references`, `based on` | Citation, source |
+| `relates to`, `similar to` | General association |
+
+Each relationship also includes an optional `detail` field for additional context.
 
 ## UI Elements
 
@@ -94,9 +104,9 @@ Shows real-time graph statistics with node counts by label.
 
 ### Note Neighborhood Panel
 A sidebar panel showing:
-- **Extracted Nodes**: Entities from the current note with label badges
-- **Connected Nodes**: Grouped by label (Person, Concept, Tool, etc.)
-- **Relationships**: Shows relationship type and detail for each connection
+- **Extracted Nodes**: Entities from the current note with entity type badges
+- **Connected Nodes**: Grouped by entity type (PERSON, CONCEPT, TOOL, etc.)
+- **Relationships**: Shows relationship verb and detail for each connection
 - Click nodes to see source notes and relationship details
 
 ### Graph View Context Menu
@@ -112,9 +122,9 @@ Right-click a node to:
 
 ### Analysis Settings
 - **Extraction Mode**: Control extraction depth
-  - *Simple*: Max 15 entities, 20 relationships (fast, low cost)
-  - *Advanced*: Max 30 entities, 50 relationships (balanced)
-  - *Maximum*: No limits (thorough extraction)
+  - *Standard*: Max 15 entities per chunk (fast, low cost)
+  - *Thorough*: No limits per chunk (comprehensive extraction)
+- **Chunked Processing**: Long notes are automatically split into ~500 token chunks and processed in parallel (max 3 concurrent)
 - **Auto-analyze on save**: Automatically analyze notes when you save them (2-second debounce)
 - **Analyze entire vault**: Batch analyze all notes with progress tracking and cancellation support
 
@@ -137,7 +147,7 @@ Enable embedding-based entity resolution for intelligent deduplication:
 - **Open graph in main window**: Toggle to open the graph visualization in a main tab instead of the right sidebar
 
 ### Data Management
-- View graph statistics (nodes by label, relationships by type)
+- View graph statistics (nodes by entity type, total relationships)
 - Clear all graph data
 
 ## Installation
@@ -175,7 +185,7 @@ Enable embedding-based entity resolution for intelligent deduplication:
 - **Scroll** to zoom in/out
 - **Drag** to pan around the graph
 
-Node colors are determined by label (predefined colors for common labels, hash-based colors for others). Edge styles vary by relationship type.
+Node colors are determined by entity type (10 predefined colors). Edges use unified gray styling with relationship verbs shown on hover.
 
 ### Search
 Two search modes are available:

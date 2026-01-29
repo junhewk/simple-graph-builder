@@ -52,7 +52,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	geminiModel: 'gemini-2.5-flash',
 	ollamaModel: 'gpt-oss:20b',
 	ollamaHost: 'http://localhost:11434',
-	extractionMode: 'simple',
+	extractionMode: 'standard',
 	autoAnalyzeOnSave: false,
 	openGraphInMain: false,
 	// Embedding-based resolution (opt-in)
