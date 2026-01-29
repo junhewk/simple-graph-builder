@@ -1,22 +1,22 @@
-import { OntologyNode, OntologyEdge, OntologyExtractionResult, RawExtractionRelationship, RelationshipType, ResolutionStats, Settings } from '../types';
+import { OntologyNode, OntologyEdge, OntologyExtractionResult, RawExtractionRelationship, ResolutionStats, Settings } from '../types';
 import type { GraphCache } from './cache';
 import type { App, TFile } from 'obsidian';
 import { getResolvedLinks } from './links';
 import { EntityResolver } from './resolver';
 
 /**
- * Generate a unique node ID from label and name.
+ * Generate a unique node ID from entity type and name.
  * Uses lowercase normalized name for deduplication.
  */
-export function generateNodeId(label: string, name: string): string {
-	return `${label.toLowerCase()}:${name.toLowerCase().trim()}`;
+export function generateNodeId(entityType: string, name: string): string {
+	return `${entityType.toLowerCase()}:${name.toLowerCase().trim()}`;
 }
 
 /**
- * Generate a unique edge ID from source, target, and type.
+ * Generate a unique edge ID from source, target, and relationship verb.
  */
-export function generateEdgeId(source: string, target: string, type: RelationshipType): string {
-	return `${source}->${target}:${type}`;
+export function generateEdgeId(source: string, target: string, relationship: string): string {
+	return `${source}->${target}:${relationship.toLowerCase()}`;
 }
 
 /**
@@ -53,14 +53,15 @@ function processRelationships(
 			continue;
 		}
 
-		const edgeId = generateEdgeId(sourceId, targetId, rawRel.type);
+		const relationship = rawRel.relationship || 'relates to';
+		const edgeId = generateEdgeId(sourceId, targetId, relationship);
 
 		if (!cache.getEdgeById(edgeId)) {
 			const newEdge: OntologyEdge = {
 				id: edgeId,
 				source: sourceId,
 				target: targetId,
-				type: rawRel.type,
+				relationship: relationship,
 				properties: {
 					detail: rawRel.properties.detail,
 					...Object.fromEntries(
@@ -80,8 +81,8 @@ function processRelationships(
 
 /**
  * Merge ontology extraction results into GraphCache.
- * Nodes are merged by label:name combination.
- * Edges are merged by source->target:type combination.
+ * Nodes are merged by entityType:name combination.
+ * Edges are merged by source->target:relationship combination.
  */
 export function mergeExtractionIntoCache(
 	cache: GraphCache,
@@ -98,13 +99,13 @@ export function mergeExtractionIntoCache(
 	for (const rawNode of extraction.nodes) {
 		const normalizedName = normalizeName(rawNode.properties.name);
 
-		// First check if a node with the same name already exists (regardless of label)
+		// First check if a node with the same name already exists (regardless of entity type)
 		const existingByName = cache.getNodeByName(normalizedName);
 
 		// Use existing node's ID if found, otherwise generate new ID
 		const nodeId = existingByName
 			? existingByName.id
-			: generateNodeId(rawNode.label, normalizedName);
+			: generateNodeId(rawNode.entityType, normalizedName);
 		idMap.set(rawNode.id, nodeId);
 
 		const existing = existingByName || cache.getNodeById(nodeId);
@@ -127,11 +128,12 @@ export function mergeExtractionIntoCache(
 			// Create new node
 			const newNode: OntologyNode = {
 				id: nodeId,
-				label: rawNode.label,
+				entityType: rawNode.entityType,
 				properties: {
 					name: normalizedName,
+					description: rawNode.properties.description,
 					...Object.fromEntries(
-						Object.entries(rawNode.properties).filter(([k]) => k !== 'name')
+						Object.entries(rawNode.properties).filter(([k]) => k !== 'name' && k !== 'description')
 					)
 				},
 				sourceNotes: [notePath],
@@ -219,11 +221,12 @@ export async function mergeExtractionIntoCacheWithResolution(
 			const normalizedName = normalizeName(rawNode.properties.name);
 			const newNode: OntologyNode = {
 				id: nodeId,
-				label: rawNode.label,
+				entityType: rawNode.entityType,
 				properties: {
 					name: normalizedName,
+					description: rawNode.properties.description,
 					...Object.fromEntries(
-						Object.entries(rawNode.properties).filter(([k]) => k !== 'name')
+						Object.entries(rawNode.properties).filter(([k]) => k !== 'name' && k !== 'description')
 					)
 				},
 				sourceNotes: [notePath],
@@ -304,14 +307,14 @@ export function mergeInternalLinksIntoCache(
 			for (const targetNode of targetNoteNodes) {
 				if (sourceNode.id === targetNode.id) continue;
 
-				const edgeId = generateEdgeId(sourceNode.id, targetNode.id, 'RELATED_TO');
+				const edgeId = generateEdgeId(sourceNode.id, targetNode.id, 'links to');
 
 				if (!cache.getEdgeById(edgeId)) {
 					cache.addEdge({
 						id: edgeId,
 						source: sourceNode.id,
 						target: targetNode.id,
-						type: 'RELATED_TO',
+						relationship: 'links to',
 						properties: { detail: 'wikilink' },
 						sourceNote: file.path,
 						createdAt: now,

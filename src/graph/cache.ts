@@ -1,4 +1,4 @@
-import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, ResolutionCache, EmbeddingIndex } from '../types';
+import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, ResolutionCache, EmbeddingIndex, labelToEntityType, relationshipTypeToVerb, isValidRelationshipType } from '../types';
 import { DEFAULT_SETTINGS, getEmbeddingDimensions } from '../settings';
 import { loadEmbeddingsBinary, saveEmbeddingsBinary, cosineSimilarity } from '../extraction/llm-client';
 import type SimpleGraphBuilderPlugin from '../main';
@@ -22,7 +22,8 @@ export class GraphCache {
 
 	// Indexes for O(1) lookups
 	private nodeById: Map<string, OntologyNode> = new Map();
-	private nodesByLabel: Map<string, OntologyNode[]> = new Map();
+	private nodesByEntityType: Map<string, OntologyNode[]> = new Map();
+	private nodesByLabel: Map<string, OntologyNode[]> = new Map(); // Legacy
 	private nodesBySourceNote: Map<string, OntologyNode[]> = new Map();
 	private nodeByName: Map<string, OntologyNode> = new Map(); // lowercase name -> node
 	private nodeByAlias: Map<string, OntologyNode> = new Map(); // lowercase alias -> node
@@ -58,7 +59,7 @@ export class GraphCache {
 		if (graph) {
 			// Check for legacy v1 data
 			if (isLegacyGraphData(graph)) {
-				console.log('Detected legacy v1 graph data. Clearing for v2 schema.');
+				console.debug('Detected legacy v1 graph data. Clearing for v2 schema.');
 				this.nodes = [];
 				this.edges = [];
 				this.version = GRAPH_SCHEMA_VERSION;
@@ -68,8 +69,8 @@ export class GraphCache {
 				}
 				this.dirty = true;
 			} else {
-				this.nodes = (graph.nodes || []) as OntologyNode[];
-				this.edges = (graph.edges || []) as OntologyEdge[];
+				this.nodes = graph.nodes || [];
+				this.edges = graph.edges || [];
 				this.version = graph.version || GRAPH_SCHEMA_VERSION;
 			}
 		} else {
@@ -77,6 +78,9 @@ export class GraphCache {
 			this.edges = [];
 			this.version = GRAPH_SCHEMA_VERSION;
 		}
+
+		// Migrate v2 -> v3 schema (populate entityType and relationship)
+		this.migrateToV3();
 
 		// Load resolution cache
 		if (data?.resolutionCache) {
@@ -100,10 +104,52 @@ export class GraphCache {
 	}
 
 	/**
+	 * Migrate v2 data to v3 schema:
+	 * - Nodes: populate entityType from label
+	 * - Edges: populate relationship from type
+	 */
+	private migrateToV3(): void {
+		let migrated = false;
+
+		// Migrate nodes: populate entityType from label if missing
+		for (const node of this.nodes) {
+			if (!node.entityType && node.label) {
+				node.entityType = labelToEntityType(node.label);
+				migrated = true;
+			} else if (!node.entityType) {
+				node.entityType = 'CONCEPT';
+				migrated = true;
+			}
+		}
+
+		// Migrate edges: populate relationship from type if missing
+		for (const edge of this.edges) {
+			if (!edge.relationship && edge.type) {
+				const edgeType = edge.type;
+				if (isValidRelationshipType(edgeType)) {
+					edge.relationship = relationshipTypeToVerb(edgeType);
+				} else {
+					edge.relationship = String(edgeType).toLowerCase().replace(/_/g, ' ');
+				}
+				migrated = true;
+			} else if (!edge.relationship) {
+				edge.relationship = 'relates to';
+				migrated = true;
+			}
+		}
+
+		if (migrated) {
+			console.log('Migrated graph data from v2 to v3 schema');
+			this.dirty = true;
+		}
+	}
+
+	/**
 	 * Rebuild all indexes from raw arrays.
 	 */
 	private rebuildIndexes(): void {
 		this.nodeById.clear();
+		this.nodesByEntityType.clear();
 		this.nodesByLabel.clear();
 		this.nodesBySourceNote.clear();
 		this.nodeByName.clear();
@@ -128,11 +174,19 @@ export class GraphCache {
 	private indexNode(node: OntologyNode): void {
 		this.nodeById.set(node.id, node);
 
-		// Index by label
-		if (!this.nodesByLabel.has(node.label)) {
-			this.nodesByLabel.set(node.label, []);
+		// Index by entity type
+		const entityType = node.entityType || 'CONCEPT';
+		if (!this.nodesByEntityType.has(entityType)) {
+			this.nodesByEntityType.set(entityType, []);
 		}
-		this.nodesByLabel.get(node.label)!.push(node);
+		this.nodesByEntityType.get(entityType)!.push(node);
+
+		// Index by label (legacy support)
+		const label = node.label || entityType;
+		if (!this.nodesByLabel.has(label)) {
+			this.nodesByLabel.set(label, []);
+		}
+		this.nodesByLabel.get(label)!.push(node);
 
 		// Index by source notes
 		for (const notePath of node.sourceNotes) {
@@ -173,8 +227,17 @@ export class GraphCache {
 			}
 		}
 
-		// Remove from label index
-		const labelArr = this.nodesByLabel.get(node.label);
+		// Remove from entity type index
+		const entityType = node.entityType || 'CONCEPT';
+		const entityTypeArr = this.nodesByEntityType.get(entityType);
+		if (entityTypeArr) {
+			const idx = entityTypeArr.indexOf(node);
+			if (idx >= 0) entityTypeArr.splice(idx, 1);
+		}
+
+		// Remove from label index (legacy support)
+		const label = node.label || entityType;
+		const labelArr = this.nodesByLabel.get(label);
 		if (labelArr) {
 			const idx = labelArr.indexOf(node);
 			if (idx >= 0) labelArr.splice(idx, 1);
@@ -258,6 +321,10 @@ export class GraphCache {
 		return this.nodeById.get(id);
 	}
 
+	getNodesByEntityType(entityType: string): OntologyNode[] {
+		return this.nodesByEntityType.get(entityType) || [];
+	}
+
 	getNodesByLabel(label: string): OntologyNode[] {
 		return this.nodesByLabel.get(label) || [];
 	}
@@ -323,7 +390,14 @@ export class GraphCache {
 	}
 
 	/**
-	 * Get all unique labels in the graph.
+	 * Get all unique entity types in the graph.
+	 */
+	getAllEntityTypes(): string[] {
+		return Array.from(this.nodesByEntityType.keys());
+	}
+
+	/**
+	 * Get all unique labels in the graph (legacy support).
 	 */
 	getAllLabels(): string[] {
 		return Array.from(this.nodesByLabel.keys());
@@ -634,19 +708,19 @@ export class GraphCache {
 	/**
 	 * Find nodes similar to the given embedding.
 	 * Returns nodes with similarity above threshold, sorted by similarity.
-	 * Optionally filter by label.
+	 * Optionally filter by entity type.
 	 */
 	findSimilarByEmbedding(
 		query: Float32Array,
 		threshold: number,
-		label?: string
+		entityType?: string
 	): Array<{ node: OntologyNode; similarity: number }> {
 		const results: Array<{ node: OntologyNode; similarity: number }> = [];
 
 		for (const [nodeId, embedding] of this.embeddings) {
 			const node = this.nodeById.get(nodeId);
 			if (!node) continue;
-			if (label && node.label !== label) continue;
+			if (entityType && (node.entityType || node.label) !== entityType) continue;
 
 			const sim = cosineSimilarity(query, embedding);
 			if (sim >= threshold) {
@@ -666,14 +740,14 @@ export class GraphCache {
 		query: Float32Array,
 		minThreshold: number,
 		maxThreshold: number,
-		label?: string
+		entityType?: string
 	): Array<{ node: OntologyNode; similarity: number }> {
 		const results: Array<{ node: OntologyNode; similarity: number }> = [];
 
 		for (const [nodeId, embedding] of this.embeddings) {
 			const node = this.nodeById.get(nodeId);
 			if (!node) continue;
-			if (label && node.label !== label) continue;
+			if (entityType && (node.entityType || node.label) !== entityType) continue;
 
 			const sim = cosineSimilarity(query, embedding);
 			if (sim >= minThreshold && sim < maxThreshold) {
@@ -697,7 +771,7 @@ export class GraphCache {
 			clearTimeout(this.saveTimeout);
 		}
 		this.saveTimeout = setTimeout(() => {
-			this.flush();
+			void this.flush();
 		}, SAVE_DEBOUNCE_MS);
 	}
 
@@ -769,9 +843,15 @@ export class GraphCache {
 
 	/**
 	 * Get statistics about the graph.
-	 * Returns dynamic label-based counts.
+	 * Returns dynamic entity type-based counts.
 	 */
-	getStats(): { nodes: number; edges: number; labels: Record<string, number> } {
+	getStats(): { nodes: number; edges: number; labels: Record<string, number>; entityTypes: Record<string, number> } {
+		const entityTypes: Record<string, number> = {};
+		for (const [entityType, nodes] of this.nodesByEntityType) {
+			entityTypes[entityType] = nodes.length;
+		}
+
+		// Legacy labels support
 		const labels: Record<string, number> = {};
 		for (const [label, nodes] of this.nodesByLabel) {
 			labels[label] = nodes.length;
@@ -781,6 +861,7 @@ export class GraphCache {
 			nodes: this.nodes.length,
 			edges: this.edges.length,
 			labels,
+			entityTypes,
 		};
 	}
 
@@ -789,12 +870,14 @@ export class GraphCache {
 	 */
 	getStatsSummary(): string {
 		const stats = this.getStats();
-		const labelCounts = Object.entries(stats.labels)
-			.sort((a: [string, number], b: [string, number]) => b[1] - a[1])
+		// Prefer entity types over legacy labels
+		const counts = Object.keys(stats.entityTypes).length > 0 ? stats.entityTypes : stats.labels;
+		const typeCounts = Object.entries(counts)
+			.sort((a, b) => b[1] - a[1])
 			.slice(0, 3)
-			.map(([label, count]: [string, number]) => `${count} ${label}`)
+			.map(([type, count]) => `${count} ${type}`)
 			.join(', ');
 
-		return `${stats.nodes} nodes, ${stats.edges} edges${labelCounts ? ` (${labelCounts})` : ''}`;
+		return `${stats.nodes} nodes, ${stats.edges} edges${typeCounts ? ` (${typeCounts})` : ''}`;
 	}
 }

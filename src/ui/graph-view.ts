@@ -3,7 +3,7 @@ import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import SimpleGraphBuilderPlugin from '../main';
 import { openSearchModal } from '../commands/search';
-import { OntologyNode, OntologyEdge, RelationshipType } from '../types';
+import { OntologyNode, OntologyEdge, getEntityTypeColor } from '../types';
 
 // Register fCoSE layout extension
 cytoscape.use(fcose);
@@ -13,73 +13,6 @@ export const GRAPH_VIEW_TYPE = 'simple-graph-view';
 // Performance thresholds
 const LARGE_GRAPH_THRESHOLD = 500; // nodes + edges
 const MAX_RENDER_ELEMENTS = 2000; // maximum elements to render
-
-// ============================================
-// Dynamic Label Colors
-// ============================================
-
-// Base colors for common labels (fallback to hash-based color for others)
-const LABEL_COLORS: Record<string, string> = {
-	// People & Organizations
-	Person: '#6366f1',       // indigo
-	Organization: '#8b5cf6', // violet
-	Team: '#a78bfa',         // light violet
-
-	// Concepts & Ideas
-	Concept: '#14b8a6',      // teal
-	Theory: '#2dd4bf',       // light teal
-	Method: '#5eead4',       // cyan
-	Technique: '#67e8f9',    // light cyan
-
-	// Projects & Products
-	Project: '#a855f7',      // purple
-	Product: '#c084fc',      // light purple
-	System: '#d8b4fe',       // lavender
-	Application: '#e9d5ff',  // pale lavender
-
-	// Tools & Software
-	Tool: '#f59e0b',         // amber
-	Library: '#fbbf24',      // yellow
-	Framework: '#fcd34d',    // light yellow
-	Software: '#fde68a',     // pale yellow
-
-	// Events
-	Event: '#f472b6',        // pink
-	Meeting: '#f9a8d4',      // light pink
-	Conference: '#fbcfe8',   // pale pink
-
-	// Documents
-	Document: '#60a5fa',     // blue
-	Paper: '#93c5fd',        // light blue
-	Book: '#bfdbfe',         // pale blue
-	Article: '#dbeafe',      // very pale blue
-
-	// Places
-	Place: '#4ade80',        // green
-	Location: '#86efac',     // light green
-};
-
-// Generate color from string hash for unlisted labels
-function getLabelColor(label: string): string {
-	if (LABEL_COLORS[label]) return LABEL_COLORS[label];
-
-	// Hash-based color generation
-	let hash = 0;
-	for (let i = 0; i < label.length; i++) {
-		hash = label.charCodeAt(i) + ((hash << 5) - hash);
-	}
-	const hue = Math.abs(hash) % 360;
-	return `hsl(${hue}, 70%, 60%)`;
-}
-
-// Edge styles by relationship type (fixed 5 types)
-const RELATIONSHIP_STYLES: Record<RelationshipType, { lineStyle: string; color: string; width?: number; arrow?: boolean; opacity?: number }> = {
-	HAS_PART: { lineStyle: 'solid', color: '#64748b', width: 1.5 },      // gray - structural
-	LEADS_TO: { lineStyle: 'solid', color: '#3b82f6', width: 1.2, arrow: true }, // blue - causal
-	ACTED_ON: { lineStyle: 'solid', color: '#22c55e', width: 1.2 },      // green - action
-	CITES: { lineStyle: 'dashed', color: '#8b5cf6', width: 1 },          // purple - reference
-	RELATED_TO: { lineStyle: 'dotted', color: '#94a3b8', opacity: 0.7 }, // light gray - loose
-};
 
 // ============================================
 // Graph Styles
@@ -106,39 +39,18 @@ const GRAPH_STYLES: cytoscape.StylesheetStyle[] = [
 			'background-color': 'data(color)',
 		},
 	},
-	// Base edge style
+	// Base edge style (unified for free-form relationships)
 	{
 		selector: 'edge',
 		style: {
-			'width': 0.8,
-			'line-color': 'data(color)',
+			'width': 1,
+			'line-color': '#94a3b8',
 			'curve-style': 'bezier',
 			'opacity': 0.7,
 			'line-style': 'solid',
-		},
-	},
-	// Edges with arrows
-	{
-		selector: 'edge[arrow="true"]',
-		style: {
 			'target-arrow-shape': 'triangle',
-			'target-arrow-color': 'data(color)',
-			'arrow-scale': 0.6,
-		},
-	},
-	// Dashed edges
-	{
-		selector: 'edge[lineStyle="dashed"]',
-		style: {
-			'line-style': 'dashed',
-		},
-	},
-	// Dotted edges
-	{
-		selector: 'edge[lineStyle="dotted"]',
-		style: {
-			'line-style': 'dotted',
-			'opacity': 0.5,
+			'target-arrow-color': '#94a3b8',
+			'arrow-scale': 0.5,
 		},
 	},
 	// Highlighted state (selected node and neighbors)
@@ -301,34 +213,31 @@ export class GraphView extends ItemView {
 
 		const elements: cytoscape.ElementDefinition[] = [];
 
-		// Add nodes with dynamic colors
+		// Add nodes with entity type colors
 		for (const node of nodesToRender) {
 			elements.push({
 				data: {
 					id: node.id,
 					name: node.properties.name,
-					label: node.label,
-					color: getLabelColor(node.label),
+					entityType: node.entityType,
+					label: node.label || node.entityType, // fallback for legacy
+					color: getEntityTypeColor(node.entityType || node.label),
 					sourceNotes: node.sourceNotes,
 				},
 			});
 		}
 
-		// Add edges with type-based styling
+		// Add edges with unified styling (free-form relationships)
 		const nodeIds = new Set(nodesToRender.map(n => n.id));
 		for (const edge of edgesToRender) {
 			if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
-				const style = RELATIONSHIP_STYLES[edge.type] || RELATIONSHIP_STYLES.RELATED_TO;
 				elements.push({
 					data: {
 						id: edge.id,
 						source: edge.source,
 						target: edge.target,
-						type: edge.type,
-						detail: edge.properties.detail,
-						color: style.color,
-						lineStyle: style.lineStyle,
-						arrow: style.arrow ? 'true' : 'false',
+						relationship: edge.relationship || edge.type || 'relates to',
+						detail: edge.properties?.detail,
 					},
 				});
 			}
@@ -399,16 +308,16 @@ export class GraphView extends ItemView {
 		if (!this.tooltipEl) return;
 
 		const name = node.data('name');
-		const label = node.data('label');
+		const entityType = node.data('entityType') || node.data('label');
 		const sourceNotes = node.data('sourceNotes') || [];
 
-		let html = `<div class="tooltip-label">${label}</div>`;
-		html += `<div class="tooltip-name">${name}</div>`;
+		this.tooltipEl.empty();
+		this.tooltipEl.createDiv({ cls: 'tooltip-label', text: entityType });
+		this.tooltipEl.createDiv({ cls: 'tooltip-name', text: name });
 		if (sourceNotes.length > 0) {
-			html += `<div class="tooltip-sources">Found in ${sourceNotes.length} note${sourceNotes.length > 1 ? 's' : ''}</div>`;
+			this.tooltipEl.createDiv({ cls: 'tooltip-sources', text: `Found in ${sourceNotes.length} note${sourceNotes.length > 1 ? 's' : ''}` });
 		}
 
-		this.tooltipEl.innerHTML = html;
 		this.tooltipEl.style.left = `${position.x + 15}px`;
 		this.tooltipEl.style.top = `${position.y + 15}px`;
 		this.tooltipEl.style.display = 'block';
@@ -417,15 +326,15 @@ export class GraphView extends ItemView {
 	private showEdgeTooltip(edge: cytoscape.EdgeSingular, position: { x: number; y: number }): void {
 		if (!this.tooltipEl) return;
 
-		const type = edge.data('type');
+		const relationship = edge.data('relationship');
 		const detail = edge.data('detail');
 
-		let html = `<div class="tooltip-type">${type}</div>`;
+		this.tooltipEl.empty();
+		this.tooltipEl.createDiv({ cls: 'tooltip-type', text: relationship });
 		if (detail) {
-			html += `<div class="tooltip-detail">${detail}</div>`;
+			this.tooltipEl.createDiv({ cls: 'tooltip-detail', text: detail });
 		}
 
-		this.tooltipEl.innerHTML = html;
 		this.tooltipEl.style.left = `${position.x + 15}px`;
 		this.tooltipEl.style.top = `${position.y + 15}px`;
 		this.tooltipEl.style.display = 'block';
@@ -512,7 +421,7 @@ export class GraphView extends ItemView {
 		this.cy.elements().removeClass('highlighted faded');
 	}
 
-	async onClose() {
+	async onClose(): Promise<void> {
 		if (this.cy) {
 			this.cy.destroy();
 			this.cy = null;

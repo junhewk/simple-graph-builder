@@ -5,6 +5,7 @@ import { MODEL_OPTIONS, EMBEDDING_MODEL_OPTIONS } from '../settings';
 import { clearHashes } from '../graph/hashes';
 import { analyzeEntireVault, isAnalyzingVault, cancelVaultAnalysis } from '../commands/analyze';
 import { getEmbeddings, settingsToEmbeddingOptions } from '../extraction/llm-client';
+import { ConfirmModal } from './confirm-modal';
 
 export class SettingsTab extends PluginSettingTab {
 	plugin: SimpleGraphBuilderPlugin;
@@ -19,7 +20,7 @@ export class SettingsTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl('h2', { text: 'Simple Graph Builder Settings' });
+		new Setting(containerEl).setName('Simple Graph Builder settings').setHeading();
 
 		// API Provider
 		new Setting(containerEl)
@@ -78,7 +79,7 @@ export class SettingsTab extends PluginSettingTab {
 							await this.plugin.saveSettings();
 						}
 					});
-				text.inputEl.style.width = '180px';
+				text.inputEl.addClass('sgb-setting-input-wide');
 			});
 
 		// OpenAI settings
@@ -120,7 +121,7 @@ export class SettingsTab extends PluginSettingTab {
 							await this.plugin.saveSettings();
 						}
 					});
-				text.inputEl.style.width = '180px';
+				text.inputEl.addClass('sgb-setting-input-wide');
 			});
 
 		// Gemini settings
@@ -162,7 +163,7 @@ export class SettingsTab extends PluginSettingTab {
 							await this.plugin.saveSettings();
 						}
 					});
-				text.inputEl.style.width = '180px';
+				text.inputEl.addClass('sgb-setting-input-wide');
 			});
 
 		// Ollama settings
@@ -203,37 +204,40 @@ export class SettingsTab extends PluginSettingTab {
 							await this.plugin.saveSettings();
 						}
 					});
-				text.inputEl.style.width = '180px';
+				text.inputEl.addClass('sgb-setting-input-wide');
 			});
 
 		// Tool calling warning for Ollama
-		const ollamaWarning = this.providerSettingsEls.ollama.createEl('div', { cls: 'setting-item-description' });
-		ollamaWarning.style.marginTop = '8px';
-		ollamaWarning.style.padding = '8px';
-		ollamaWarning.style.backgroundColor = 'var(--background-modifier-message)';
-		ollamaWarning.style.borderRadius = '4px';
-		ollamaWarning.innerHTML = `
-			<strong>Smart Search compatibility:</strong> Some models have limited tool calling support.
-			<br><code>deepseek-r1:*</code> and <code>gemma3:*</code> may not work with Smart Search.
-			<br>Recommended: <code>qwen3:*</code>, <code>gpt-oss:*</code> for best results.
-		`;
+		const ollamaWarning = this.providerSettingsEls.ollama.createEl('div', { cls: 'setting-item-description sgb-ollama-warning' });
+		ollamaWarning.createEl('strong', { text: 'Smart Search compatibility:' });
+		ollamaWarning.appendText(' Some models have limited tool calling support.');
+		ollamaWarning.createEl('br');
+		ollamaWarning.createEl('code', { text: 'deepseek-r1:*' });
+		ollamaWarning.appendText(' and ');
+		ollamaWarning.createEl('code', { text: 'gemma3:*' });
+		ollamaWarning.appendText(' may not work with Smart Search.');
+		ollamaWarning.createEl('br');
+		ollamaWarning.appendText('Recommended: ');
+		ollamaWarning.createEl('code', { text: 'qwen3:*' });
+		ollamaWarning.appendText(', ');
+		ollamaWarning.createEl('code', { text: 'gpt-oss:*' });
+		ollamaWarning.appendText(' for best results.');
 
 		// Update visibility based on current provider
 		this.updateProviderSettings();
 
 		// Analysis Settings section
-		containerEl.createEl('h3', { text: 'Analysis Settings' });
+		new Setting(containerEl).setName('Analysis settings').setHeading();
 
 		// Extraction mode
 		new Setting(containerEl)
 			.setName('Extraction mode')
-			.setDesc('Controls how thorough the entity extraction is. Higher modes extract more entities but cost more API tokens.')
+			.setDesc('Controls how thorough the entity extraction is. Content is split into chunks (~500 tokens each) for parallel processing.')
 			.addDropdown(dropdown => {
 				dropdown
-					.addOption('simple', 'Simple (max 15 entities, 20 relations)')
-					.addOption('advanced', 'Advanced (max 30 entities, 50 relations)')
-					.addOption('maximum', 'Maximum (no limits)')
-					.setValue(this.plugin.settings.extractionMode || 'simple')
+					.addOption('standard', 'Standard (max 15 entities per chunk)')
+					.addOption('thorough', 'Thorough (no limits per chunk)')
+					.setValue(this.plugin.settings.extractionMode || 'standard')
 					.onChange(async (value) => {
 						this.plugin.settings.extractionMode = value as ExtractionMode;
 						await this.plugin.saveSettings();
@@ -254,7 +258,7 @@ export class SettingsTab extends PluginSettingTab {
 			});
 
 		// View Settings section
-		containerEl.createEl('h3', { text: 'View Settings' });
+		new Setting(containerEl).setName('View settings').setHeading();
 
 		new Setting(containerEl)
 			.setName('Open graph in main window')
@@ -269,14 +273,10 @@ export class SettingsTab extends PluginSettingTab {
 			});
 
 		// Entity Resolution section
-		containerEl.createEl('h3', { text: 'Entity Resolution (Advanced)' });
+		new Setting(containerEl).setName('Entity resolution (advanced)').setHeading();
 
-		const resolutionInfo = containerEl.createEl('div', { cls: 'setting-item-description' });
-		resolutionInfo.style.marginBottom = '12px';
-		resolutionInfo.innerHTML = `
-			Entity resolution uses embeddings to detect semantically similar entities (e.g., "AI" and "Artificial Intelligence")
-			and merge them automatically. This is optional and incurs additional API costs.
-		`;
+		const resolutionInfo = containerEl.createEl('div', { cls: 'setting-item-description sgb-resolution-info' });
+		resolutionInfo.appendText('Entity resolution uses embeddings to detect semantically similar entities (e.g., "AI" and "Artificial Intelligence") and merge them automatically. This is optional and incurs additional API costs.');
 
 		// Enable embeddings toggle
 		new Setting(containerEl)
@@ -437,18 +437,16 @@ export class SettingsTab extends PluginSettingTab {
 		}
 
 		// Vault analysis section
-		containerEl.createEl('h3', { text: 'Vault Analysis' });
+		new Setting(containerEl).setName('Vault analysis').setHeading();
 
 		const vaultWarning = containerEl.createEl('div', { cls: 'setting-item-description vault-analysis-warning' });
-		vaultWarning.innerHTML = `
-			<strong>Warning:</strong> Analyzing the entire vault will:
-			<ul>
-				<li>Make one API call per note (can be expensive for large vaults)</li>
-				<li>Take a long time (approx. 10-15 seconds per note)</li>
-				<li>May hit rate limits depending on your API plan</li>
-			</ul>
-			<em>Already analyzed notes will be skipped unless changed.</em>
-		`;
+		vaultWarning.createEl('strong', { text: 'Warning:' });
+		vaultWarning.appendText(' Analyzing the entire vault will:');
+		const warningList = vaultWarning.createEl('ul');
+		warningList.createEl('li', { text: 'Make one API call per note (can be expensive for large vaults)' });
+		warningList.createEl('li', { text: 'Take a long time (approx. 10-15 seconds per note)' });
+		warningList.createEl('li', { text: 'May hit rate limits depending on your API plan' });
+		vaultWarning.createEl('em', { text: 'Already analyzed notes will be skipped unless changed.' });
 
 		const vaultButtonContainer = containerEl.createDiv({ cls: 'vault-analysis-buttons' });
 
@@ -466,7 +464,7 @@ export class SettingsTab extends PluginSettingTab {
 
 				updateButtonState();
 
-				button.onClick(async () => {
+				button.onClick(() => {
 					if (isAnalyzingVault()) {
 						cancelVaultAnalysis();
 						new Notice('Cancelling vault analysis...');
@@ -474,25 +472,23 @@ export class SettingsTab extends PluginSettingTab {
 						setTimeout(updateButtonState, 1000);
 					} else {
 						const fileCount = this.plugin.app.vault.getMarkdownFiles().length;
-						const confirmed = confirm(
-							`Analyze ${fileCount} notes in your vault?\n\n` +
+						const message = `Analyze ${fileCount} notes in your vault?\n\n` +
 							`Estimated time: ${Math.ceil(fileCount * 10 / 60)} - ${Math.ceil(fileCount * 15 / 60)} minutes\n` +
 							`Estimated API calls: up to ${fileCount}\n\n` +
-							`You can cancel at any time.`
-						);
+							`You can cancel at any time.`;
 
-						if (confirmed) {
+						new ConfirmModal(this.app, message, async () => {
 							updateButtonState();
 							await analyzeEntireVault(this.plugin);
 							updateButtonState();
 							this.renderGraphStats(statsEl);
-						}
+						}).open();
 					}
 				});
 			});
 
 		// Data Management section
-		containerEl.createEl('h3', { text: 'Data Management' });
+		new Setting(containerEl).setName('Data management').setHeading();
 
 		// Graph stats
 		const statsEl = containerEl.createDiv({ cls: 'graph-stats' });
@@ -506,27 +502,25 @@ export class SettingsTab extends PluginSettingTab {
 				button
 					.setButtonText('Clear All Data')
 					.setWarning()
-					.onClick(async () => {
-						const confirmed = confirm(
-							'Are you sure you want to clear all graph data?\n\n' +
+					.onClick(() => {
+						const message = 'Are you sure you want to clear all graph data?\n\n' +
 							'This will remove:\n' +
 							'- All extracted nodes and relationships\n' +
 							'- All note connections\n' +
 							'- Analysis history (notes will be re-analyzed)\n\n' +
-							'This action cannot be undone.'
-						);
-						if (confirmed) {
+							'This action cannot be undone.';
+						new ConfirmModal(this.app, message, async () => {
 							this.plugin.graphCache.clear();
 							await this.plugin.graphCache.flush();
 							await clearHashes(this.plugin);
 							new Notice('Graph data cleared');
 							this.renderGraphStats(statsEl);
-						}
+						}).open();
 					});
 			});
 
 		// Support section
-		containerEl.createEl('h3', { text: 'Support' });
+		new Setting(containerEl).setName('Support').setHeading();
 
 		new Setting(containerEl)
 			.setName('Buy me a coffee')

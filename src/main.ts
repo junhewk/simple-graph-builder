@@ -127,8 +127,8 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 
 			// Build detailed tooltip
 			const labelDetails = Object.entries(stats.labels)
-				.sort((a: [string, number], b: [string, number]) => b[1] - a[1])
-				.map(([label, count]: [string, number]) => `  ${label}: ${count}`)
+				.sort((a, b) => b[1] - a[1])
+				.map(([label, count]) => `  ${label}: ${count}`)
 				.join('\n');
 
 			this.statusBarItem.setAttr('aria-label',
@@ -195,14 +195,22 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		openSearchModal(this, query);
 	}
 
-	async onunload() {
+	onunload(): void {
 		// Flush any pending graph changes
-		await this.graphCache.flush();
+		void this.graphCache.flush();
 	}
 
 	async loadSettings() {
 		const data: PluginData | null = await this.loadData();
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data?.settings);
+
+		// Migrate old extractionMode values (v2 -> v3)
+		const mode = this.settings.extractionMode as string;
+		if (mode === 'simple') {
+			this.settings.extractionMode = 'standard';
+		} else if (mode === 'advanced' || mode === 'maximum') {
+			this.settings.extractionMode = 'thorough';
+		}
 	}
 
 	async saveSettings() {

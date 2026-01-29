@@ -5,7 +5,7 @@ import { searchGraphCache, SearchResult } from '../graph/search';
 /**
  * Open search modal, optionally with an initial query.
  */
-export async function openSearchModal(plugin: SimpleGraphBuilderPlugin, initialQuery?: string): Promise<void> {
+export function openSearchModal(plugin: SimpleGraphBuilderPlugin, initialQuery?: string): void {
 	new SearchModal(plugin.app, plugin, initialQuery).open();
 }
 
@@ -28,7 +28,7 @@ class SearchModal extends Modal {
 		contentEl.empty();
 		contentEl.addClass('simple-graph-search-modal');
 
-		contentEl.createEl('h2', { text: 'Search Related Notes' });
+		contentEl.createEl('h2', { text: 'Search related notes' });
 
 		// Search input
 		new Setting(contentEl)
@@ -36,7 +36,7 @@ class SearchModal extends Modal {
 			.setDesc('Enter a concept, entity name, or topic')
 			.addText(text => {
 				text.setPlaceholder('e.g., Machine Learning, Alice, Project Alpha')
-					.onChange(async (value) => {
+					.onChange((value) => {
 						this.currentQuery = value;
 						this.performSearch();
 					});
@@ -165,7 +165,7 @@ class SearchModal extends Modal {
 						});
 						noteLink.addEventListener('click', (e) => {
 							e.preventDefault();
-							this.openNote(notePath);
+							void this.openNote(notePath);
 						});
 
 						if (i < Math.min(result.sourceNotes.length, 3) - 1) {

@@ -6,6 +6,7 @@ import { App, Modal, Notice } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
 import { executeSmartSearch } from '../commands/smart-search';
 import { supportsToolCalling } from '../settings';
+import { getEntityTypeColor } from '../types';
 
 export class SmartSearchModal extends Modal {
 	private plugin: SimpleGraphBuilderPlugin;
@@ -22,43 +23,29 @@ export class SmartSearchModal extends Modal {
 	onOpen() {
 		const { contentEl } = this;
 		contentEl.empty();
-		contentEl.addClass('smart-search-modal');
-		contentEl.style.padding = '20px';
+		contentEl.addClass('smart-search-modal sgb-smart-search-content');
 
 		// Title
-		const titleEl = contentEl.createEl('h2', { text: 'Smart Search', cls: 'smart-search-title' });
-		titleEl.style.margin = '0 0 8px 0';
-		titleEl.style.fontSize = '1.5em';
-		titleEl.style.fontWeight = '600';
+		contentEl.createEl('h2', { text: 'Smart search', cls: 'sgb-smart-search-title' });
 
-		const descEl = contentEl.createEl('p', {
-			cls: 'smart-search-description',
+		contentEl.createEl('p', {
+			cls: 'sgb-smart-search-desc',
 			text: 'Ask a question about your knowledge graph. The AI will explore connections and provide an answer with sources.',
 		});
-		descEl.style.margin = '0 0 16px 0';
-		descEl.style.color = 'var(--text-muted)';
-		descEl.style.fontSize = '0.9em';
 
 		// Input area
-		const inputContainer = contentEl.createDiv({ cls: 'smart-search-input-container' });
-		inputContainer.style.width = '100%';
-		inputContainer.style.marginBottom = '12px';
+		const inputContainer = contentEl.createDiv({ cls: 'sgb-smart-search-input-container' });
 
 		this.inputEl = inputContainer.createEl('textarea', {
-			cls: 'smart-search-input',
+			cls: 'smart-search-input sgb-smart-search-textarea',
 			attr: {
 				placeholder: 'e.g., "What methods did we use for the recommendation project?" or "Who is connected to Alice?"',
 				rows: '3',
 			},
 		});
-		this.inputEl.style.width = '100%';
-		this.inputEl.style.boxSizing = 'border-box';
-		this.inputEl.style.padding = '10px';
-		this.inputEl.style.resize = 'vertical';
 
 		// Search button
-		const buttonContainer = contentEl.createDiv({ cls: 'smart-search-buttons' });
-		buttonContainer.style.marginBottom = '16px';
+		const buttonContainer = contentEl.createDiv({ cls: 'sgb-smart-search-btn-container' });
 
 		const searchBtn = buttonContainer.createEl('button', {
 			cls: 'smart-search-btn mod-cta',
@@ -69,33 +56,25 @@ export class SmartSearchModal extends Modal {
 		const toolSupported = supportsToolCalling(this.plugin.settings);
 		if (!toolSupported) {
 			searchBtn.disabled = true;
-			searchBtn.style.opacity = '0.5';
-			searchBtn.style.cursor = 'not-allowed';
+			searchBtn.addClass('sgb-btn-disabled');
 
-			const warningEl = contentEl.createDiv({ cls: 'smart-search-warning' });
-			warningEl.style.padding = '10px';
-			warningEl.style.marginBottom = '12px';
-			warningEl.style.backgroundColor = 'var(--background-modifier-error)';
-			warningEl.style.borderRadius = '4px';
-			warningEl.style.color = 'var(--text-error)';
-			warningEl.innerHTML = `
-				<strong>Model not supported:</strong> The current model (<code>${this.getCurrentModelName()}</code>) has limited tool calling support.
-				<br>Smart Search requires tool calling. Please switch to a compatible model in settings.
-			`;
+			const warningEl = contentEl.createDiv({ cls: 'sgb-smart-search-warning' });
+			warningEl.createEl('strong', { text: 'Model not supported:' });
+			warningEl.appendText(' The current model (');
+			warningEl.createEl('code', { text: this.getCurrentModelName() });
+			warningEl.appendText(') has limited tool calling support.');
+			warningEl.createEl('br');
+			warningEl.appendText('Smart Search requires tool calling. Please switch to a compatible model in settings.');
 		}
 
 		// Status indicator
-		this.statusEl = contentEl.createDiv({ cls: 'smart-search-status' });
-		this.statusEl.style.display = 'none';
-		this.statusEl.style.padding = '10px';
-		this.statusEl.style.color = 'var(--text-muted)';
-		this.statusEl.style.fontStyle = 'italic';
+		this.statusEl = contentEl.createDiv({ cls: 'sgb-smart-search-status' });
 
 		// Results area
 		this.resultsEl = contentEl.createDiv({ cls: 'smart-search-results' });
 
 		// Event handlers
-		searchBtn.addEventListener('click', () => this.performSearch());
+		searchBtn.addEventListener('click', () => void this.performSearch());
 		this.inputEl.addEventListener('keydown', (e) => {
 			if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
 				e.preventDefault();
@@ -130,7 +109,7 @@ export class SmartSearchModal extends Modal {
 
 		this.isSearching = true;
 		this.resultsEl.empty();
-		this.statusEl.style.display = 'block';
+		this.statusEl.addClass('visible');
 		this.statusEl.setText('Initializing...');
 
 		try {
@@ -156,7 +135,7 @@ export class SmartSearchModal extends Modal {
 		} finally {
 			this.isSearching = false;
 			if (this.statusEl) {
-				this.statusEl.style.display = 'none';
+				this.statusEl.removeClass('visible');
 			}
 		}
 	}
@@ -178,7 +157,7 @@ export class SmartSearchModal extends Modal {
 		// Relevant nodes section
 		if (result.relevantNodes.length > 0) {
 			const nodesSection = this.resultsEl.createDiv({ cls: 'smart-search-nodes-section' });
-			nodesSection.createEl('h3', { text: 'Relevant Entities', cls: 'smart-search-section-title' });
+			nodesSection.createEl('h3', { text: 'Relevant entities', cls: 'smart-search-section-title' });
 
 			const nodesList = nodesSection.createEl('ul', { cls: 'smart-search-nodes-list' });
 			for (const node of result.relevantNodes) {
@@ -187,7 +166,7 @@ export class SmartSearchModal extends Modal {
 				// Left side: badge + clickable name
 				const nameContainer = item.createDiv({ cls: 'smart-search-node-name-container' });
 				const badge = nameContainer.createEl('span', { cls: 'smart-search-label-badge', text: node.label });
-				badge.style.backgroundColor = this.getLabelColor(node.label);
+				badge.style.backgroundColor = getEntityTypeColor(node.label);
 				const nameLink = nameContainer.createEl('a', { cls: 'smart-search-node-link', text: node.name });
 				nameLink.setAttribute('href', '#');
 				nameLink.addEventListener('click', (e) => {
@@ -210,7 +189,7 @@ export class SmartSearchModal extends Modal {
 		// Source notes section
 		if (result.sourceNotes.length > 0) {
 			const notesSection = this.resultsEl.createDiv({ cls: 'smart-search-notes-section' });
-			notesSection.createEl('h3', { text: 'Source Notes', cls: 'smart-search-section-title' });
+			notesSection.createEl('h3', { text: 'Source notes', cls: 'smart-search-section-title' });
 
 			const notesList = notesSection.createEl('ul', { cls: 'smart-search-notes-list' });
 			for (const note of result.sourceNotes) {
@@ -221,7 +200,7 @@ export class SmartSearchModal extends Modal {
 				link.setAttribute('href', '#');
 				link.addEventListener('click', (e) => {
 					e.preventDefault();
-					this.app.workspace.openLinkText(note.path, '', false);
+					void this.app.workspace.openLinkText(note.path, '', false);
 					this.close();
 				});
 
@@ -241,46 +220,6 @@ export class SmartSearchModal extends Modal {
 				text: 'No results found. Try a different query.',
 			});
 		}
-	}
-
-	/**
-	 * Get color for a label (consistent with graph-view and neighborhood-view).
-	 */
-	private getLabelColor(label: string): string {
-		const LABEL_COLORS: Record<string, string> = {
-			Person: '#6366f1',
-			Organization: '#8b5cf6',
-			Team: '#a78bfa',
-			Concept: '#14b8a6',
-			Theory: '#2dd4bf',
-			Method: '#5eead4',
-			Technique: '#67e8f9',
-			Project: '#a855f7',
-			Product: '#c084fc',
-			System: '#d8b4fe',
-			Tool: '#f59e0b',
-			Library: '#fbbf24',
-			Framework: '#fcd34d',
-			Software: '#fde68a',
-			Event: '#f472b6',
-			Meeting: '#f9a8d4',
-			Conference: '#fbcfe8',
-			Document: '#60a5fa',
-			Paper: '#93c5fd',
-			Book: '#bfdbfe',
-			Place: '#4ade80',
-			Location: '#86efac',
-		};
-
-		if (LABEL_COLORS[label]) return LABEL_COLORS[label];
-
-		// Hash-based color generation for unknown labels
-		let hash = 0;
-		for (let i = 0; i < label.length; i++) {
-			hash = label.charCodeAt(i) + ((hash << 5) - hash);
-		}
-		const hue = Math.abs(hash) % 360;
-		return `hsl(${hue}, 70%, 60%)`;
 	}
 
 	/**

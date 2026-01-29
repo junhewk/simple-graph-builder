@@ -1,6 +1,5 @@
 import { App, Modal, Setting, Notice } from 'obsidian';
 import { OntologyNode } from '../types';
-import { GraphCache } from '../graph/cache';
 import { EntityResolver } from '../graph/resolver';
 import type SimpleGraphBuilderPlugin from '../main';
 
@@ -26,15 +25,15 @@ export class EntityMergeModal extends Modal {
 		contentEl.empty();
 		contentEl.addClass('entity-merge-modal');
 
-		contentEl.createEl('h2', { text: 'Merge Entity' });
+		contentEl.createEl('h2', { text: 'Merge entity' });
 
 		// Source entity info
 		const sourceSection = contentEl.createDiv({ cls: 'entity-merge-source' });
-		sourceSection.createEl('h4', { text: 'Source Entity (will be merged into target)' });
+		sourceSection.createEl('h4', { text: 'Source entity (will be merged into target)' });
 
 		const sourceInfo = sourceSection.createDiv({ cls: 'entity-info' });
 		sourceInfo.createEl('span', { text: this.sourceNode.properties.name, cls: 'entity-name' });
-		sourceInfo.createEl('span', { text: this.sourceNode.label, cls: 'entity-label' });
+		sourceInfo.createEl('span', { text: this.sourceNode.entityType || this.sourceNode.label || 'CONCEPT', cls: 'entity-label' });
 
 		if (this.sourceNode.properties.aliases && this.sourceNode.properties.aliases.length > 0) {
 			const aliasesEl = sourceSection.createDiv({ cls: 'entity-aliases' });
@@ -47,7 +46,7 @@ export class EntityMergeModal extends Modal {
 
 		// Target entity search
 		const targetSection = contentEl.createDiv({ cls: 'entity-merge-target' });
-		targetSection.createEl('h4', { text: 'Target Entity (will receive the merge)' });
+		targetSection.createEl('h4', { text: 'Target entity (will receive the merge)' });
 
 		new Setting(targetSection)
 			.setName('Search for target entity')
@@ -135,7 +134,7 @@ export class EntityMergeModal extends Modal {
 		for (const node of this.searchResults) {
 			const resultEl = container.createDiv({ cls: 'entity-search-result' });
 			resultEl.createEl('span', { text: node.properties.name, cls: 'entity-name' });
-			resultEl.createEl('span', { text: node.label, cls: 'entity-label' });
+			resultEl.createEl('span', { text: node.entityType || node.label || 'CONCEPT', cls: 'entity-label' });
 
 			const aliases = node.properties.aliases || [];
 			if (aliases.length > 0) {
@@ -165,11 +164,11 @@ export class EntityMergeModal extends Modal {
 			return;
 		}
 
-		container.createEl('h5', { text: 'Selected Target:' });
+		container.createEl('h5', { text: 'Selected target:' });
 
 		const targetInfo = container.createDiv({ cls: 'entity-info selected' });
 		targetInfo.createEl('span', { text: this.targetNode.properties.name, cls: 'entity-name' });
-		targetInfo.createEl('span', { text: this.targetNode.label, cls: 'entity-label' });
+		targetInfo.createEl('span', { text: this.targetNode.entityType || this.targetNode.label || 'CONCEPT', cls: 'entity-label' });
 
 		const aliases = this.targetNode.properties.aliases || [];
 		if (aliases.length > 0) {
@@ -189,9 +188,8 @@ export class EntityMergeModal extends Modal {
 		if (!this.targetNode) return;
 
 		try {
-			// Use the EntityResolver to perform the merge
 			const resolver = new EntityResolver(this.plugin.graphCache, this.plugin.settings);
-			const success = await resolver.mergeEntities(this.sourceNode.id, this.targetNode.id);
+			const success = resolver.mergeEntities(this.sourceNode.id, this.targetNode.id);
 
 			if (success) {
 				await this.plugin.graphCache.flush();

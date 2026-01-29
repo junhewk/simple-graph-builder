@@ -111,7 +111,7 @@ export async function executeSmartSearch(
 
 			try {
 				return parseSmartSearchResponse(response.content || '');
-			} catch (e) {
+			} catch {
 				// If parsing fails, return the raw response
 				return {
 					answer: response.content || 'No answer generated.',
@@ -161,7 +161,7 @@ async function callLLMWithTools(
 			// Ollama tool use support varies by model
 			return callOllamaWithTools(ollamaHost || 'http://localhost:11434', model, messages, tools);
 		default:
-			throw new Error(`Unknown provider: ${provider}`);
+			throw new Error(`Unknown provider: ${provider as string}`);
 	}
 }
 
@@ -414,8 +414,11 @@ async function callGeminiWithTools(
 		requestBody.systemInstruction = { parts: [{ text: systemMessage.content }] };
 	}
 
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
-	let data: any;
+	interface GeminiResponse {
+		candidates?: Array<{ content?: { parts?: Array<{ text?: string; functionCall?: { name: string; args: unknown } }> }; finishReason?: string }>;
+		error?: { message?: string };
+	}
+	let data: GeminiResponse;
 	try {
 		const res = await requestUrl({
 			url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -531,7 +534,7 @@ async function callOllamaWithTools(
 		}
 
 		return { content: data.message?.content || '' };
-	} catch (e) {
+	} catch {
 		// Fall back to simple generate if chat doesn't work
 		const prompt = messages.map(m => `${m.role}: ${m.content}`).join('\n\n');
 
@@ -585,7 +588,7 @@ function parseSmartSearchResponse(response: string): SmartSearchResult {
 			relevantNodes: Array.isArray(parsed.relevantNodes) ? parsed.relevantNodes : [],
 			sourceNotes: Array.isArray(parsed.sourceNotes) ? parsed.sourceNotes : [],
 		};
-	} catch (e) {
+	} catch {
 		// If JSON parsing fails, return the raw text as the answer
 		return {
 			answer: response,

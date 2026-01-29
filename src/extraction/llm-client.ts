@@ -1,6 +1,6 @@
-import { ApiProvider, EmbeddingProvider, OntologyExtractionResult, Settings, RelationshipType, isValidRelationshipType } from '../types';
+import { ApiProvider, EmbeddingProvider, OntologyExtractionResult, Settings, EntityType, ExtractionMode, isValidEntityType, RawExtractionNode, RawExtractionRelationship } from '../types';
 import { requestUrl, Vault } from 'obsidian';
-import { getEmbeddingDimensions } from '../settings';
+import { chunkContent, buildExtractionPrompt } from './prompts';
 
 export interface ExtractionError {
 	type: 'api_error' | 'parse_error' | 'config_error' | 'rate_limit';
@@ -22,7 +22,7 @@ export async function extractOntology(
 	options: ExtractionOptions,
 	prompt: string
 ): Promise<OntologyExtractionResult> {
-	const { provider, apiKey, model, ollamaHost } = options;
+	const { provider, apiKey, model } = options;
 
 	// Ollama doesn't need an API key
 	if (provider !== 'ollama' && !apiKey) {
@@ -42,6 +42,95 @@ export async function extractOntology(
 		}
 		throw handleApiError(e, provider);
 	}
+}
+
+/**
+ * Extract ontology with chunked content for better handling of long notes.
+ * Processes chunks in parallel (max 3 concurrent) and merges results.
+ */
+export async function extractOntologyChunked(
+	options: ExtractionOptions,
+	content: string,
+	existingNodeNames: string[],
+	mode: ExtractionMode
+): Promise<{ result: OntologyExtractionResult; chunkCount: number }> {
+	const chunks = chunkContent(content, 500);
+
+	if (chunks.length === 1) {
+		// Single chunk, no need for parallel processing
+		const prompt = buildExtractionPrompt(chunks[0], existingNodeNames, mode);
+		const result = await extractOntology(options, prompt);
+		return { result, chunkCount: 1 };
+	}
+
+	// Process in parallel with max 3 concurrent
+	const maxConcurrent = 3;
+	const results: OntologyExtractionResult[] = [];
+
+	for (let i = 0; i < chunks.length; i += maxConcurrent) {
+		const batch = chunks.slice(i, i + maxConcurrent);
+		const batchResults = await Promise.all(
+			batch.map(async (chunk, batchIndex) => {
+				const prompt = buildExtractionPrompt(chunk, existingNodeNames, mode);
+				try {
+					return await extractOntology(options, prompt);
+				} catch (e) {
+					console.warn(`Chunk ${i + batchIndex + 1} extraction failed:`, e);
+					return { nodes: [], relationships: [] };
+				}
+			})
+		);
+		results.push(...batchResults);
+	}
+
+	return { result: mergeChunkResults(results), chunkCount: chunks.length };
+}
+
+/**
+ * Merge extraction results from multiple chunks.
+ * Deduplicates nodes by name (case-insensitive).
+ */
+function mergeChunkResults(results: OntologyExtractionResult[]): OntologyExtractionResult {
+	const seenNames = new Set<string>();
+	const nodes: RawExtractionNode[] = [];
+	const relationships: RawExtractionRelationship[] = [];
+	let nodeIdCounter = 1;
+
+	for (const result of results) {
+		// Re-map node IDs to avoid conflicts
+		const idMap = new Map<string, string>();
+
+		for (const node of result.nodes) {
+			const key = node.properties.name.toLowerCase();
+			if (!seenNames.has(key)) {
+				seenNames.add(key);
+				const newId = String(nodeIdCounter++);
+				idMap.set(node.id, newId);
+				nodes.push({ ...node, id: newId });
+			} else {
+				// Find existing node with same name and map to its ID
+				const existing = nodes.find(n => n.properties.name.toLowerCase() === key);
+				if (existing) {
+					idMap.set(node.id, existing.id);
+				}
+			}
+		}
+
+		// Remap relationship source/target IDs
+		for (const rel of result.relationships) {
+			const newSource = idMap.get(rel.source);
+			const newTarget = idMap.get(rel.target);
+			if (newSource && newTarget) {
+				relationships.push({
+					...rel,
+					source: newSource,
+					target: newTarget,
+				});
+			}
+		}
+	}
+
+	return { nodes, relationships };
 }
 
 /**
@@ -88,7 +177,7 @@ async function callLLMProvider(options: ExtractionOptions, prompt: string): Prom
 		case 'ollama':
 			return callOllama(ollamaHost || 'http://localhost:11434', model, prompt);
 		default:
-			throw createError('config_error', `Unknown provider: ${provider}`);
+			throw createError('config_error', `Unknown provider: ${provider as string}`);
 	}
 }
 
@@ -156,7 +245,7 @@ async function callOpenAI(apiKey: string, model: string, prompt: string): Promis
 }
 
 async function callGemini(apiKey: string, model: string, prompt: string): Promise<string> {
-	console.log(`[Gemini] Calling model: ${model}, prompt length: ${prompt.length} chars`);
+	console.debug(`[Gemini] Calling model: ${model}, prompt length: ${prompt.length} chars`);
 
 	const res = await requestUrl({
 		url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
@@ -182,10 +271,10 @@ async function callGemini(apiKey: string, model: string, prompt: string): Promis
 	const candidate = data.candidates?.[0];
 
 	// Debug logging
-	console.log(`[Gemini] Response finishReason: ${candidate?.finishReason}`);
-	console.log(`[Gemini] Response text length: ${candidate?.content?.parts?.[0]?.text?.length || 0} chars`);
+	console.debug(`[Gemini] Response finishReason: ${candidate?.finishReason}`);
+	console.debug(`[Gemini] Response text length: ${candidate?.content?.parts?.[0]?.text?.length || 0} chars`);
 	if (data.usageMetadata) {
-		console.log(`[Gemini] Usage: prompt=${data.usageMetadata.promptTokenCount}, output=${data.usageMetadata.candidatesTokenCount}, total=${data.usageMetadata.totalTokenCount}`);
+		console.debug(`[Gemini] Usage: prompt=${data.usageMetadata.promptTokenCount}, output=${data.usageMetadata.candidatesTokenCount}, total=${data.usageMetadata.totalTokenCount}`);
 	}
 
 	if (!candidate?.content?.parts?.[0]?.text) {
@@ -268,7 +357,7 @@ export async function getEmbeddings(
 			case 'ollama':
 				return await callOllamaEmbeddings(ollamaHost || 'http://localhost:11434', model, texts);
 			default:
-				throw createError('config_error', `Unknown embedding provider: ${provider}`);
+				throw createError('config_error', `Unknown embedding provider: ${provider as string}`);
 		}
 	} catch (e) {
 		if (e instanceof Error && 'type' in e) {
@@ -555,7 +644,7 @@ export async function loadEmbeddingsBinary(
 		}
 	} catch {
 		// File doesn't exist or can't be read
-		console.log('No embeddings file found, starting fresh');
+		console.debug('No embeddings file found, starting fresh');
 	}
 
 	return result;
@@ -604,11 +693,9 @@ Answer with ONLY "yes" or "no".
 // ============================================
 
 /**
- * Parse LLM response into OntologyExtractionResult.
- * Validates relationship types and normalizes the structure.
+ * Extract JSON string from LLM response, handling markdown code blocks.
  */
-function parseOntologyResponse(response: string): OntologyExtractionResult {
-	// Extract JSON from response (handle markdown code blocks)
+function extractJsonFromResponse(response: string): string {
 	let jsonStr = response.trim();
 
 	// Handle various markdown code block formats
@@ -625,71 +712,139 @@ function parseOntologyResponse(response: string): OntologyExtractionResult {
 		}
 	}
 
-	try {
-		const parsed = JSON.parse(jsonStr);
+	return jsonStr;
+}
 
-		// Validate and normalize nodes
-		const nodes = Array.isArray(parsed.nodes)
-			? parsed.nodes
-				.filter((n: unknown) => {
-					if (!n || typeof n !== 'object') return false;
-					const node = n as Record<string, unknown>;
-					return node.id && node.label &&
-						node.properties &&
-						typeof (node.properties as Record<string, unknown>).name === 'string';
-				})
-				.map((n: Record<string, unknown>) => ({
-					id: String(n.id),
-					label: String(n.label),
-					properties: {
-						name: String((n.properties as Record<string, unknown>).name),
-						...Object.fromEntries(
-							Object.entries(n.properties as Record<string, unknown>)
-								.filter(([k]: [string, unknown]) => k !== 'name')
-						)
-					}
-				}))
-			: [];
+/**
+ * Parse entities from parsed JSON object.
+ * Handles both new schema (entities) and legacy schema (nodes).
+ */
+function parseEntities(parsed: Record<string, unknown>): RawExtractionNode[] {
+	const rawEntities = (parsed.entities || parsed.nodes || []) as Record<string, unknown>[];
+	const nodes: RawExtractionNode[] = [];
+	let idCounter = 1;
 
-		// Validate and normalize relationships
-		const relationships = Array.isArray(parsed.relationships)
-			? parsed.relationships
-				.filter((r: unknown) => {
-					if (!r || typeof r !== 'object') return false;
-					const rel = r as Record<string, unknown>;
-					return rel.source && rel.target && rel.type &&
-						isValidRelationshipType(String(rel.type));
-				})
-				.map((r: Record<string, unknown>) => ({
-					source: String(r.source),
-					target: String(r.target),
-					type: String(r.type) as RelationshipType,
-					properties: {
-						detail: r.properties && typeof (r.properties as Record<string, unknown>).detail === 'string'
-							? String((r.properties as Record<string, unknown>).detail)
-							: 'related',
-						...Object.fromEntries(
-							r.properties && typeof r.properties === 'object'
-								? Object.entries(r.properties as Record<string, unknown>)
-									.filter(([k]: [string, unknown]) => k !== 'detail')
-								: []
-						)
-					}
-				}))
-			: [];
+	for (const entity of rawEntities) {
+		if (!entity || typeof entity !== 'object') continue;
 
-		// Log warning for invalid relationship types that were filtered out
-		const invalidRelTypes = Array.isArray(parsed.relationships)
-			? (parsed.relationships as Record<string, unknown>[])
-				.filter(r => r.type && !isValidRelationshipType(String(r.type)))
-				.map(r => r.type)
-			: [];
-		if (invalidRelTypes.length > 0) {
-			console.warn('Filtered out invalid relationship types:', [...new Set(invalidRelTypes)]);
+		// Get name from either direct property or nested properties
+		const props = entity.properties as Record<string, unknown> | undefined;
+		const name = entity.name || props?.name;
+		if (!name || typeof name !== 'string') continue;
+
+		// Get entity type - try entity_type, then label, default to CONCEPT
+		let entityType: EntityType = 'CONCEPT';
+		const rawType = entity.entity_type || entity.entityType || entity.label;
+		if (rawType && typeof rawType === 'string') {
+			const upperType = rawType.toUpperCase();
+			if (isValidEntityType(upperType)) {
+				entityType = upperType as EntityType;
+			}
 		}
 
+		// Get description
+		const description = entity.description || props?.description;
+
+		nodes.push({
+			id: entity.id ? String(entity.id) : String(idCounter++),
+			entityType,
+			properties: {
+				name: String(name).trim(),
+				description: description ? String(description) : undefined,
+			}
+		});
+	}
+
+	return nodes;
+}
+
+/**
+ * Parse relationships from parsed JSON object.
+ * Resolves entity names to IDs using the provided name-to-id map.
+ */
+function parseRelationships(
+	parsed: Record<string, unknown>,
+	nodes: RawExtractionNode[],
+	nameToId: Map<string, string>
+): RawExtractionRelationship[] {
+	const rawRelationships = (parsed.relationships || []) as Record<string, unknown>[];
+	const relationships: RawExtractionRelationship[] = [];
+
+	for (const rel of rawRelationships) {
+		if (!rel || typeof rel !== 'object') continue;
+
+		// Source can be an ID or a name
+		let sourceId = rel.source ? String(rel.source) : '';
+		let targetId = rel.target ? String(rel.target) : '';
+
+		// Try to resolve names to IDs
+		if (sourceId && !nodes.find(n => n.id === sourceId)) {
+			const resolvedId = nameToId.get(sourceId.toLowerCase());
+			if (resolvedId) sourceId = resolvedId;
+		}
+		if (targetId && !nodes.find(n => n.id === targetId)) {
+			const resolvedId = nameToId.get(targetId.toLowerCase());
+			if (resolvedId) targetId = resolvedId;
+		}
+
+		if (!sourceId || !targetId) continue;
+
+		// Get relationship verb - try relationship, then type with conversion
+		let relationship = rel.relationship ? String(rel.relationship) : '';
+		if (!relationship && rel.type) {
+			// Convert legacy type to verb
+			const legacyTypeMap: Record<string, string> = {
+				'HAS_PART': 'contains',
+				'LEADS_TO': 'leads to',
+				'ACTED_ON': 'acts on',
+				'CITES': 'cites',
+				'RELATED_TO': 'relates to',
+			};
+			relationship = legacyTypeMap[String(rel.type).toUpperCase()] || String(rel.type);
+		}
+
+		if (!relationship) relationship = 'relates to';
+
+		const props = rel.properties as Record<string, unknown> | undefined;
+		const detail = rel.description || props?.detail;
+
+		relationships.push({
+			source: sourceId,
+			target: targetId,
+			relationship: relationship.toLowerCase(),
+			properties: {
+				detail: detail ? String(detail) : undefined,
+			}
+		});
+	}
+
+	return relationships;
+}
+
+/**
+ * Parse LLM response into OntologyExtractionResult.
+ * Handles both new schema (entities/relationships) and legacy schema (nodes/relationships).
+ */
+function parseOntologyResponse(response: string): OntologyExtractionResult {
+	const jsonStr = extractJsonFromResponse(response);
+
+	try {
+		const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
+
+		// Parse entities
+		const nodes = parseEntities(parsed);
+
+		// Build name-to-id map for relationship resolution
+		const nameToId = new Map<string, string>();
+		for (const node of nodes) {
+			nameToId.set(node.properties.name.toLowerCase(), node.id);
+		}
+
+		// Parse relationships
+		const relationships = parseRelationships(parsed, nodes, nameToId);
+
 		return { nodes, relationships };
-	} catch (e) {
+	} catch {
 		console.error('Failed to parse LLM response:', response);
 		throw createError('parse_error', 'Failed to parse extraction result from LLM', response.slice(0, 200));
 	}

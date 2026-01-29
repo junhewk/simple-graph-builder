@@ -4,13 +4,15 @@
  */
 
 import type { GraphCache } from './cache';
-import type {
+import {
 	OntologyEdge,
-	RelationshipType,
+	EntityType,
 	SearchNodeResult,
 	RelationshipResult,
 	ConnectedNodeResult,
 	SourceNoteResult,
+	getNodeEntityType,
+	getEdgeRelationship,
 } from '../types';
 
 // ============================================
@@ -19,7 +21,8 @@ import type {
 
 export interface NodeDetails {
 	name: string;
-	label: string;
+	entityType: EntityType;
+	label?: string;  // Legacy
 	properties: Record<string, unknown>;
 	sourceNotes: string[];
 }
@@ -133,7 +136,7 @@ function calculateMatchScore(query: string, name: string): number {
 export function searchNodes(
 	cache: GraphCache,
 	query: string,
-	label?: string
+	entityType?: string
 ): SearchNodeResult[] {
 	const results: SearchNodeResult[] = [];
 	const queryTrimmed = query.trim();
@@ -141,9 +144,12 @@ export function searchNodes(
 	if (!queryTrimmed) return [];
 
 	for (const node of cache.getAllNodes()) {
-		// Apply label filter if specified
-		if (label && node.label !== label) {
-			continue;
+		// Apply entity type filter if specified (check both entityType and legacy label)
+		if (entityType) {
+			const nodeType = node.entityType || node.label;
+			if (nodeType?.toUpperCase() !== entityType.toUpperCase()) {
+				continue;
+			}
 		}
 
 		const score = calculateMatchScore(queryTrimmed, node.properties.name);
@@ -151,6 +157,7 @@ export function searchNodes(
 		if (score > 0) {
 			results.push({
 				name: node.properties.name,
+				entityType: getNodeEntityType(node),
 				label: node.label,
 				score: Math.round(score * 100) / 100,
 			});
@@ -169,6 +176,7 @@ export function getNode(cache: GraphCache, name: string): NodeDetails | null {
 
 	return {
 		name: node.properties.name,
+		entityType: getNodeEntityType(node),
 		label: node.label,
 		properties: { ...node.properties },
 		sourceNotes: [...node.sourceNotes],
@@ -176,13 +184,13 @@ export function getNode(cache: GraphCache, name: string): NodeDetails | null {
 }
 
 /**
- * Get relationships for a node, optionally filtered by direction and type.
+ * Get relationships for a node, optionally filtered by direction.
+ * Relationships are now free-form verbs.
  */
 export function getRelationships(
 	cache: GraphCache,
 	nodeName: string,
-	direction: 'outgoing' | 'incoming' | 'both' = 'both',
-	type?: RelationshipType
+	direction: 'outgoing' | 'incoming' | 'both' = 'both'
 ): RelationshipResult[] {
 	const node = cache.getNodeByName(nodeName);
 	if (!node) return [];
@@ -192,15 +200,14 @@ export function getRelationships(
 	// Get outgoing edges (where this node is the source)
 	if (direction === 'outgoing' || direction === 'both') {
 		for (const edge of cache.getEdgesBySource(node.id)) {
-			if (type && edge.type !== type) continue;
-
 			const targetNode = cache.getNodeById(edge.target);
 			if (targetNode) {
 				results.push({
 					from: node.properties.name,
 					to: targetNode.properties.name,
+					relationship: getEdgeRelationship(edge),
 					type: edge.type,
-					detail: edge.properties.detail,
+					detail: edge.properties?.detail,
 				});
 			}
 		}
@@ -209,15 +216,14 @@ export function getRelationships(
 	// Get incoming edges (where this node is the target)
 	if (direction === 'incoming' || direction === 'both') {
 		for (const edge of cache.getEdgesByTarget(node.id)) {
-			if (type && edge.type !== type) continue;
-
 			const sourceNode = cache.getNodeById(edge.source);
 			if (sourceNode) {
 				results.push({
 					from: sourceNode.properties.name,
 					to: node.properties.name,
+					relationship: getEdgeRelationship(edge),
 					type: edge.type,
-					detail: edge.properties.detail,
+					detail: edge.properties?.detail,
 				});
 			}
 		}
@@ -265,6 +271,7 @@ export function getConnectedNodes(
 					const newPath = [...path, neighborNode.properties.name];
 					results.push({
 						name: neighborNode.properties.name,
+						entityType: getNodeEntityType(neighborNode),
 						label: neighborNode.label,
 						path: newPath,
 					});
@@ -306,7 +313,7 @@ export function findPath(
 	fromName: string,
 	toName: string,
 	maxHops = 4
-): { found: boolean; path: Array<{ node: string; via?: RelationshipType; detail?: string }> } {
+): { found: boolean; path: Array<{ node: string; via?: string; detail?: string }> } {
 	const startNode = cache.getNodeByName(fromName);
 	const endNode = cache.getNodeByName(toName);
 
@@ -328,7 +335,7 @@ export function findPath(
 
 		if (currentId === endNode.id) {
 			// Reconstruct path
-			const path: Array<{ node: string; via?: RelationshipType; detail?: string }> = [];
+			const path: Array<{ node: string; via?: string; detail?: string }> = [];
 			let id: string | null = endNode.id;
 
 			while (id) {
@@ -338,8 +345,8 @@ export function findPath(
 				if (node) {
 					path.unshift({
 						node: node.properties.name,
-						via: entry?.edge?.type,
-						detail: entry?.edge?.properties.detail,
+						via: entry?.edge?.relationship || entry?.edge?.type,
+						detail: entry?.edge?.properties?.detail,
 					});
 				}
 
@@ -395,7 +402,7 @@ export function executeToolCall(cache: GraphCache, toolCall: ToolCall): ToolResu
 				result: searchNodes(
 					cache,
 					args.query as string,
-					args.label as string | undefined
+					(args.entity_type || args.label) as string | undefined
 				),
 			};
 
@@ -411,8 +418,7 @@ export function executeToolCall(cache: GraphCache, toolCall: ToolCall): ToolResu
 				result: getRelationships(
 					cache,
 					args.node_name as string,
-					args.direction as 'outgoing' | 'incoming' | 'both' | undefined,
-					args.type as RelationshipType | undefined
+					args.direction as 'outgoing' | 'incoming' | 'both' | undefined
 				),
 			};
 
@@ -445,8 +451,8 @@ export function executeToolCall(cache: GraphCache, toolCall: ToolCall): ToolResu
 
 		default:
 			return {
-				name,
-				result: { error: `Unknown tool: ${name}` },
+				name: name as ToolName,
+				result: { error: `Unknown tool: ${name as string}` },
 			};
 	}
 }

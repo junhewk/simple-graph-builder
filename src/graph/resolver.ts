@@ -1,4 +1,4 @@
-import { OntologyNode, RawExtractionNode, ResolutionResult, ResolutionStats, Settings } from '../types';
+import { OntologyNode, RawExtractionNode, ResolutionResult, ResolutionStats, Settings, getNodeEntityType, getEdgeRelationship } from '../types';
 import { GraphCache } from './cache';
 import { getEmbeddings, settingsToEmbeddingOptions, verifyEntityMatch, settingsToExtractionOptions, EmbeddingOptions } from '../extraction/llm-client';
 import { generateNodeId, generateEdgeId } from './merge';
@@ -131,7 +131,7 @@ export class EntityResolver {
 	 * Create a "new entity" resolution result.
 	 */
 	private createNewEntityResult(rawNode: RawExtractionNode, lowerName: string): ResolutionResult {
-		const nodeId = generateNodeId(rawNode.label, rawNode.properties.name);
+		const nodeId = generateNodeId(rawNode.entityType, rawNode.properties.name);
 		this.stats.new++;
 		const result: ResolutionResult = {
 			nodeId,
@@ -238,7 +238,7 @@ export class EntityResolver {
 		const highMatches = this.cache.findSimilarByEmbedding(
 			queryEmbedding,
 			this.settings.resolutionThresholdHigh,
-			rawNode.label
+			rawNode.entityType
 		);
 
 		if (highMatches.length > 0) {
@@ -263,7 +263,7 @@ export class EntityResolver {
 				queryEmbedding,
 				this.settings.resolutionThresholdLow,
 				this.settings.resolutionThresholdHigh,
-				rawNode.label
+				rawNode.entityType
 			);
 
 			for (const candidate of candidates) {
@@ -271,12 +271,12 @@ export class EntityResolver {
 					settingsToExtractionOptions(this.settings),
 					{
 						name,
-						label: rawNode.label,
-						description: rawNode.properties.description as string | undefined,
+						label: rawNode.entityType,
+						description: rawNode.properties.description,
 					},
 					{
 						name: candidate.node.properties.name,
-						label: candidate.node.label,
+						label: getNodeEntityType(candidate.node),
 						description: candidate.node.properties.description as string | undefined,
 					}
 				);
@@ -298,7 +298,7 @@ export class EntityResolver {
 		}
 
 		// No match found - store embedding for the new entity
-		const nodeId = generateNodeId(rawNode.label, name);
+		const nodeId = generateNodeId(rawNode.entityType, name);
 		this.cache.setEmbedding(nodeId, queryEmbedding);
 
 		return null;
@@ -352,7 +352,7 @@ export class EntityResolver {
 	 * Merge an entity into another (manual merge).
 	 * The source entity's name becomes an alias of the target.
 	 */
-	async mergeEntities(sourceNodeId: string, targetNodeId: string): Promise<boolean> {
+	mergeEntities(sourceNodeId: string, targetNodeId: string): boolean {
 		const sourceNode = this.cache.getNodeById(sourceNodeId);
 		const targetNode = this.cache.getNodeById(targetNodeId);
 
@@ -421,18 +421,19 @@ export class EntityResolver {
 		const sourceEdges = this.cache.getConnectedEdges(sourceNodeId);
 
 		for (const edge of sourceEdges) {
+			const relationship = getEdgeRelationship(edge);
 			if (edge.source === sourceNodeId && edge.target !== targetNodeId) {
 				const existingEdges = this.cache.getEdgesBySource(targetNodeId);
-				const exists = existingEdges.some(e => e.target === edge.target && e.type === edge.type);
+				const exists = existingEdges.some(e => e.target === edge.target && (e.relationship || e.type) === relationship);
 				if (!exists) {
-					const newEdgeId = generateEdgeId(targetNodeId, edge.target, edge.type);
+					const newEdgeId = generateEdgeId(targetNodeId, edge.target, relationship);
 					this.cache.addEdge({ ...edge, source: targetNodeId, id: newEdgeId });
 				}
 			} else if (edge.target === sourceNodeId && edge.source !== targetNodeId) {
 				const existingEdges = this.cache.getEdgesByTarget(targetNodeId);
-				const exists = existingEdges.some(e => e.source === edge.source && e.type === edge.type);
+				const exists = existingEdges.some(e => e.source === edge.source && (e.relationship || e.type) === relationship);
 				if (!exists) {
-					const newEdgeId = generateEdgeId(edge.source, targetNodeId, edge.type);
+					const newEdgeId = generateEdgeId(edge.source, targetNodeId, relationship);
 					this.cache.addEdge({ ...edge, target: targetNodeId, id: newEdgeId });
 				}
 			}

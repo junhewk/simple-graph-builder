@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, MarkdownView } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
-import { OntologyNode, OntologyEdge } from '../types';
+import { OntologyNode, OntologyEdge, getEntityTypeColor } from '../types';
 
 export const NEIGHBORHOOD_VIEW_TYPE = 'simple-graph-neighborhood';
 
@@ -33,13 +33,13 @@ export class NeighborhoodView extends ItemView {
 		return 'network';
 	}
 
-	async onOpen() {
+	async onOpen(): Promise<void> {
 		const container = this.containerEl.children[1];
 		container.empty();
 		container.addClass('neighborhood-view-container');
 
 		// Header
-		container.createEl('div', { cls: 'neighborhood-header', text: 'Note Neighborhood' });
+		container.createEl('div', { cls: 'neighborhood-header', text: 'Note neighborhood' });
 
 		// Content area
 		this.neighborhoodContentEl = container.createDiv({ cls: 'neighborhood-content' });
@@ -85,17 +85,19 @@ export class NeighborhoodView extends ItemView {
 				cls: 'neighborhood-analyze-btn',
 				text: 'Analyze this note',
 			});
-			analyzeBtn.addEventListener('click', async () => {
-				const { analyzeCurrentNote } = await import('../commands/analyze');
-				await analyzeCurrentNote(this.plugin);
-				this.refresh();
+			analyzeBtn.addEventListener('click', () => {
+				void (async () => {
+					const { analyzeCurrentNote } = await import('../commands/analyze');
+					await analyzeCurrentNote(this.plugin);
+					this.refresh();
+				})();
 			});
 			return;
 		}
 
 		// Render current note info
 		const currentSection = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-section' });
-		currentSection.createEl('div', { cls: 'neighborhood-section-title', text: 'Current Note' });
+		currentSection.createEl('div', { cls: 'neighborhood-section-title', text: 'Current note' });
 		currentSection.createEl('div', { cls: 'neighborhood-current-note', text: file.basename });
 
 		// Get all connected nodes (from this note's nodes)
@@ -116,25 +118,25 @@ export class NeighborhoodView extends ItemView {
 			}
 		}
 
-		// Group connections by label
-		const connectionsByLabel = new Map<string, ConnectionInfo[]>();
+		// Group connections by entity type
+		const connectionsByType = new Map<string, ConnectionInfo[]>();
 		for (const connection of connectionMap.values()) {
-			const label = connection.node.label;
-			if (!connectionsByLabel.has(label)) {
-				connectionsByLabel.set(label, []);
+			const entityType = connection.node.entityType || connection.node.label || 'CONCEPT';
+			if (!connectionsByType.has(entityType)) {
+				connectionsByType.set(entityType, []);
 			}
-			connectionsByLabel.get(label)!.push(connection);
+			connectionsByType.get(entityType)!.push(connection);
 		}
 
 		// Render nodes extracted from this note
 		this.renderExtractedNodes(nodesFromNote);
 
-		// Render connections by label (sorted by count)
-		const sortedLabels = Array.from(connectionsByLabel.entries())
+		// Render connections by entity type (sorted by count)
+		const sortedTypes = Array.from(connectionsByType.entries())
 			.sort((a, b) => b[1].length - a[1].length);
 
-		for (const [label, connections] of sortedLabels) {
-			this.renderConnectionSection(label, connections);
+		for (const [entityType, connections] of sortedTypes) {
+			this.renderConnectionSection(entityType, connections);
 		}
 
 		// Show empty state if no connections
@@ -161,22 +163,23 @@ export class NeighborhoodView extends ItemView {
 		const list = section.createEl('ul', { cls: 'neighborhood-list' });
 		for (const node of nodes) {
 			const item = list.createEl('li', { cls: 'neighborhood-item neighborhood-item-extracted' });
-			const labelBadge = item.createEl('span', { cls: 'neighborhood-label-badge', text: node.label });
-			labelBadge.style.backgroundColor = this.getLabelColor(node.label);
+			const entityType = node.entityType || node.label || 'CONCEPT';
+			const labelBadge = item.createEl('span', { cls: 'neighborhood-label-badge', text: entityType });
+			labelBadge.style.backgroundColor = getEntityTypeColor(entityType);
 			item.createEl('span', { cls: 'neighborhood-link', text: node.properties.name });
 		}
 	}
 
 	/**
-	 * Render a section of connections grouped by label.
+	 * Render a section of connections grouped by entity type.
 	 */
-	private renderConnectionSection(label: string, connections: ConnectionInfo[]): void {
+	private renderConnectionSection(entityType: string, connections: ConnectionInfo[]): void {
 		if (!this.neighborhoodContentEl) return;
 
 		const section = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-section' });
 		section.createEl('div', {
 			cls: 'neighborhood-section-title',
-			text: `${label} (${connections.length})`,
+			text: `${entityType} (${connections.length})`,
 		});
 
 		const list = section.createEl('ul', { cls: 'neighborhood-list' });
@@ -190,7 +193,7 @@ export class NeighborhoodView extends ItemView {
 
 			// Show relationship info on hover
 			const edgeInfo = connection.edges
-				.map(e => `${e.type}: ${e.properties.detail}`)
+				.map(e => `${e.relationship || e.type}: ${e.properties?.detail || ''}`)
 				.slice(0, 3)
 				.join('; ');
 			link.setAttr('aria-label', edgeInfo || 'Connected');
@@ -217,8 +220,9 @@ export class NeighborhoodView extends ItemView {
 		const popup = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-popup' });
 
 		const header = popup.createDiv({ cls: 'neighborhood-popup-header' });
-		const labelBadge = header.createEl('span', { cls: 'neighborhood-label-badge', text: node.label });
-		labelBadge.style.backgroundColor = this.getLabelColor(node.label);
+		const entityType = node.entityType || node.label || 'CONCEPT';
+		const labelBadge = header.createEl('span', { cls: 'neighborhood-label-badge', text: entityType });
+		labelBadge.style.backgroundColor = getEntityTypeColor(entityType);
 		header.createEl('span', { text: node.properties.name });
 		const closeBtn = header.createEl('button', { cls: 'neighborhood-popup-close', text: '×' });
 		closeBtn.addEventListener('click', () => popup.remove());
@@ -248,56 +252,20 @@ export class NeighborhoodView extends ItemView {
 				const targetNode = this.plugin.graphCache.getNodeById(edge.target);
 				if (sourceNode && targetNode) {
 					const relItem = relList.createEl('li', { cls: 'neighborhood-relationship' });
-					relItem.innerHTML = `<span class="rel-from">${sourceNode.properties.name}</span>
-						<span class="rel-type">${edge.type}</span>
-						<span class="rel-to">${targetNode.properties.name}</span>
-						<span class="rel-detail">${edge.properties.detail}</span>`;
+					const relationship = edge.relationship || edge.type || 'relates to';
+					const detail = edge.properties?.detail || '';
+					relItem.createEl('span', { cls: 'rel-from', text: sourceNode.properties.name });
+					relItem.createEl('span', { cls: 'rel-type', text: relationship });
+					relItem.createEl('span', { cls: 'rel-to', text: targetNode.properties.name });
+					if (detail) {
+						relItem.createEl('span', { cls: 'rel-detail', text: detail });
+					}
 				}
 			}
 		}
 	}
 
-	/**
-	 * Get color for a label (consistent with graph-view).
-	 */
-	private getLabelColor(label: string): string {
-		const LABEL_COLORS: Record<string, string> = {
-			Person: '#6366f1',
-			Organization: '#8b5cf6',
-			Team: '#a78bfa',
-			Concept: '#14b8a6',
-			Theory: '#2dd4bf',
-			Method: '#5eead4',
-			Technique: '#67e8f9',
-			Project: '#a855f7',
-			Product: '#c084fc',
-			System: '#d8b4fe',
-			Tool: '#f59e0b',
-			Library: '#fbbf24',
-			Framework: '#fcd34d',
-			Software: '#fde68a',
-			Event: '#f472b6',
-			Meeting: '#f9a8d4',
-			Conference: '#fbcfe8',
-			Document: '#60a5fa',
-			Paper: '#93c5fd',
-			Book: '#bfdbfe',
-			Place: '#4ade80',
-			Location: '#86efac',
-		};
-
-		if (LABEL_COLORS[label]) return LABEL_COLORS[label];
-
-		// Hash-based color generation for unknown labels
-		let hash = 0;
-		for (let i = 0; i < label.length; i++) {
-			hash = label.charCodeAt(i) + ((hash << 5) - hash);
-		}
-		const hue = Math.abs(hash) % 360;
-		return `hsl(${hue}, 70%, 60%)`;
-	}
-
-	async onClose() {
-		// Cleanup
+	async onClose(): Promise<void> {
+		// No cleanup needed - event listeners are managed by registerEvent
 	}
 }

@@ -592,3 +592,133 @@
 	padding-top: 1em;
 	border-top: 1px solid var(--background-modifier-border);
 }
+
+/* Settings Tab - Additional Styles */
+.sgb-setting-input-wide {
+	width: 180px;
+}
+
+.sgb-ollama-warning {
+	margin-top: 8px;
+	padding: 8px;
+	background: var(--background-modifier-message);
+	border-radius: 4px;
+}
+
+.sgb-resolution-info {
+	margin-bottom: 12px;
+}
+
+/* Graph View - Tooltip */
+.graph-tooltip {
+	position: absolute;
+	z-index: 1000;
+	pointer-events: none;
+	display: none;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 8px 12px;
+	font-size: 12px;
+	box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+.graph-tooltip.visible {
+	display: block;
+}
+
+.graph-tooltip .tooltip-label {
+	font-size: 10px;
+	text-transform: uppercase;
+	color: var(--text-muted);
+	margin-bottom: 2px;
+}
+
+.graph-tooltip .tooltip-name {
+	font-weight: 500;
+}
+
+.graph-tooltip .tooltip-sources {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 4px;
+}
+
+.graph-tooltip .tooltip-type {
+	font-weight: 500;
+}
+
+.graph-tooltip .tooltip-detail {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 2px;
+}
+
+.sgb-graph-container-relative {
+	position: relative;
+}
+
+/* Smart Search Modal - Additional Styles */
+.sgb-smart-search-content {
+	padding: 20px;
+}
+
+.sgb-smart-search-title {
+	margin: 0 0 8px 0;
+	font-size: 1.5em;
+	font-weight: 600;
+}
+
+.sgb-smart-search-desc {
+	margin: 0 0 16px 0;
+	color: var(--text-muted);
+	font-size: 0.9em;
+}
+
+.sgb-smart-search-input-container {
+	width: 100%;
+	margin-bottom: 12px;
+}
+
+.sgb-smart-search-textarea {
+	width: 100%;
+	box-sizing: border-box;
+	padding: 10px;
+	resize: vertical;
+}
+
+.sgb-smart-search-btn-container {
+	margin-bottom: 16px;
+}
+
+.sgb-smart-search-warning {
+	padding: 10px;
+	margin-bottom: 12px;
+	background: var(--background-modifier-error);
+	border-radius: 4px;
+	color: var(--text-error);
+}
+
+.sgb-smart-search-status {
+	display: none;
+	padding: 10px;
+	color: var(--text-muted);
+	font-style: italic;
+}
+
+.sgb-smart-search-status.visible {
+	display: block;
+}
+
+.sgb-btn-disabled {
+	opacity: 0.5;
+	cursor: not-allowed;
+}
+
+/* Confirm Modal */
+.modal-button-container {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	margin-top: 16px;
+}
