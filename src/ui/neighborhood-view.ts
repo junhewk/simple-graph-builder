@@ -159,7 +159,7 @@ export class NeighborhoodView extends ItemView {
 		const section = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-section' });
 		section.createEl('div', {
 			cls: 'neighborhood-section-title',
-			text: `Extracted Nodes (${nodes.length})`,
+			text: `Extracted nodes (${nodes.length})`,
 		});
 
 		const list = section.createEl('ul', { cls: 'neighborhood-list' });

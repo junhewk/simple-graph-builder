@@ -449,10 +449,12 @@ export function executeToolCall(cache: GraphCache, toolCall: ToolCall): ToolResu
 				),
 			};
 
-		default:
+		default: {
+			const unknownTool: string = name;
 			return {
-				name: name as ToolName,
-				result: { error: `Unknown tool: ${name as string}` },
+				name: unknownTool as ToolName,
+				result: { error: `Unknown tool: ${unknownTool}` },
 			};
+		}
 	}
 }

@@ -176,8 +176,10 @@ async function callLLMProvider(options: ExtractionOptions, prompt: string): Prom
 			return callGemini(apiKey, model, prompt);
 		case 'ollama':
 			return callOllama(ollamaHost || 'http://localhost:11434', model, prompt);
-		default:
-			throw createError('config_error', `Unknown provider: ${provider as string}`);
+		default: {
+			const exhaustiveCheck: never = provider;
+			throw createError('config_error', `Unknown provider: ${exhaustiveCheck as string}`);
+		}
 	}
 }
 
@@ -356,8 +358,10 @@ export async function getEmbeddings(
 				return await callGeminiEmbeddings(apiKey, model, texts);
 			case 'ollama':
 				return await callOllamaEmbeddings(ollamaHost || 'http://localhost:11434', model, texts);
-			default:
-				throw createError('config_error', `Unknown embedding provider: ${provider as string}`);
+			default: {
+				const exhaustiveCheck: never = provider;
+				throw createError('config_error', `Unknown embedding provider: ${exhaustiveCheck as string}`);
+			}
 		}
 	} catch (e) {
 		if (e instanceof Error && 'type' in e) {

@@ -51,13 +51,13 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		this.addCommand({
 			id: 'search-related-notes',
 			name: 'Search related notes',
-			callback: () => openSearchModal(this),
+			callback: () => void openSearchModal(this),
 		});
 
 		this.addCommand({
 			id: 'open-graph-view',
 			name: 'Open graph view',
-			callback: () => this.activateGraphView(),
+			callback: () => void this.activateGraphView(),
 		});
 
 		this.addCommand({
@@ -75,13 +75,13 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		this.addCommand({
 			id: 'open-neighborhood-view',
 			name: 'Open note neighborhood panel',
-			callback: () => this.activateNeighborhoodView(),
+			callback: () => void this.activateNeighborhoodView(),
 		});
 
 		this.addCommand({
 			id: 'smart-search',
 			name: 'Smart search (AI-powered)',
-			callback: () => openSmartSearch(this),
+			callback: () => void openSmartSearch(this),
 		});
 
 		// Add settings tab
@@ -95,14 +95,14 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 				item
 					.setTitle('Analyze current note')
 					.setIcon('sparkles')
-					.onClick(() => analyzeCurrentNote(this))
+					.onClick(() => void analyzeCurrentNote(this))
 			);
 
 			menu.addItem((item) =>
 				item
 					.setTitle('Open graph view')
 					.setIcon('git-fork')
-					.onClick(() => this.activateGraphView())
+					.onClick(() => void this.activateGraphView())
 			);
 
 			menu.showAtMouseEvent(evt);

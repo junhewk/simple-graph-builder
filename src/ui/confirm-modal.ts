@@ -22,7 +22,7 @@ export class ConfirmModal extends Modal {
 			.addEventListener('click', () => this.close());
 		buttonContainer.createEl('button', { text: 'Confirm', cls: 'mod-warning' })
 			.addEventListener('click', () => {
-				this.onConfirm();
+				void this.onConfirm();
 				this.close();
 			});
 	}

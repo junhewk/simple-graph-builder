@@ -15,7 +15,7 @@ import { settingsToExtractionOptions } from '../extraction/llm-client';
 
 interface SmartSearchResult {
 	answer: string;
-	relevantNodes: Array<{ name: string; label: string; relevance: string }>;
+	relevantNodes: Array<{ name: string; entityType: string; relevance: string }>;
 	sourceNotes: Array<{ path: string; title: string; relevance: string }>;
 }
 
@@ -160,8 +160,10 @@ async function callLLMWithTools(
 		case 'ollama':
 			// Ollama tool use support varies by model
 			return callOllamaWithTools(ollamaHost || 'http://localhost:11434', model, messages, tools);
-		default:
-			throw new Error(`Unknown provider: ${provider as string}`);
+		default: {
+			const exhaustiveCheck: never = provider;
+			throw new Error(`Unknown provider: ${exhaustiveCheck as string}`);
+		}
 	}
 }
 

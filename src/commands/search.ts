@@ -54,10 +54,10 @@ class SearchModal extends Modal {
 		const labels = this.plugin.graphCache.getAllLabels();
 		if (labels.length > 0) {
 			new Setting(contentEl)
-				.setName('Filter by label')
-				.setDesc('Only show nodes with this label')
+				.setName('Filter by entity type')
+				.setDesc('Only show nodes with this entity type')
 				.addDropdown(dropdown => {
-					dropdown.addOption('', 'All labels');
+					dropdown.addOption('', 'All entity types');
 					for (const label of labels.sort()) {
 						dropdown.addOption(label, label);
 					}

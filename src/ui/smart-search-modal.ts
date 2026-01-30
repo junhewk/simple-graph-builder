@@ -142,7 +142,7 @@ export class SmartSearchModal extends Modal {
 
 	private renderResults(result: {
 		answer: string;
-		relevantNodes: Array<{ name: string; label: string; relevance: string }>;
+		relevantNodes: Array<{ name: string; entityType: string; relevance: string }>;
 		sourceNotes: Array<{ path: string; title: string; relevance: string }>;
 	}) {
 		if (!this.resultsEl) return;
@@ -165,8 +165,8 @@ export class SmartSearchModal extends Modal {
 
 				// Left side: badge + clickable name
 				const nameContainer = item.createDiv({ cls: 'smart-search-node-name-container' });
-				const badge = nameContainer.createEl('span', { cls: 'smart-search-label-badge', text: node.label });
-				badge.style.backgroundColor = getEntityTypeColor(node.label);
+				const badge = nameContainer.createEl('span', { cls: 'smart-search-label-badge', text: node.entityType });
+				badge.style.backgroundColor = getEntityTypeColor(node.entityType);
 				const nameLink = nameContainer.createEl('a', { cls: 'smart-search-node-link', text: node.name });
 				nameLink.setAttribute('href', '#');
 				nameLink.addEventListener('click', (e) => {
