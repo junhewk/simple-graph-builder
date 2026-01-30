@@ -257,6 +257,167 @@ export class SettingsTab extends PluginSettingTab {
 					});
 			});
 
+		// Smart Search model section
+		new Setting(containerEl).setName('Smart search model').setHeading();
+
+		const smartSearchInfo = containerEl.createEl('div', { cls: 'setting-item-description sgb-smart-search-info' });
+		smartSearchInfo.appendText('By default, Smart search uses the same model as extraction. You can configure a separate model for better search results (e.g., use a faster model for extraction and a more capable model for search).');
+
+		// Use separate Smart Search model toggle
+		new Setting(containerEl)
+			.setName('Use separate model for smart search')
+			.setDesc('Enable to configure a different model for Smart search queries.')
+			.addToggle(toggle => {
+				toggle
+					.setValue(this.plugin.settings.useSeparateSmartSearchModel)
+					.onChange(async (value) => {
+						this.plugin.settings.useSeparateSmartSearchModel = value;
+						await this.plugin.saveSettings();
+						this.display(); // Refresh to show/hide model settings
+					});
+			});
+
+		// Only show Smart Search model settings if enabled
+		if (this.plugin.settings.useSeparateSmartSearchModel) {
+			// Smart Search provider
+			new Setting(containerEl)
+				.setName('Smart search provider')
+				.setDesc('Select the provider for Smart search queries.')
+				.addDropdown(dropdown => {
+					dropdown
+						.addOption('claude', 'Claude (Anthropic)')
+						.addOption('openai', 'OpenAI')
+						.addOption('gemini', 'Gemini (Google)')
+						.addOption('ollama', 'Ollama (local)')
+						.setValue(this.plugin.settings.smartSearchProvider)
+						.onChange(async (value) => {
+							this.plugin.settings.smartSearchProvider = value as ApiProvider;
+							await this.plugin.saveSettings();
+							this.display(); // Refresh to update model options
+						});
+				});
+
+			// Smart Search model for selected provider
+			const smartSearchProvider = this.plugin.settings.smartSearchProvider;
+
+			if (smartSearchProvider === 'claude') {
+				new Setting(containerEl)
+					.setName('Smart search Claude model')
+					.addDropdown(dropdown => {
+						for (const model of MODEL_OPTIONS.claude) {
+							dropdown.addOption(model, model);
+						}
+						dropdown
+							.setValue(this.plugin.settings.smartSearchClaudeModel)
+							.onChange(async (value) => {
+								this.plugin.settings.smartSearchClaudeModel = value;
+								await this.plugin.saveSettings();
+							});
+					})
+					.addText(text => {
+						text
+							.setPlaceholder('Or enter custom model')
+							.setValue(MODEL_OPTIONS.claude.includes(this.plugin.settings.smartSearchClaudeModel) ? '' : this.plugin.settings.smartSearchClaudeModel)
+							.onChange(async (value) => {
+								if (value.trim()) {
+									this.plugin.settings.smartSearchClaudeModel = value.trim();
+									await this.plugin.saveSettings();
+								}
+							});
+						text.inputEl.addClass('sgb-setting-input-wide');
+					});
+			} else if (smartSearchProvider === 'openai') {
+				new Setting(containerEl)
+					.setName('Smart search OpenAI model')
+					.addDropdown(dropdown => {
+						for (const model of MODEL_OPTIONS.openai) {
+							dropdown.addOption(model, model);
+						}
+						dropdown
+							.setValue(this.plugin.settings.smartSearchOpenaiModel)
+							.onChange(async (value) => {
+								this.plugin.settings.smartSearchOpenaiModel = value;
+								await this.plugin.saveSettings();
+							});
+					})
+					.addText(text => {
+						text
+							.setPlaceholder('Or enter custom model')
+							.setValue(MODEL_OPTIONS.openai.includes(this.plugin.settings.smartSearchOpenaiModel) ? '' : this.plugin.settings.smartSearchOpenaiModel)
+							.onChange(async (value) => {
+								if (value.trim()) {
+									this.plugin.settings.smartSearchOpenaiModel = value.trim();
+									await this.plugin.saveSettings();
+								}
+							});
+						text.inputEl.addClass('sgb-setting-input-wide');
+					});
+			} else if (smartSearchProvider === 'gemini') {
+				new Setting(containerEl)
+					.setName('Smart search Gemini model')
+					.addDropdown(dropdown => {
+						for (const model of MODEL_OPTIONS.gemini) {
+							dropdown.addOption(model, model);
+						}
+						dropdown
+							.setValue(this.plugin.settings.smartSearchGeminiModel)
+							.onChange(async (value) => {
+								this.plugin.settings.smartSearchGeminiModel = value;
+								await this.plugin.saveSettings();
+							});
+					})
+					.addText(text => {
+						text
+							.setPlaceholder('Or enter custom model')
+							.setValue(MODEL_OPTIONS.gemini.includes(this.plugin.settings.smartSearchGeminiModel) ? '' : this.plugin.settings.smartSearchGeminiModel)
+							.onChange(async (value) => {
+								if (value.trim()) {
+									this.plugin.settings.smartSearchGeminiModel = value.trim();
+									await this.plugin.saveSettings();
+								}
+							});
+						text.inputEl.addClass('sgb-setting-input-wide');
+					});
+			} else if (smartSearchProvider === 'ollama') {
+				new Setting(containerEl)
+					.setName('Smart search Ollama model')
+					.addDropdown(dropdown => {
+						for (const model of MODEL_OPTIONS.ollama) {
+							dropdown.addOption(model, model);
+						}
+						dropdown
+							.setValue(MODEL_OPTIONS.ollama.includes(this.plugin.settings.smartSearchOllamaModel) ? this.plugin.settings.smartSearchOllamaModel : MODEL_OPTIONS.ollama[0])
+							.onChange(async (value) => {
+								this.plugin.settings.smartSearchOllamaModel = value;
+								await this.plugin.saveSettings();
+							});
+					})
+					.addText(text => {
+						text
+							.setPlaceholder('Or enter custom model')
+							.setValue(MODEL_OPTIONS.ollama.includes(this.plugin.settings.smartSearchOllamaModel) ? '' : this.plugin.settings.smartSearchOllamaModel)
+							.onChange(async (value) => {
+								if (value.trim()) {
+									this.plugin.settings.smartSearchOllamaModel = value.trim();
+									await this.plugin.saveSettings();
+								}
+							});
+						text.inputEl.addClass('sgb-setting-input-wide');
+					});
+
+				// Tool calling warning for Ollama Smart Search
+				const smartSearchOllamaWarning = containerEl.createEl('div', { cls: 'setting-item-description sgb-ollama-warning' });
+				smartSearchOllamaWarning.createEl('strong', { text: 'Note:' });
+				smartSearchOllamaWarning.appendText(' Smart search requires tool calling support. ');
+				smartSearchOllamaWarning.createEl('code', { text: 'deepseek-r1:*' });
+				smartSearchOllamaWarning.appendText(' and ');
+				smartSearchOllamaWarning.createEl('code', { text: 'gemma3:*' });
+				smartSearchOllamaWarning.appendText(' may not work. Recommended: ');
+				smartSearchOllamaWarning.createEl('code', { text: 'qwen3:*' });
+				smartSearchOllamaWarning.appendText('.');
+			}
+		}
+
 		// View section
 		new Setting(containerEl).setName('View').setHeading();
 

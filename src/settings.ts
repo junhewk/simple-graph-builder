@@ -13,25 +13,47 @@ const LIMITED_TOOL_SUPPORT_PATTERNS = [
 /**
  * Check if the current model configuration supports tool calling.
  * Returns true if the model is expected to work with Smart Search.
+ * Uses Smart Search specific settings if enabled.
  */
 export function supportsToolCalling(settings: Settings): boolean {
-	const { apiProvider } = settings;
+	// Get the effective provider and model for Smart Search
+	const provider = settings.useSeparateSmartSearchModel
+		? settings.smartSearchProvider
+		: settings.apiProvider;
 
 	// Claude, OpenAI always support tool calling
-	if (apiProvider === 'claude' || apiProvider === 'openai') {
+	if (provider === 'claude' || provider === 'openai') {
 		return true;
 	}
 
+	// Get the effective model
+	let model: string;
+	if (settings.useSeparateSmartSearchModel) {
+		const modelMap: Record<string, string> = {
+			claude: settings.smartSearchClaudeModel,
+			openai: settings.smartSearchOpenaiModel,
+			gemini: settings.smartSearchGeminiModel,
+			ollama: settings.smartSearchOllamaModel,
+		};
+		model = modelMap[provider] || '';
+	} else {
+		const modelMap: Record<string, string> = {
+			claude: settings.claudeModel,
+			openai: settings.openaiModel,
+			gemini: settings.geminiModel,
+			ollama: settings.ollamaModel,
+		};
+		model = modelMap[provider] || '';
+	}
+
 	// Check Gemini model
-	if (apiProvider === 'gemini') {
-		const model = settings.geminiModel.toLowerCase();
-		return !LIMITED_TOOL_SUPPORT_PATTERNS.some(pattern => model.includes(pattern));
+	if (provider === 'gemini') {
+		return !LIMITED_TOOL_SUPPORT_PATTERNS.some(pattern => model.toLowerCase().includes(pattern));
 	}
 
 	// Check Ollama model
-	if (apiProvider === 'ollama') {
-		const model = settings.ollamaModel.toLowerCase();
-		return !LIMITED_TOOL_SUPPORT_PATTERNS.some(pattern => model.includes(pattern));
+	if (provider === 'ollama') {
+		return !LIMITED_TOOL_SUPPORT_PATTERNS.some(pattern => model.toLowerCase().includes(pattern));
 	}
 
 	return true;
@@ -44,6 +66,46 @@ export function getLimitedToolSupportModels(): string[] {
 	return ['deepseek-r1:*', 'gemma3:*', 'gemini-2.5-flash-lite'];
 }
 
+/**
+ * Get the effective Smart Search configuration.
+ * Returns provider, model, and API key to use for Smart Search.
+ */
+export function getSmartSearchConfig(settings: Settings): {
+	provider: Settings['apiProvider'];
+	model: string;
+	apiKey: string;
+	ollamaHost: string;
+} {
+	if (settings.useSeparateSmartSearchModel) {
+		const modelMap: Record<string, string> = {
+			claude: settings.smartSearchClaudeModel,
+			openai: settings.smartSearchOpenaiModel,
+			gemini: settings.smartSearchGeminiModel,
+			ollama: settings.smartSearchOllamaModel,
+		};
+		return {
+			provider: settings.smartSearchProvider,
+			model: modelMap[settings.smartSearchProvider] || '',
+			apiKey: settings.apiKey, // Use same API key for now
+			ollamaHost: settings.ollamaHost,
+		};
+	}
+
+	// Use same settings as extraction
+	const modelMap: Record<string, string> = {
+		claude: settings.claudeModel,
+		openai: settings.openaiModel,
+		gemini: settings.geminiModel,
+		ollama: settings.ollamaModel,
+	};
+	return {
+		provider: settings.apiProvider,
+		model: modelMap[settings.apiProvider] || '',
+		apiKey: settings.apiKey,
+		ollamaHost: settings.ollamaHost,
+	};
+}
+
 export const DEFAULT_SETTINGS: Settings = {
 	apiProvider: 'claude',
 	apiKey: '',
@@ -54,6 +116,14 @@ export const DEFAULT_SETTINGS: Settings = {
 	ollamaHost: 'http://localhost:11434',
 	extractionMode: 'standard',
 	autoAnalyzeOnSave: false,
+	// Smart Search model settings
+	useSeparateSmartSearchModel: false,
+	smartSearchProvider: 'claude',
+	smartSearchClaudeModel: 'claude-sonnet-4-5-20250929',
+	smartSearchOpenaiModel: 'gpt-4o',
+	smartSearchGeminiModel: 'gemini-2.5-pro',
+	smartSearchOllamaModel: 'qwen3:32b',
+	// View settings
 	openGraphInMain: false,
 	graphMinDegree: 0,
 	// Embedding-based resolution (opt-in)

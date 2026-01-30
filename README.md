@@ -128,6 +128,14 @@ Right-click a node to:
 - **Auto-analyze on save**: Automatically analyze notes when you save them (2-second debounce)
 - **Analyze entire vault**: Batch analyze all notes with progress tracking and cancellation support
 
+### Smart Search Model
+You can configure a separate model for Smart Search queries, allowing you to use faster/cheaper models for extraction while using more capable models for search:
+- **Use separate model for smart search**: Enable to configure a different model
+- **Smart search provider**: Choose provider (Claude, OpenAI, Gemini, Ollama)
+- **Smart search model**: Select or enter a custom model name
+
+This is useful for optimizing cost vs. quality - e.g., use GPT-4o-mini for extraction and GPT-4o for search.
+
 ### Entity Resolution (Opt-in)
 Enable embedding-based entity resolution for intelligent deduplication:
 - **Enable embeddings**: Turn on the hybrid resolution pipeline

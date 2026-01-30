@@ -7,7 +7,7 @@ import { requestUrl } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
 import { buildSmartSearchSystemPrompt, getSmartSearchTools } from '../extraction/prompts';
 import { executeToolCall, ToolCall } from '../graph/tools';
-import { settingsToExtractionOptions } from '../extraction/llm-client';
+import { getSmartSearchConfig } from '../settings';
 
 // ============================================
 // Types
@@ -42,10 +42,10 @@ export async function executeSmartSearch(
 	query: string,
 	onProgress?: (status: string) => void
 ): Promise<SmartSearchResult> {
-	const options = settingsToExtractionOptions(plugin.settings);
+	const config = getSmartSearchConfig(plugin.settings);
 
 	// Check API configuration
-	if (options.provider !== 'ollama' && !options.apiKey) {
+	if (config.provider !== 'ollama' && !config.apiKey) {
 		throw new Error('API key not configured. Please set your API key in settings.');
 	}
 
@@ -68,7 +68,7 @@ export async function executeSmartSearch(
 		iteration++;
 
 		// Call LLM
-		const response = await callLLMWithTools(options, messages, tools);
+		const response = await callLLMWithTools(config, messages, tools);
 
 		// Check if LLM wants to use tools
 		if (response.tool_calls && response.tool_calls.length > 0) {
@@ -144,11 +144,11 @@ interface LLMResponse {
 }
 
 async function callLLMWithTools(
-	options: ReturnType<typeof settingsToExtractionOptions>,
+	config: ReturnType<typeof getSmartSearchConfig>,
 	messages: Message[],
 	tools: ReturnType<typeof getSmartSearchTools>
 ): Promise<LLMResponse> {
-	const { provider, apiKey, model, ollamaHost } = options;
+	const { provider, apiKey, model, ollamaHost } = config;
 
 	switch (provider) {
 		case 'claude':

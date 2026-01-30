@@ -5,7 +5,7 @@
 import { App, Modal, Notice } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
 import { executeSmartSearch } from '../commands/smart-search';
-import { supportsToolCalling } from '../settings';
+import { supportsToolCalling, getSmartSearchConfig } from '../settings';
 import { getEntityTypeColor } from '../types';
 
 export class SmartSearchModal extends Modal {
@@ -224,17 +224,11 @@ export class SmartSearchModal extends Modal {
 	}
 
 	/**
-	 * Get the current model name based on provider.
+	 * Get the current model name for Smart Search based on settings.
 	 */
 	private getCurrentModelName(): string {
-		const { apiProvider, claudeModel, openaiModel, geminiModel, ollamaModel } = this.plugin.settings;
-		const modelMap: Record<string, string> = {
-			claude: claudeModel,
-			openai: openaiModel,
-			gemini: geminiModel,
-			ollama: ollamaModel,
-		};
-		return modelMap[apiProvider] || 'unknown';
+		const config = getSmartSearchConfig(this.plugin.settings);
+		return config.model || 'unknown';
 	}
 
 	onClose() {

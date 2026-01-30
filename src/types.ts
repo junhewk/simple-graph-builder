@@ -302,7 +302,7 @@ export type ExtractionMode = 'standard' | 'thorough';
 export interface Settings {
 	apiProvider: ApiProvider;
 	apiKey: string;
-	// Model selection per provider
+	// Model selection per provider (for KG building / extraction)
 	claudeModel: string;
 	openaiModel: string;
 	geminiModel: string;
@@ -312,6 +312,13 @@ export interface Settings {
 	extractionMode: ExtractionMode;  // Controls extraction thoroughness
 	// Auto-analysis
 	autoAnalyzeOnSave: boolean;  // Analyze notes automatically when saved
+	// Smart Search model settings (separate from extraction)
+	useSeparateSmartSearchModel: boolean;  // default: false - use same model as extraction
+	smartSearchProvider: ApiProvider;      // default: same as apiProvider
+	smartSearchClaudeModel: string;
+	smartSearchOpenaiModel: string;
+	smartSearchGeminiModel: string;
+	smartSearchOllamaModel: string;
 	// View settings
 	openGraphInMain: boolean;    // Open graph view in main window instead of sidebar
 	graphMinDegree: number;      // Minimum connections to show node in graph (default: 0)
