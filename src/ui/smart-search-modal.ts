@@ -21,9 +21,10 @@ export class SmartSearchModal extends Modal {
 	}
 
 	onOpen() {
-		const { contentEl } = this;
+		const { contentEl, modalEl } = this;
 		contentEl.empty();
-		contentEl.addClass('smart-search-modal sgb-smart-search-content');
+		modalEl.addClass('smart-search-modal');
+		contentEl.addClass('sgb-smart-search-content');
 
 		// Title
 		contentEl.createEl('h2', { text: 'Smart search', cls: 'sgb-smart-search-title' });
