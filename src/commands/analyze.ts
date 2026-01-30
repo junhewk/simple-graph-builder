@@ -43,7 +43,7 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		return;
 	}
 	if (apiProvider === 'ollama' && !ollamaModel) {
-		new Notice('Set the Ollama model in settings first');
+		new Notice('Ollama model must be set in settings first');
 		return;
 	}
 
@@ -311,7 +311,7 @@ export async function analyzeEntireVault(
 		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	}
 	if (apiProvider === 'ollama' && !ollamaModel) {
-		new Notice('Set the Ollama model in settings first');
+		new Notice('Ollama model must be set in settings first');
 		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	}
 

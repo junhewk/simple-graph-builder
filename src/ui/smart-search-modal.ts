@@ -40,7 +40,7 @@ export class SmartSearchModal extends Modal {
 		this.inputEl = inputContainer.createEl('textarea', {
 			cls: 'smart-search-input sgb-smart-search-textarea',
 			attr: {
-				placeholder: 'e.g., "What methods did we use for the project?" or "Who is connected to Alice?"',
+				placeholder: 'What methods did we use for the project?',
 				rows: '3',
 			},
 		});

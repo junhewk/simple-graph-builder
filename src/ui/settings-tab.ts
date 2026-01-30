@@ -28,9 +28,9 @@ export class SettingsTab extends PluginSettingTab {
 			.setDesc('Select the provider for entity extraction')
 			.addDropdown(dropdown => {
 				dropdown
-					.addOption('claude', 'Claude (Anthropic)')
+					.addOption('claude', 'Claude')
 					.addOption('openai', 'OpenAI')
-					.addOption('gemini', 'Gemini (Google)')
+					.addOption('gemini', 'Gemini')
 					.addOption('ollama', 'Ollama (local)')
 					.setValue(this.plugin.settings.apiProvider)
 					.onChange(async (value) => {
@@ -44,10 +44,10 @@ export class SettingsTab extends PluginSettingTab {
 		this.providerSettingsEls.claude = containerEl.createDiv();
 		new Setting(this.providerSettingsEls.claude)
 			.setName('API key')
-			.setDesc('Your Anthropic API key')
+			.setDesc('Claude key')
 			.addText(text => {
 				text
-					.setPlaceholder('sk-ant-...')
+					.setPlaceholder('Enter API key')
 					.setValue(this.plugin.settings.apiKey)
 					.onChange(async (value) => {
 						this.plugin.settings.apiKey = value;
@@ -89,7 +89,7 @@ export class SettingsTab extends PluginSettingTab {
 			.setDesc('Your OpenAI API key')
 			.addText(text => {
 				text
-					.setPlaceholder('sk-...')
+					.setPlaceholder('Enter API key')
 					.setValue(this.plugin.settings.apiKey)
 					.onChange(async (value) => {
 						this.plugin.settings.apiKey = value;
@@ -128,7 +128,7 @@ export class SettingsTab extends PluginSettingTab {
 		this.providerSettingsEls.gemini = containerEl.createDiv();
 		new Setting(this.providerSettingsEls.gemini)
 			.setName('API key')
-			.setDesc('Your Google AI API key')
+			.setDesc('Gemini key')
 			.addText(text => {
 				text
 					.setPlaceholder('Enter your API key')
@@ -173,7 +173,7 @@ export class SettingsTab extends PluginSettingTab {
 			.setDesc('Ollama server address')
 			.addText(text => {
 				text
-					.setPlaceholder('http://localhost:11434')
+					.setPlaceholder('Server address')
 					.setValue(this.plugin.settings.ollamaHost)
 					.onChange(async (value) => {
 						this.plugin.settings.ollamaHost = value || 'http://localhost:11434';
@@ -212,16 +212,11 @@ export class SettingsTab extends PluginSettingTab {
 		ollamaWarning.createEl('strong', { text: 'Smart search compatibility:' });
 		ollamaWarning.appendText(' Some models have limited tool calling support.');
 		ollamaWarning.createEl('br');
-		ollamaWarning.createEl('code', { text: 'deepseek-r1:*' });
-		ollamaWarning.appendText(' and ');
-		ollamaWarning.createEl('code', { text: 'gemma3:*' });
-		ollamaWarning.appendText(' may not work with Smart Search.');
+		ollamaWarning.appendText('Limited support: ');
+		ollamaWarning.createEl('code', { text: 'Gemma3' });
 		ollamaWarning.createEl('br');
 		ollamaWarning.appendText('Recommended: ');
-		ollamaWarning.createEl('code', { text: 'qwen3:*' });
-		ollamaWarning.appendText(', ');
-		ollamaWarning.createEl('code', { text: 'gpt-oss:*' });
-		ollamaWarning.appendText(' for best results.');
+		ollamaWarning.createEl('code', { text: 'Qwen3' });
 
 		// Update visibility based on current provider
 		this.updateProviderSettings();
@@ -266,7 +261,7 @@ export class SettingsTab extends PluginSettingTab {
 		// Use separate Smart Search model toggle
 		new Setting(containerEl)
 			.setName('Use separate model for smart search')
-			.setDesc('Enable to configure a different model for Smart search queries.')
+			.setDesc('Enable to configure a different model for smart search queries.')
 			.addToggle(toggle => {
 				toggle
 					.setValue(this.plugin.settings.useSeparateSmartSearchModel)
@@ -282,12 +277,12 @@ export class SettingsTab extends PluginSettingTab {
 			// Smart Search provider
 			new Setting(containerEl)
 				.setName('Smart search provider')
-				.setDesc('Select the provider for Smart search queries.')
+				.setDesc('Select the provider for smart search queries.')
 				.addDropdown(dropdown => {
 					dropdown
-						.addOption('claude', 'Claude (Anthropic)')
+						.addOption('claude', 'Claude')
 						.addOption('openai', 'OpenAI')
-						.addOption('gemini', 'Gemini (Google)')
+						.addOption('gemini', 'Gemini')
 						.addOption('ollama', 'Ollama (local)')
 						.setValue(this.plugin.settings.smartSearchProvider)
 						.onChange(async (value) => {
@@ -302,7 +297,7 @@ export class SettingsTab extends PluginSettingTab {
 
 			if (smartSearchProvider === 'claude') {
 				new Setting(containerEl)
-					.setName('Smart search Claude model')
+					.setName('Claude model for smart search')
 					.addDropdown(dropdown => {
 						for (const model of MODEL_OPTIONS.claude) {
 							dropdown.addOption(model, model);
@@ -354,7 +349,7 @@ export class SettingsTab extends PluginSettingTab {
 					});
 			} else if (smartSearchProvider === 'gemini') {
 				new Setting(containerEl)
-					.setName('Smart search Gemini model')
+					.setName('Gemini model for smart search')
 					.addDropdown(dropdown => {
 						for (const model of MODEL_OPTIONS.gemini) {
 							dropdown.addOption(model, model);
@@ -380,7 +375,7 @@ export class SettingsTab extends PluginSettingTab {
 					});
 			} else if (smartSearchProvider === 'ollama') {
 				new Setting(containerEl)
-					.setName('Smart search Ollama model')
+					.setName('Ollama model for smart search')
 					.addDropdown(dropdown => {
 						for (const model of MODEL_OPTIONS.ollama) {
 							dropdown.addOption(model, model);
@@ -409,11 +404,11 @@ export class SettingsTab extends PluginSettingTab {
 				const smartSearchOllamaWarning = containerEl.createEl('div', { cls: 'setting-item-description sgb-ollama-warning' });
 				smartSearchOllamaWarning.createEl('strong', { text: 'Note:' });
 				smartSearchOllamaWarning.appendText(' Smart search requires tool calling support. ');
-				smartSearchOllamaWarning.createEl('code', { text: 'deepseek-r1:*' });
+				smartSearchOllamaWarning.createEl('code', { text: 'Deepseek-r1:*' });
 				smartSearchOllamaWarning.appendText(' and ');
-				smartSearchOllamaWarning.createEl('code', { text: 'gemma3:*' });
+				smartSearchOllamaWarning.createEl('code', { text: 'Gemma3:*' });
 				smartSearchOllamaWarning.appendText(' may not work. Recommended: ');
-				smartSearchOllamaWarning.createEl('code', { text: 'qwen3:*' });
+				smartSearchOllamaWarning.createEl('code', { text: 'Qwen3:*' });
 				smartSearchOllamaWarning.appendText('.');
 			}
 		}
@@ -476,7 +471,7 @@ export class SettingsTab extends PluginSettingTab {
 				.addDropdown(dropdown => {
 					dropdown
 						.addOption('openai', 'OpenAI')
-						.addOption('gemini', 'Gemini (Google)')
+						.addOption('gemini', 'Gemini')
 						.addOption('ollama', 'Ollama (local)')
 						.setValue(this.plugin.settings.embeddingProvider)
 						.onChange(async (value) => {

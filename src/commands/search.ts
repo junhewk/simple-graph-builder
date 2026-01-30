@@ -35,7 +35,7 @@ class SearchModal extends Modal {
 			.setName('Search query')
 			.setDesc('Enter a concept, entity name, or topic')
 			.addText(text => {
-				text.setPlaceholder('e.g., machine learning, Alice, project name')
+				text.setPlaceholder('Search concepts, projects, or topics')
 					.onChange((value) => {
 						this.currentQuery = value;
 						this.performSearch();
