@@ -734,7 +734,7 @@ export class SettingsTab extends PluginSettingTab {
 		for (const provider of providers) {
 			const el = this.providerSettingsEls[provider];
 			if (el) {
-				el.style.display = provider === currentProvider ? 'block' : 'none';
+				el.toggle(provider === currentProvider);
 			}
 		}
 	}
