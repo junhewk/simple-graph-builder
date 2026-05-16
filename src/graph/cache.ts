@@ -13,7 +13,7 @@ export class GraphCache {
 	private plugin: SimpleGraphBuilderPlugin;
 	private loaded = false;
 	private dirty = false;
-	private saveTimeout: ReturnType<typeof setTimeout> | null = null;
+	private saveTimeout: number | null = null;
 
 	// Raw data
 	private nodes: OntologyNode[] = [];
@@ -780,9 +780,9 @@ export class GraphCache {
 
 	private scheduleSave(): void {
 		if (this.saveTimeout) {
-			clearTimeout(this.saveTimeout);
+			activeWindow.clearTimeout(this.saveTimeout);
 		}
-		this.saveTimeout = setTimeout(() => {
+		this.saveTimeout = activeWindow.setTimeout(() => {
 			void this.flush();
 		}, SAVE_DEBOUNCE_MS);
 	}
@@ -792,7 +792,7 @@ export class GraphCache {
 	 */
 	async flush(): Promise<void> {
 		if (this.saveTimeout) {
-			clearTimeout(this.saveTimeout);
+			activeWindow.clearTimeout(this.saveTimeout);
 			this.saveTimeout = null;
 		}
 

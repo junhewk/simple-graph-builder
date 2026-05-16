@@ -179,7 +179,7 @@ export class GraphView extends ItemView {
 			});
 
 			// Allow UI to update before heavy computation
-			await new Promise(resolve => setTimeout(resolve, 50));
+			await new Promise(resolve => activeWindow.setTimeout(resolve, 50));
 			loadingEl.remove();
 		}
 

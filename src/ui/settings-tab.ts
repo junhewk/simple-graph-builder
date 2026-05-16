@@ -639,7 +639,7 @@ export class SettingsTab extends PluginSettingTab {
 						cancelVaultAnalysis();
 						new Notice('Cancelling vault analysis...');
 						// Button will update after analysis stops
-						setTimeout(updateButtonState, 1000);
+						activeWindow.setTimeout(updateButtonState, 1000);
 					} else {
 						const fileCount = this.plugin.app.vault.getMarkdownFiles().length;
 						const message = `Analyze ${fileCount} notes in your vault?\n\n` +
@@ -780,7 +780,7 @@ export class SettingsTab extends PluginSettingTab {
 
 				// Small delay between batches
 				if (i + batchSize < nodesToProcess.length) {
-					await new Promise(resolve => setTimeout(resolve, 100));
+					await new Promise(resolve => activeWindow.setTimeout(resolve, 100));
 				}
 			}
 

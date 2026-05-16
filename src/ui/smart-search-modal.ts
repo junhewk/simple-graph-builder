@@ -84,7 +84,7 @@ export class SmartSearchModal extends Modal {
 		});
 
 		// Focus input
-		setTimeout(() => this.inputEl?.focus(), 50);
+		activeWindow.setTimeout(() => this.inputEl?.focus(), 50);
 	}
 
 	private async performSearch() {
