@@ -272,6 +272,20 @@ This plugin's entity resolution approach is inspired by recent advances in knowl
 
 Simple Graph Builder combines the simplicity of LightRAG with KGGen's hybrid resolution approach, adapted for Obsidian's local-first architecture.
 
+## Development
+
+```bash
+npm install
+npm run dev     # watch build
+npm run build   # production build (typecheck + bundle)
+npm test        # provider wire-level tests
+npm test -- gemini   # run one suite
+```
+
+`npm test` bundles each `tests/*.test.ts` with esbuild, stubbing Obsidian's `requestUrl` so outgoing requests can be captured, then asserts the exact JSON each provider adapter builds. No test framework is involved — esbuild is already a dev dependency, and the plugin ships its whole bundle.
+
+These are deliberately wire-level, because that is where the bugs are: a parameter a model rejects, a tool result dropped from a loop, embeddings written at the wrong vector width. Each suite exits non-zero on failure, and the release workflow runs them before publishing.
+
 ## References
 
 [1] Guo, Z., et al. (2024). "LightRAG: Simple and Fast Retrieval-Augmented Generation." https://github.com/HKUDS/LightRAG
