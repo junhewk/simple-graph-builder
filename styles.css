@@ -605,6 +605,17 @@
 	border-radius: 4px;
 }
 
+/* Per-model capability notice shown under a model picker. Empty unless the
+   selected model lacks a feature, so it collapses when there is nothing to say. */
+.sgb-model-warning:not(:empty) {
+	margin-top: 4px;
+	color: var(--text-muted);
+}
+
+.sgb-model-warning-error:not(:empty) {
+	color: var(--text-error);
+}
+
 .sgb-resolution-info {
 	margin-bottom: 12px;
 }

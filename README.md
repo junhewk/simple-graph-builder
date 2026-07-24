@@ -20,8 +20,10 @@ This design provides **structured entity classification with expressive relation
 - **Hybrid Entity Resolution**: Multi-stage deduplication pipeline combining fast lookups with embedding similarity and LLM verification (inspired by KGGen [3])
 - **Smart Search**: AI-powered natural language queries over your knowledge graph with multi-path exploration
 - **Entity Extraction**: Automatically extract entities from your notes using AI (configurable extraction depth)
+- **Schema-enforced Extraction**: Every extraction request carries a JSON schema, and replies are validated against it — malformed entities are reported and dropped rather than silently polluting the graph
 - **Internal Link Support**: Automatically processes `[[wikilinks]]` to build note-to-note connections
-- **Multiple LLM Support**: Works with Claude, OpenAI, Gemini, and Ollama (local)
+- **Multiple LLM Support**: Works with Claude, OpenAI, Gemini, and local servers — Ollama plus anything OpenAI-compatible (llama.cpp, LM Studio, vLLM)
+- **Reasoning Effort Control**: Tune how hard the model thinks, separately for extraction and Smart Search
 - **Korean Language Support**: Bigram Jaccard similarity for robust Korean text matching (handles particles and spacing variations)
 - **Interactive Graph View**: Visualize your knowledge graph with fCoSE force-directed layout
 - **Large Graph Support**: Optimized for thousands of nodes with fast rendering
@@ -116,14 +118,16 @@ Right-click a node to:
 ## Settings
 
 ### API Configuration
-- **API Provider**: Choose between Claude, OpenAI, Gemini, or Ollama
-- **API Key**: Your API key (not needed for Ollama)
+- **API Provider**: Choose between Claude, OpenAI, Gemini, or Ollama (local)
+- **API Key**: Your API key (not needed for a local server unless it was started with `--api-key`)
+- **Server API** (local only): Which API the local server speaks — *Ollama* (`/api/chat`) or *OpenAI-compatible* (`/v1/chat/completions`). Use OpenAI-compatible for llama.cpp's `llama-server`, LM Studio, vLLM and similar; set **Host** to the base address without the `/v1` suffix.
 - **Model**: Select or enter a custom model name
 
 ### Analysis Settings
 - **Extraction Mode**: Control extraction depth
   - *Standard*: Max 15 entities per chunk (fast, low cost)
   - *Thorough*: No limits per chunk (comprehensive extraction)
+- **Reasoning effort**: How much the model thinks before extracting — *Auto*, *Minimal*, *Low*, *Medium*, *High*, or *Max*. Defaults to *Minimal*: notes are processed in many parallel chunks, so higher levels raise cost and latency noticeably. Models that don't support the setting (such as `claude-haiku-4-5`) are flagged in settings and simply ignore it.
 - **Chunked Processing**: Long notes are automatically split into ~500 token chunks and processed in parallel (max 3 concurrent)
 - **Auto-analyze on save**: Automatically analyze notes when you save them (2-second debounce)
 - **Analyze entire vault**: Batch analyze all notes with progress tracking and cancellation support
@@ -133,17 +137,20 @@ You can configure a separate model for Smart Search queries, allowing you to use
 - **Use separate model for smart search**: Enable to configure a different model
 - **Smart search provider**: Choose provider (Claude, OpenAI, Gemini, Ollama)
 - **Smart search model**: Select or enter a custom model name
+- **Smart search reasoning effort**: Set independently from extraction — searching benefits from more reasoning than extraction does
 
-This is useful for optimizing cost vs. quality - e.g., use GPT-4o-mini for extraction and GPT-4o for search.
+This is useful for optimizing cost vs. quality - e.g., use `gpt-5.4-mini` for extraction and `gpt-5.6-luna` for search.
 
 ### Entity Resolution (Opt-in)
 Enable embedding-based entity resolution for intelligent deduplication:
 - **Enable embeddings**: Turn on the hybrid resolution pipeline
-- **Embedding provider**: OpenAI, Gemini, or Ollama (can differ from main LLM provider)
+- **Embedding provider**: OpenAI, Gemini, or a local server — chosen independently of the chat provider, so a local chat model does not force local embeddings
+- **Embedding server API** (local only): *Ollama* (`/api/embed`) or *OpenAI-compatible* (`/v1/embeddings`), set separately from the chat provider's API
+- **Embedding server host** (local only): leave blank to reuse the chat provider's host; set it when embeddings run elsewhere
 - **Embedding API key**: Separate key for embedding API calls
 - **Embedding model**:
   - OpenAI: `text-embedding-3-small` (1536 dims), `text-embedding-3-large` (3072 dims)
-  - Gemini: `text-embedding-004` (768 dims)
+  - Gemini: `gemini-embedding-001` (768 / 1536 / 3072 dims)
   - Ollama: `nomic-embed-text` (768 dims), `mxbai-embed-large` (1024 dims)
 - **High confidence threshold**: Auto-merge above this similarity (default: 0.90)
 - **Low confidence threshold**: LLM verification range floor (default: 0.80)
@@ -157,6 +164,26 @@ Enable embedding-based entity resolution for intelligent deduplication:
 ### Data Management
 - View graph statistics (nodes by entity type, total relationships)
 - Clear all graph data
+
+## Supported Models
+
+Note analysis requires a model that can return **structured output** (JSON schema). Models that cannot are refused with a message rather than silently producing a lower-quality graph, and the settings panel flags them as you select them.
+
+| Provider | Models |
+|----------|--------|
+| Claude | `claude-sonnet-5`, `claude-haiku-4-5` |
+| OpenAI | `gpt-5.6-luna`, `gpt-5.4-mini` |
+| Gemini | `gemini-3.6-flash`, `gemini-3.5-flash-lite` |
+| Local | any model your server exposes — Ollama, or an OpenAI-compatible server such as llama.cpp's `llama-server`, LM Studio or vLLM |
+
+Any other model can be typed into the **Custom…** field. Smart Search additionally needs tool calling; for local servers, start `llama-server` with `--jinja`, and prefer `qwen3:*` or `gpt-oss:*` on Ollama.
+
+## Upgrading to 0.4.0
+
+This release moves to each provider's current API. Two things happen automatically on first load:
+
+- **Model IDs are migrated.** Retired IDs are rewritten to their current equivalents (for example `claude-sonnet-4-5-20250929` → `claude-sonnet-5`, `gpt-4o` → `gpt-5.6-luna`). Ollama model names are left alone, since those refer to models you have pulled locally. Check your model selection afterwards if you had a specific one configured.
+- **Gemini embeddings are reset.** `text-embedding-004` was shut down in January 2026, so it is replaced by `gemini-embedding-001`. Stored embeddings from the old model are discarded and you will be prompted to recompute them; entity resolution is paused until you do. OpenAI and Ollama embeddings are unaffected.
 
 ## Installation
 
@@ -222,7 +249,7 @@ This plugin makes API calls to extract entities from your notes.
 
 ### Embedding Costs (if enabled)
 - **OpenAI**: ~$0.02 per 1M tokens for `text-embedding-3-small`
-- **Gemini**: Free tier available for `text-embedding-004`
+- **Gemini**: Free tier available for `gemini-embedding-001`
 - **Ollama**: Free (local models like `nomic-embed-text`)
 
 Consider using Ollama for cost-free operation, or batch analyze during off-peak hours to manage costs.

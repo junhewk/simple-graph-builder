@@ -1,18 +1,34 @@
-import { ApiProvider, EmbeddingProvider, OntologyExtractionResult, Settings, EntityType, ExtractionMode, isValidEntityType, RawExtractionNode, RawExtractionRelationship } from '../types';
-import { requestUrl, Vault } from 'obsidian';
+import { ApiProvider, EmbeddingProvider, LocalApiStyle, OntologyExtractionResult, Settings, EntityType, ExtractionMode, RawExtractionNode, RawExtractionRelationship } from '../types';
+import { Vault } from 'obsidian';
 import { chunkContent, buildExtractionPrompt } from './prompts';
+import { getEmbeddingRequestConfig } from '../settings';
+import { postJson } from './providers/http';
+import { createError, handleApiError } from './providers/errors';
+import { getAdapter } from './providers/index';
+import { resolveModelConfig } from './providers/models';
+import { EffortLevel } from './providers/effort';
+import { JsonSchemaObject } from './providers/types';
+import {
+	ENTITY_ITEM_SCHEMA,
+	EXTRACTION_SCHEMA_NAME,
+	ONTOLOGY_JSON_SCHEMA,
+	RELATIONSHIP_ITEM_SCHEMA,
+	SchemaViolation,
+	toProviderSchema,
+	validateAgainstSchema,
+} from './providers/schemas';
 
-export interface ExtractionError {
-	type: 'api_error' | 'parse_error' | 'config_error' | 'rate_limit';
-	message: string;
-	details?: string;
-}
+// Re-exported so existing importers (commands/analyze.ts) keep working.
+export type { ExtractionError } from './providers/errors';
 
 export interface ExtractionOptions {
 	provider: ApiProvider;
 	apiKey: string;
 	model: string;
 	ollamaHost?: string;
+	localApiStyle?: LocalApiStyle;
+	effort: EffortLevel;
+	maxOutputTokens: number;
 }
 
 /**
@@ -33,14 +49,23 @@ export async function extractOntology(
 		throw createError('config_error', 'Model not configured. Please set a model name in settings.');
 	}
 
+	if (!getAdapter(provider, { apiKey, ollamaHost: options.ollamaHost, localApiStyle: options.localApiStyle }).capabilities(model).structuredOutput) {
+		throw createError(
+			'config_error',
+			`${model} cannot return structured output, which extraction requires. ` +
+				'Choose a different model in settings.'
+		);
+	}
+
 	try {
-		const response = await callLLMProvider(options, prompt);
+		// Extraction is defined in terms of the schema: the request carries it,
+		// the reply is validated against it, and a violation is an error rather
+		// than something to be guessed around.
+		const response = await callLLMProvider(options, prompt, extractionSchemaFor(provider));
 		return parseOntologyResponse(response);
 	} catch (e) {
-		if (e instanceof Error && 'type' in e) {
-			throw e; // Already an ExtractionError
-		}
-		throw handleApiError(e, provider);
+		// handleApiError passes typed errors straight through.
+		throw handleApiError(e, provider, options.ollamaHost);
 	}
 }
 
@@ -137,184 +162,53 @@ function mergeChunkResults(results: OntologyExtractionResult[]): OntologyExtract
  * Helper to create ExtractionOptions from Settings
  */
 export function settingsToExtractionOptions(settings: Settings): ExtractionOptions {
-	// Get the model for the current provider
-	const modelMap: Record<ApiProvider, string> = {
-		claude: settings.claudeModel,
-		openai: settings.openaiModel,
-		gemini: settings.geminiModel,
-		ollama: settings.ollamaModel,
-	};
-
+	const resolved = resolveModelConfig(settings, 'extraction');
 	return {
-		provider: settings.apiProvider,
-		apiKey: settings.apiKey,
-		model: modelMap[settings.apiProvider],
-		ollamaHost: settings.ollamaHost,
+		provider: resolved.provider,
+		apiKey: resolved.apiKey,
+		model: resolved.model,
+		ollamaHost: resolved.ollamaHost,
+		localApiStyle: resolved.localApiStyle,
+		effort: resolved.effort,
+		maxOutputTokens: resolved.maxOutputTokens,
 	};
-}
-
-function createError(type: ExtractionError['type'], message: string, details?: string): Error {
-	const error = new Error(message) as Error & ExtractionError;
-	error.type = type;
-	error.details = details;
-	return error;
 }
 
 /**
  * Call the appropriate LLM provider for text completion.
  * Shared helper for extractOntology and verifyEntityMatch.
  */
-async function callLLMProvider(options: ExtractionOptions, prompt: string): Promise<string> {
-	const { provider, apiKey, model, ollamaHost } = options;
+async function callLLMProvider(
+	options: ExtractionOptions,
+	prompt: string,
+	responseSchema?: { name: string; schema: JsonSchemaObject }
+): Promise<string> {
+	const { provider, apiKey, model, ollamaHost, localApiStyle, effort, maxOutputTokens } = options;
+	const creds = { apiKey, ollamaHost, localApiStyle };
 
-	switch (provider) {
-		case 'claude':
-			return callClaude(apiKey, model, prompt);
-		case 'openai':
-			return callOpenAI(apiKey, model, prompt);
-		case 'gemini':
-			return callGemini(apiKey, model, prompt);
-		case 'ollama':
-			return callOllama(ollamaHost || 'http://localhost:11434', model, prompt);
-		default: {
-			const exhaustiveCheck: never = provider;
-			throw createError('config_error', `Unknown provider: ${exhaustiveCheck as string}`);
-		}
-	}
-}
-
-function handleApiError(e: unknown, provider: ApiProvider | EmbeddingProvider): Error {
-	const err = e as { status?: number; message?: string };
-
-	if (err.status === 401) {
-		return createError('api_error', `Invalid ${provider} API key. Please check your settings.`);
-	}
-	if (err.status === 429) {
-		return createError('rate_limit', `Rate limit exceeded for ${provider}. Please wait and try again.`);
-	}
-	if (err.status === 400) {
-		return createError('api_error', `Bad request to ${provider} API.`, err.message);
-	}
-	if (err.status && err.status >= 500) {
-		return createError('api_error', `${provider} API server error. Please try again later.`);
-	}
-
-	return createError('api_error', `Failed to call ${provider} API: ${err.message || 'Unknown error'}`);
-}
-
-async function callClaude(apiKey: string, model: string, prompt: string): Promise<string> {
-	const res = await requestUrl({
-		url: 'https://api.anthropic.com/v1/messages',
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			'x-api-key': apiKey,
-			'anthropic-version': '2023-06-01',
+	const result = await getAdapter(provider, creds).complete(
+		{
+			model,
+			effort,
+			maxOutputTokens,
+			responseSchema,
+			turns: [{ kind: 'user', text: prompt }],
 		},
-		body: JSON.stringify({
-			model: model,
-			messages: [{ role: 'user', content: prompt }],
-		}),
-	});
-
-	const data = res.json;
-	if (!data.content?.[0]?.text) {
-		throw createError('api_error', 'Empty response from Claude API');
-	}
-	return data.content[0].text;
+		creds
+	);
+	return result.text;
 }
 
-async function callOpenAI(apiKey: string, model: string, prompt: string): Promise<string> {
-	const res = await requestUrl({
-		url: 'https://api.openai.com/v1/chat/completions',
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			'Authorization': `Bearer ${apiKey}`,
-		},
-		body: JSON.stringify({
-			model: model,
-			messages: [{ role: 'user', content: prompt }],
-			temperature: 0.3,
-		}),
-	});
-
-	const data = res.json;
-	if (!data.choices?.[0]?.message?.content) {
-		throw createError('api_error', 'Empty response from OpenAI API');
-	}
-	return data.choices[0].message.content;
+/**
+ * The extraction schema, in the dialect the given provider accepts.
+ */
+function extractionSchemaFor(provider: ApiProvider): { name: string; schema: JsonSchemaObject } {
+	return {
+		name: EXTRACTION_SCHEMA_NAME,
+		schema: toProviderSchema(ONTOLOGY_JSON_SCHEMA, provider),
+	};
 }
 
-async function callGemini(apiKey: string, model: string, prompt: string): Promise<string> {
-	console.debug(`[Gemini] Calling model: ${model}, prompt length: ${prompt.length} chars`);
-
-	const res = await requestUrl({
-		url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`,
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({
-			contents: [{ parts: [{ text: prompt }] }],
-			generationConfig: {
-				temperature: 0.3,
-			},
-		}),
-	});
-
-	const data = res.json;
-
-	if (data.error) {
-		console.error('Gemini API error:', data.error);
-		throw createError('api_error', `Gemini API error: ${data.error.message || JSON.stringify(data.error)}`);
-	}
-
-	const candidate = data.candidates?.[0];
-
-	// Debug logging
-	console.debug(`[Gemini] Response finishReason: ${candidate?.finishReason}`);
-	console.debug(`[Gemini] Response text length: ${candidate?.content?.parts?.[0]?.text?.length || 0} chars`);
-	if (data.usageMetadata) {
-		console.debug(`[Gemini] Usage: prompt=${data.usageMetadata.promptTokenCount}, output=${data.usageMetadata.candidatesTokenCount}, total=${data.usageMetadata.totalTokenCount}`);
-	}
-
-	if (!candidate?.content?.parts?.[0]?.text) {
-		if (candidate?.finishReason === 'SAFETY') {
-			throw createError('api_error', 'Gemini extraction blocked by safety filters. Try distinct content.');
-		}
-		throw createError('api_error', 'Empty response from Gemini API');
-	}
-
-	return candidate.content.parts[0].text;
-}
-
-async function callOllama(host: string, model: string, prompt: string): Promise<string> {
-	// Normalize host URL
-	const baseUrl = host.replace(/\/+$/, '');
-
-	const res = await requestUrl({
-		url: `${baseUrl}/api/generate`,
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({
-			model: model,
-			prompt: prompt,
-			stream: false,
-			options: {
-				temperature: 0.3,
-			},
-		}),
-	});
-
-	const data = res.json;
-	if (!data.response) {
-		throw createError('api_error', 'Empty response from Ollama API');
-	}
-	return data.response;
-}
 
 // ============================================
 // Embedding Functions
@@ -324,7 +218,10 @@ export interface EmbeddingOptions {
 	provider: EmbeddingProvider;
 	apiKey: string;
 	model: string;
+	/** Base address of the local embedding server. */
 	ollamaHost?: string;
+	/** Which API that local server speaks. Independent of the chat provider. */
+	localApiStyle?: LocalApiStyle;
 }
 
 /**
@@ -335,9 +232,9 @@ export async function getEmbeddings(
 	options: EmbeddingOptions,
 	texts: string[]
 ): Promise<Float32Array[]> {
-	const { provider, apiKey, model, ollamaHost } = options;
+	const { provider, apiKey, model, ollamaHost, localApiStyle } = options;
 
-	// Ollama doesn't need an API key
+	// A local server usually needs no API key.
 	if (provider !== 'ollama' && !apiKey) {
 		throw createError('config_error', 'Embedding API key not configured.');
 	}
@@ -356,18 +253,27 @@ export async function getEmbeddings(
 				return await callOpenAIEmbeddings(apiKey, model, texts);
 			case 'gemini':
 				return await callGeminiEmbeddings(apiKey, model, texts);
-			case 'ollama':
-				return await callOllamaEmbeddings(ollamaHost || 'http://localhost:11434', model, texts);
+			case 'ollama': {
+				const host = (ollamaHost || 'http://localhost:11434').replace(/\/+$/, '');
+				return localApiStyle === 'openai'
+					? await callOpenAiStyleEmbeddings(
+						`${host}${/\/v\d+$/.test(host) ? '' : '/v1'}/embeddings`,
+						apiKey,
+						model,
+						texts,
+						'ollama',
+						host
+					)
+					: await callOllamaEmbeddings(host, model, texts);
+			}
 			default: {
 				const exhaustiveCheck: never = provider;
 				throw createError('config_error', `Unknown embedding provider: ${exhaustiveCheck as string}`);
 			}
 		}
 	} catch (e) {
-		if (e instanceof Error && 'type' in e) {
-			throw e; // Already an ExtractionError
-		}
-		throw handleApiError(e, provider);
+		// handleApiError passes typed errors straight through.
+		throw handleApiError(e, provider, ollamaHost);
 	}
 }
 
@@ -379,27 +285,57 @@ export function settingsToEmbeddingOptions(settings: Settings): EmbeddingOptions
 		provider: settings.embeddingProvider,
 		apiKey: settings.embeddingApiKey || settings.apiKey, // Fall back to main API key
 		model: settings.embeddingModel,
-		ollamaHost: settings.ollamaHost,
+		// The embedding server need not be the chat server: a local chat model
+		// does not imply a local embedding model. Fall back to the chat host
+		// only when no separate one is configured.
+		ollamaHost: settings.embeddingHost || settings.ollamaHost,
+		localApiStyle: settings.embeddingLocalApiStyle ?? 'ollama',
 	};
 }
 
-async function callOpenAIEmbeddings(apiKey: string, model: string, texts: string[]): Promise<Float32Array[]> {
-	const res = await requestUrl({
-		url: 'https://api.openai.com/v1/embeddings',
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-			'Authorization': `Bearer ${apiKey}`,
-		},
-		body: JSON.stringify({
+function callOpenAIEmbeddings(apiKey: string, model: string, texts: string[]): Promise<Float32Array[]> {
+	return callOpenAiStyleEmbeddings(
+		'https://api.openai.com/v1/embeddings',
+		apiKey,
+		model,
+		texts,
+		'openai'
+	);
+}
+
+/**
+ * The OpenAI `/v1/embeddings` shape, which OpenAI itself and every
+ * OpenAI-compatible local server (llama-server, LM Studio, vLLM) implement.
+ */
+async function callOpenAiStyleEmbeddings(
+	url: string,
+	apiKey: string,
+	model: string,
+	texts: string[],
+	provider: EmbeddingProvider,
+	ollamaHost?: string
+): Promise<Float32Array[]> {
+	const data = await postJson<{ data?: { index: number; embedding: number[] }[] }>({
+		url,
+		provider,
+		ollamaHost,
+		// A local server started without --api-key needs no Authorization header.
+		headers: apiKey ? { 'Authorization': `Bearer ${apiKey}` } : undefined,
+		body: {
 			model: model,
 			input: texts,
-		}),
+		},
 	});
 
-	const data = res.json;
 	if (!data.data || !Array.isArray(data.data)) {
-		throw createError('api_error', 'Invalid response from OpenAI embeddings API');
+		throw createError('api_error', `Invalid response from the ${provider} embeddings API`);
+	}
+
+	if (data.data.length !== texts.length) {
+		throw createError(
+			'api_error',
+			`Embeddings API returned ${data.data.length} vectors for ${texts.length} inputs.`
+		);
 	}
 
 	// Sort by index to ensure correct order
@@ -408,22 +344,27 @@ async function callOpenAIEmbeddings(apiKey: string, model: string, texts: string
 }
 
 async function callGeminiEmbeddings(apiKey: string, model: string, texts: string[]): Promise<Float32Array[]> {
-	// Gemini uses a different API structure - batch embed
-	const res = await requestUrl({
-		url: `https://generativelanguage.googleapis.com/v1beta/models/${model}:batchEmbedContents?key=${apiKey}`,
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({
-			requests: texts.map(text => ({
-				model: `models/${model}`,
-				content: { parts: [{ text }] },
-			})),
-		}),
-	});
+	// The catalogue id may encode a Matryoshka truncation width
+	// (gemini-embedding-001@768); the API only knows the bare model name.
+	const { apiModel, outputDimensionality } = getEmbeddingRequestConfig('gemini', model);
 
-	const data = res.json;
+	const data = await postJson<{
+		error?: { message?: string };
+		embeddings?: { values: number[] }[];
+	}>({
+		url: `https://generativelanguage.googleapis.com/v1beta/models/${apiModel}:batchEmbedContents`,
+		provider: 'gemini',
+		headers: {
+			'x-goog-api-key': apiKey,
+		},
+		body: {
+			requests: texts.map(text => ({
+				model: `models/${apiModel}`,
+				content: { parts: [{ text }] },
+				...(outputDimensionality ? { outputDimensionality } : {}),
+			})),
+		},
+	});
 
 	if (data.error) {
 		throw createError('api_error', `Gemini embeddings error: ${data.error.message || JSON.stringify(data.error)}`);
@@ -440,26 +381,31 @@ async function callOllamaEmbeddings(host: string, model: string, texts: string[]
 	const baseUrl = host.replace(/\/+$/, '');
 	const results: Float32Array[] = [];
 
-	// Ollama's embedding API processes one text at a time
-	for (const text of texts) {
-		const res = await requestUrl({
-			url: `${baseUrl}/api/embeddings`,
-			method: 'POST',
-			headers: {
-				'Content-Type': 'application/json',
-			},
-			body: JSON.stringify({
-				model: model,
-				prompt: text,
-			}),
-		});
+	// /api/embed supersedes /api/embeddings and takes the whole batch in one
+	// request, instead of one HTTP round trip per text.
+	const data = await postJson<{ embeddings?: number[][] }>({
+		url: `${baseUrl}/api/embed`,
+		provider: 'ollama',
+		ollamaHost: baseUrl,
+		body: {
+			model: model,
+			input: texts,
+		},
+	});
 
-		const data = res.json;
-		if (!data.embedding || !Array.isArray(data.embedding)) {
-			throw createError('api_error', 'Invalid response from Ollama embeddings API');
-		}
+	if (!Array.isArray(data.embeddings)) {
+		throw createError('api_error', 'Invalid response from Ollama embeddings API');
+	}
 
-		results.push(new Float32Array(data.embedding));
+	if (data.embeddings.length !== texts.length) {
+		throw createError(
+			'api_error',
+			`Ollama returned ${data.embeddings.length} embeddings for ${texts.length} inputs.`
+		);
+	}
+
+	for (const values of data.embeddings) {
+		results.push(new Float32Array(values));
 	}
 
 	return results;
@@ -594,9 +540,21 @@ export async function saveEmbeddingsBinary(
 			continue;
 		}
 
+		// A width mismatch means these vectors came from a different embedding
+		// model. Writing anyway would be silently destructive: TypedArray.set
+		// zero-pads a shorter source and throws on a longer one, so half the
+		// file would end up as plausible-looking garbage.
+		if (embedding.length !== dimensions) {
+			throw createError(
+				'config_error',
+				`Refusing to write embeddings: node ${nodeId} has ${embedding.length} dimensions but the ` +
+					`configured model produces ${dimensions}. Recompute embeddings after changing model.`
+			);
+		}
+
 		const offset = headerSize + i * embeddingSize;
 		const embeddingView = new Float32Array(buffer, offset, dimensions);
-		embeddingView.set(embedding.slice(0, dimensions));
+		embeddingView.set(embedding);
 	}
 
 	// Write to file
@@ -683,7 +641,13 @@ Answer with ONLY "yes" or "no".
 - "no" = they are different entities (e.g., "Apple (company)" and "apple (fruit)")`;
 
 	try {
-		const response = await callLLMProvider(options, prompt);
+		// A yes/no answer called once per candidate pair inside the resolver's
+		// loop. Reasoning here is pure cost, so pin effort low and cap the
+		// output regardless of the user's extraction setting.
+		const response = await callLLMProvider(
+			{ ...options, effort: 'minimal', maxOutputTokens: 16 },
+			prompt
+		);
 		const answer = response.toLowerCase().trim();
 		return answer === 'yes' || answer.startsWith('yes');
 	} catch (e) {
@@ -697,7 +661,13 @@ Answer with ONLY "yes" or "no".
 // ============================================
 
 /**
- * Extract JSON string from LLM response, handling markdown code blocks.
+ * Extract the JSON body from a reply.
+ *
+ * Extraction requests always carry a JSON schema, so a conforming reply is bare
+ * JSON and this is a no-op passthrough. Needing to strip a markdown fence or dig
+ * a JSON object out of surrounding prose means the model ignored its schema —
+ * worth a warning, because it usually points at a local model that accepted
+ * `format` without honouring it.
  */
 function extractJsonFromResponse(response: string): string {
 	let jsonStr = response.trim();
@@ -714,6 +684,13 @@ function extractJsonFromResponse(response: string): string {
 		if (jsonMatch) {
 			jsonStr = jsonMatch[0];
 		}
+	}
+
+	if (jsonStr !== response.trim()) {
+		console.warn(
+			'[simple-graph-builder] Model returned a schema-violating reply; recovered the JSON body. ' +
+				'If this recurs, the selected model is not honouring structured output.'
+		);
 	}
 
 	return jsonStr;
@@ -740,42 +717,48 @@ function toStringId(value: unknown, fallback: string): string {
  * Handles both new schema (entities) and legacy schema (nodes).
  */
 function parseEntities(parsed: Record<string, unknown>): RawExtractionNode[] {
-	const rawEntities = (parsed.entities || parsed.nodes || []) as Record<string, unknown>[];
+	const rawEntities = (parsed.entities ?? []) as Record<string, unknown>[];
 	const nodes: RawExtractionNode[] = [];
+	const dropped: { index: number; violations: SchemaViolation[] }[] = [];
 	let idCounter = 1;
 
-	for (const entity of rawEntities) {
-		if (!entity || typeof entity !== 'object') continue;
+	for (const [index, entity] of rawEntities.entries()) {
+		// Case is the one deviation worth absorbing: "person" carries the same
+		// meaning as "PERSON". Everything else is checked as-is.
+		const candidate = normalizeEntityCase(entity);
 
-		// Get name from either direct property or nested properties
-		const props = entity.properties as Record<string, unknown> | undefined;
-		const name = entity.name || props?.name;
-		if (!name || typeof name !== 'string') continue;
-
-		// Get entity type - try entity_type, then label, default to CONCEPT
-		let entityType: EntityType = 'CONCEPT';
-		const rawType = entity.entity_type || entity.entityType || entity.label;
-		if (rawType && typeof rawType === 'string') {
-			const upperType = rawType.toUpperCase();
-			if (isValidEntityType(upperType)) {
-				entityType = upperType;
-			}
+		const violations = validateAgainstSchema(candidate, ENTITY_ITEM_SCHEMA, `$.entities[${index}]`);
+		if (violations.length) {
+			dropped.push({ index, violations });
+			continue;
 		}
 
-		// Get description
-		const description = entity.description || props?.description;
+		const name = (candidate as { name: string }).name;
+		const description = (candidate as { description?: string }).description;
 
 		nodes.push({
-			id: toStringId(entity.id, String(idCounter++)),
-			entityType,
+			id: String(idCounter++),
+			entityType: (candidate as { entity_type: EntityType }).entity_type,
 			properties: {
 				name: name.trim(),
-				description: typeof description === 'string' ? description : undefined,
-			}
+				description: description || undefined,
+			},
 		});
 	}
 
+	reportDropped('entities', dropped);
 	return nodes;
+}
+
+/**
+ * Uppercase `entity_type` so a case variant is not treated as a violation.
+ * Returns a copy; never mutates the parsed payload.
+ */
+function normalizeEntityCase(entity: unknown): unknown {
+	if (!entity || typeof entity !== 'object' || Array.isArray(entity)) return entity;
+	const e = entity as Record<string, unknown>;
+	if (typeof e.entity_type !== 'string') return entity;
+	return { ...e, entity_type: e.entity_type.toUpperCase() };
 }
 
 /**
@@ -798,16 +781,6 @@ function resolveId(
 	return nameToId.get(id.toLowerCase()) || id;
 }
 
-/**
- * Convert legacy relationship type to verb.
- */
-const LEGACY_TYPE_TO_VERB: Record<string, string> = {
-	'HAS_PART': 'contains',
-	'LEADS_TO': 'leads to',
-	'ACTED_ON': 'acts on',
-	'CITES': 'cites',
-	'RELATED_TO': 'relates to',
-};
 
 /**
  * Parse relationships from parsed JSON object.
@@ -818,40 +791,47 @@ function parseRelationships(
 	nodes: RawExtractionNode[],
 	nameToId: Map<string, string>
 ): RawExtractionRelationship[] {
-	const rawRelationships = (parsed.relationships || []) as Record<string, unknown>[];
+	const rawRelationships = (parsed.relationships ?? []) as Record<string, unknown>[];
 	const relationships: RawExtractionRelationship[] = [];
+	const dropped: { index: number; violations: SchemaViolation[] }[] = [];
 
-	for (const rel of rawRelationships) {
-		if (!rel || typeof rel !== 'object') continue;
+	for (const [index, rel] of rawRelationships.entries()) {
+		const violations = validateAgainstSchema(
+			rel,
+			RELATIONSHIP_ITEM_SCHEMA,
+			`$.relationships[${index}]`
+		);
+		if (violations.length) {
+			dropped.push({ index, violations });
+			continue;
+		}
 
+		// Endpoints are entity names; map them onto the ids assigned above. A
+		// relationship naming an entity that was never extracted is dropped.
 		const sourceId = resolveId(rel.source, nodes, nameToId);
 		const targetId = resolveId(rel.target, nodes, nameToId);
-
-		if (!sourceId || !targetId) continue;
-
-		// Get relationship verb - try relationship, then type with conversion
-		let relationship = typeof rel.relationship === 'string' ? rel.relationship : '';
-		if (!relationship && rel.type !== undefined && rel.type !== null) {
-			const typeStr = typeof rel.type === 'string' ? rel.type : '';
-			relationship = LEGACY_TYPE_TO_VERB[typeStr.toUpperCase()] || typeStr;
-		}
-		if (!relationship) {
-			relationship = 'relates to';
+		if (!sourceId || !targetId) {
+			dropped.push({
+				index,
+				violations: [{ path: `$.relationships[${index}]`, message: 'endpoint is not a known entity' }],
+			});
+			continue;
 		}
 
-		const props = rel.properties as Record<string, unknown> | undefined;
-		const detail = rel.description || props?.detail;
+		const relationship = (rel as { relationship: string }).relationship;
+		const detail = (rel as { description?: string }).description;
 
 		relationships.push({
 			source: sourceId,
 			target: targetId,
 			relationship: relationship.toLowerCase(),
 			properties: {
-				detail: typeof detail === 'string' ? detail : undefined,
-			}
+				detail: detail || undefined,
+			},
 		});
 	}
 
+	reportDropped('relationships', dropped);
 	return relationships;
 }
 
@@ -862,24 +842,66 @@ function parseRelationships(
 function parseOntologyResponse(response: string): OntologyExtractionResult {
 	const jsonStr = extractJsonFromResponse(response);
 
+	let parsed: Record<string, unknown>;
 	try {
-		const parsed = JSON.parse(jsonStr) as Record<string, unknown>;
-
-		// Parse entities
-		const nodes = parseEntities(parsed);
-
-		// Build name-to-id map for relationship resolution
-		const nameToId = new Map<string, string>();
-		for (const node of nodes) {
-			nameToId.set(node.properties.name.toLowerCase(), node.id);
-		}
-
-		// Parse relationships
-		const relationships = parseRelationships(parsed, nodes, nameToId);
-
-		return { nodes, relationships };
+		parsed = JSON.parse(jsonStr) as Record<string, unknown>;
 	} catch {
 		console.error('Failed to parse LLM response:', response);
 		throw createError('parse_error', 'Failed to parse extraction result from LLM', response.slice(0, 200));
 	}
+
+	// Validity pass. The request carried a JSON schema, so the reply is expected
+	// to conform; anything that does not is a broken contract rather than a
+	// shape to be guessed at.
+	const envelope = validateEnvelope(parsed);
+	if (envelope.length) {
+		console.error('Extraction response failed schema validation:', envelope, response.slice(0, 400));
+		throw createError(
+			'parse_error',
+			'The model returned a response that does not match the extraction schema.',
+			envelope.map((v) => `${v.path}: ${v.message}`).join('; ')
+		);
+	}
+
+	const nodes = parseEntities(parsed);
+
+	// Build name-to-id map for relationship resolution
+	const nameToId = new Map<string, string>();
+	for (const node of nodes) {
+		nameToId.set(node.properties.name.toLowerCase(), node.id);
+	}
+
+	const relationships = parseRelationships(parsed, nodes, nameToId);
+
+	return { nodes, relationships };
+}
+
+/**
+ * Envelope-level validation: the two arrays must be present and be arrays.
+ * Anything wrong here means the payload is unusable, so it throws. Individual
+ * malformed items are reported and dropped by parseEntities /
+ * parseRelationships instead, so one bad entity cannot discard a whole chunk.
+ */
+function validateEnvelope(parsed: unknown): SchemaViolation[] {
+	return validateAgainstSchema(parsed, {
+		type: 'object',
+		required: ['entities', 'relationships'],
+		properties: {
+			entities: { type: 'array' },
+			relationships: { type: 'array' },
+		},
+	});
+}
+
+/**
+ * Report dropped items once per chunk rather than once per item.
+ */
+function reportDropped(kind: string, dropped: { index: number; violations: SchemaViolation[] }[]): void {
+	if (!dropped.length) return;
+	const detail = dropped
+		.map((d) => `[${d.index}] ${d.violations.map((v) => `${v.path}: ${v.message}`).join(', ')}`)
+		.join(' | ');
+	console.warn(
+		`[simple-graph-builder] Dropped ${dropped.length} ${kind} that violated the extraction schema: ${detail}`
+	);
 }

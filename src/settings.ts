@@ -1,128 +1,50 @@
 import { Settings } from './types';
+import { resolveModelConfig, ResolvedModel } from './extraction/providers/models';
+import { DEFAULT_EFFORT } from './extraction/providers/effort';
 
 /**
- * Models with limited or no tool calling support.
- * These models may not work well with Smart Search.
+ * Bumped whenever a migration step is added. See src/settings-migration.ts.
+ * 1 = pre-versioning (extractionMode rename only)
+ * 2 = July 2026 model IDs + effort levels
  */
-const LIMITED_TOOL_SUPPORT_PATTERNS = [
-	'deepseek-r1',   // Reasoning-focused, limited tool support
-	'gemma3',        // Limited tool calling support
-	'gemini-2.5-flash-lite', // May have limited support
-];
+export const CURRENT_SETTINGS_VERSION = 2;
 
-/**
- * Check if the current model configuration supports tool calling.
- * Returns true if the model is expected to work with Smart Search.
- * Uses Smart Search specific settings if enabled.
- */
-export function supportsToolCalling(settings: Settings): boolean {
-	// Get the effective provider and model for Smart Search
-	const provider = settings.useSeparateSmartSearchModel
-		? settings.smartSearchProvider
-		: settings.apiProvider;
-
-	// Claude, OpenAI always support tool calling
-	if (provider === 'claude' || provider === 'openai') {
-		return true;
-	}
-
-	// Get the effective model
-	let model: string;
-	if (settings.useSeparateSmartSearchModel) {
-		const modelMap: Record<string, string> = {
-			claude: settings.smartSearchClaudeModel,
-			openai: settings.smartSearchOpenaiModel,
-			gemini: settings.smartSearchGeminiModel,
-			ollama: settings.smartSearchOllamaModel,
-		};
-		model = modelMap[provider] || '';
-	} else {
-		const modelMap: Record<string, string> = {
-			claude: settings.claudeModel,
-			openai: settings.openaiModel,
-			gemini: settings.geminiModel,
-			ollama: settings.ollamaModel,
-		};
-		model = modelMap[provider] || '';
-	}
-
-	// Check Gemini model
-	if (provider === 'gemini') {
-		return !LIMITED_TOOL_SUPPORT_PATTERNS.some(pattern => model.toLowerCase().includes(pattern));
-	}
-
-	// Check Ollama model
-	if (provider === 'ollama') {
-		return !LIMITED_TOOL_SUPPORT_PATTERNS.some(pattern => model.toLowerCase().includes(pattern));
-	}
-
-	return true;
-}
-
-/**
- * Get the name of models with limited tool support for display.
- */
-export function getLimitedToolSupportModels(): string[] {
-	return ['deepseek-r1:*', 'gemma3:*', 'gemini-2.5-flash-lite'];
-}
+// The model catalog and the provider/model/key resolver now live with the
+// provider adapters. Re-exported here so existing importers keep working.
+export {
+	MODEL_OPTIONS,
+	supportsToolCalling,
+	getLimitedToolSupportModels,
+	resolveModelConfig,
+} from './extraction/providers/models';
 
 /**
  * Get the effective Smart Search configuration.
- * Returns provider, model, and API key to use for Smart Search.
  */
-export function getSmartSearchConfig(settings: Settings): {
-	provider: Settings['apiProvider'];
-	model: string;
-	apiKey: string;
-	ollamaHost: string;
-} {
-	if (settings.useSeparateSmartSearchModel) {
-		const modelMap: Record<string, string> = {
-			claude: settings.smartSearchClaudeModel,
-			openai: settings.smartSearchOpenaiModel,
-			gemini: settings.smartSearchGeminiModel,
-			ollama: settings.smartSearchOllamaModel,
-		};
-		return {
-			provider: settings.smartSearchProvider,
-			model: modelMap[settings.smartSearchProvider] || '',
-			apiKey: settings.apiKey, // Use same API key for now
-			ollamaHost: settings.ollamaHost,
-		};
-	}
-
-	// Use same settings as extraction
-	const modelMap: Record<string, string> = {
-		claude: settings.claudeModel,
-		openai: settings.openaiModel,
-		gemini: settings.geminiModel,
-		ollama: settings.ollamaModel,
-	};
-	return {
-		provider: settings.apiProvider,
-		model: modelMap[settings.apiProvider] || '',
-		apiKey: settings.apiKey,
-		ollamaHost: settings.ollamaHost,
-	};
+export function getSmartSearchConfig(settings: Settings): ResolvedModel {
+	return resolveModelConfig(settings, 'smartSearch');
 }
 
 export const DEFAULT_SETTINGS: Settings = {
 	apiProvider: 'claude',
 	apiKey: '',
-	claudeModel: 'claude-sonnet-4-5-20250929',
-	openaiModel: 'gpt-5-mini',
-	geminiModel: 'gemini-2.5-flash',
+	claudeModel: 'claude-sonnet-5',
+	openaiModel: 'gpt-5.4-mini',
+	geminiModel: 'gemini-3.6-flash',
 	ollamaModel: 'gpt-oss:20b',
 	ollamaHost: 'http://localhost:11434',
+	localApiStyle: 'ollama',
 	extractionMode: 'standard',
+	extractionEffort: DEFAULT_EFFORT,
 	autoAnalyzeOnSave: false,
 	// Smart Search model settings
 	useSeparateSmartSearchModel: false,
 	smartSearchProvider: 'claude',
-	smartSearchClaudeModel: 'claude-sonnet-4-5-20250929',
-	smartSearchOpenaiModel: 'gpt-4o',
-	smartSearchGeminiModel: 'gemini-2.5-pro',
+	smartSearchClaudeModel: 'claude-sonnet-5',
+	smartSearchOpenaiModel: 'gpt-5.6-luna',
+	smartSearchGeminiModel: 'gemini-3.6-flash',
 	smartSearchOllamaModel: 'qwen3:32b',
+	smartSearchEffort: DEFAULT_EFFORT,
 	// View settings
 	openGraphInMain: false,
 	graphMinDegree: 0,
@@ -131,47 +53,12 @@ export const DEFAULT_SETTINGS: Settings = {
 	embeddingProvider: 'openai',
 	embeddingApiKey: '',
 	embeddingModel: 'text-embedding-3-small',
+	embeddingHost: '',
+	embeddingLocalApiStyle: 'ollama',
 	resolutionThresholdHigh: 0.90,
 	resolutionThresholdLow: 0.80,
 	enableLLMVerification: true,
-};
-
-// Common model options for each provider (for reference in UI)
-export const MODEL_OPTIONS = {
-	claude: [
-		'claude-sonnet-4-5-20250929',
-		'claude-haiku-4-5-20251001',
-	],
-	openai: [
-		'gpt-5.1',
-		'gpt-5-mini',
-		'gpt-5-nano',
-		'gpt-4.1',
-		'gpt-4.1-mini',
-		'gpt-4o',
-		'gpt-4o-mini',
-	],
-	gemini: [
-		'gemini-3-pro-preview',
-		'gemini-2.5-pro',
-		'gemini-2.5-flash',
-		'gemini-2.5-flash-lite',
-		'gemini-2.0-flash'
-	],
-	ollama: [
-		'gpt-oss:20b',
-		'gpt-oss:120b',
-		'deepseek-r1:8b',
-		'deepseek-r1:14b',
-		'deepseek-r1:32b',
-		'qwen3-coder:30b',
-		'gemma3:4b',
-		'gemma3:12b',
-		'gemma3:27b',
-		'qwen3:8b',
-		'qwen3:14b',
-		'qwen3:32b'
-	],
+	settingsVersion: CURRENT_SETTINGS_VERSION,
 };
 
 // Default embedding dimensions (OpenAI text-embedding-3-small)
@@ -185,7 +72,31 @@ export const EMBEDDING_MODEL_OPTIONS = {
 		{ id: 'text-embedding-ada-002', name: 'text-embedding-ada-002 (1536 dims)', dimensions: 1536 },
 	],
 	gemini: [
-		{ id: 'text-embedding-004', name: 'text-embedding-004 (768 dims)', dimensions: 768 },
+		// text-embedding-004 was shut down 2026-01-14. The @768 variant is the
+		// default because it matches the old vector width — so a migrated
+		// install keeps its stored embeddings — and because 3072 dims is 12 KB
+		// per node, which is 60 MB for a 5,000-node vault inside a synced
+		// .obsidian folder.
+		{
+			id: 'gemini-embedding-001@768',
+			name: 'gemini-embedding-001 (768 dims)',
+			dimensions: 768,
+			apiModel: 'gemini-embedding-001',
+			outputDimensionality: 768,
+		},
+		{
+			id: 'gemini-embedding-001@1536',
+			name: 'gemini-embedding-001 (1536 dims)',
+			dimensions: 1536,
+			apiModel: 'gemini-embedding-001',
+			outputDimensionality: 1536,
+		},
+		{
+			id: 'gemini-embedding-001',
+			name: 'gemini-embedding-001 (3072 dims, largest)',
+			dimensions: 3072,
+			apiModel: 'gemini-embedding-001',
+		},
 	],
 	ollama: [
 		{ id: 'nomic-embed-text', name: 'nomic-embed-text (768 dims)', dimensions: 768 },
@@ -194,12 +105,41 @@ export const EMBEDDING_MODEL_OPTIONS = {
 	],
 };
 
+interface EmbeddingModelOption {
+	id: string;
+	name: string;
+	dimensions: number;
+	/** Wire model name, when it differs from the catalogue id. */
+	apiModel?: string;
+	/** Matryoshka truncation length, when narrower than the model's native width. */
+	outputDimensionality?: number;
+}
+
+function findEmbeddingModel(provider: string, model: string): EmbeddingModelOption | undefined {
+	const providerOptions = EMBEDDING_MODEL_OPTIONS[
+		provider as keyof typeof EMBEDDING_MODEL_OPTIONS
+	] as EmbeddingModelOption[] | undefined;
+	return providerOptions?.find(m => m.id === model);
+}
+
 /**
  * Get embedding dimensions for a given provider and model.
  */
 export function getEmbeddingDimensions(provider: string, model: string): number {
-	const providerOptions = EMBEDDING_MODEL_OPTIONS[provider as keyof typeof EMBEDDING_MODEL_OPTIONS];
-	if (!providerOptions) return DEFAULT_EMBEDDING_DIMENSIONS;
-	const modelOption = providerOptions.find(m => m.id === model);
-	return modelOption?.dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
+	return findEmbeddingModel(provider, model)?.dimensions ?? DEFAULT_EMBEDDING_DIMENSIONS;
+}
+
+/**
+ * Catalogue ids can encode a truncation width (`gemini-embedding-001@768`),
+ * which is not a model name the API knows. Resolve to what goes on the wire.
+ */
+export function getEmbeddingRequestConfig(
+	provider: string,
+	model: string
+): { apiModel: string; outputDimensionality?: number } {
+	const option = findEmbeddingModel(provider, model);
+	return {
+		apiModel: option?.apiModel ?? model,
+		outputDimensionality: option?.outputDimensionality,
+	};
 }

@@ -113,6 +113,7 @@ export function buildSmartSearchSystemPrompt(): string {
    - Relationships are free-form verbs like "develops", "uses", "causes", "cites"
 4. get_connected_nodes(node_name, hops?) - Get nodes connected within N hops (default: 2)
 5. get_source_notes(node_name) - Get source notes where this node was extracted from
+6. find_path(from_name, to_name, max_hops?) - Find the chain of relationships connecting two entities (default max_hops: 4). Use this when the question asks how, or whether, two things are related.
 
 **Entity Types:**
 PERSON, ORGANIZATION, CONCEPT, PROJECT, TOOL, EVENT, PLACE, DOCUMENT, METHOD, TOPIC
@@ -245,6 +246,30 @@ export function getSmartSearchTools(): SmartSearchToolDefinition[] {
 					}
 				},
 				required: ['node_name']
+			}
+		},
+		{
+			name: 'find_path',
+			description:
+				'Find how two entities are connected, returning the chain of relationships between them. ' +
+				'Use this for questions about how or whether two things relate.',
+			parameters: {
+				type: 'object',
+				properties: {
+					from_name: {
+						type: 'string',
+						description: 'The name of the entity to start from'
+					},
+					to_name: {
+						type: 'string',
+						description: 'The name of the entity to reach'
+					},
+					max_hops: {
+						type: 'integer',
+						description: 'Maximum path length to consider (default: 4, max: 4)'
+					}
+				},
+				required: ['from_name', 'to_name']
 			}
 		}
 	];

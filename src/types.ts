@@ -1,3 +1,5 @@
+import { EffortLevel } from './extraction/providers/effort';
+
 // ============================================
 // Schema Version
 // ============================================
@@ -299,6 +301,14 @@ export type EmbeddingProvider = 'openai' | 'gemini' | 'ollama';
  */
 export type ExtractionMode = 'standard' | 'thorough';
 
+/**
+ * Which API a local LLM server speaks.
+ * - ollama: Ollama's native /api/chat
+ * - openai: the OpenAI Chat Completions API, as served by llama.cpp's
+ *   llama-server, LM Studio, vLLM, LiteLLM and similar
+ */
+export type LocalApiStyle = 'ollama' | 'openai';
+
 export interface Settings {
 	apiProvider: ApiProvider;
 	apiKey: string;
@@ -307,9 +317,11 @@ export interface Settings {
 	openaiModel: string;
 	geminiModel: string;
 	ollamaModel: string;
-	ollamaHost: string;     // Ollama server URL (default: http://localhost:11434)
+	ollamaHost: string;     // Local server URL (default: http://localhost:11434)
+	localApiStyle: LocalApiStyle;  // default: 'ollama'
 	// Extraction settings
 	extractionMode: ExtractionMode;  // Controls extraction thoroughness
+	extractionEffort: EffortLevel;   // default: 'minimal' - reasoning depth for extraction
 	// Auto-analysis
 	autoAnalyzeOnSave: boolean;  // Analyze notes automatically when saved
 	// Smart Search model settings (separate from extraction)
@@ -319,6 +331,7 @@ export interface Settings {
 	smartSearchOpenaiModel: string;
 	smartSearchGeminiModel: string;
 	smartSearchOllamaModel: string;
+	smartSearchEffort: EffortLevel;        // default: 'minimal'
 	// View settings
 	openGraphInMain: boolean;    // Open graph view in main window instead of sidebar
 	graphMinDegree: number;      // Minimum connections to show node in graph (default: 0)
@@ -327,9 +340,14 @@ export interface Settings {
 	embeddingProvider: EmbeddingProvider; // default: 'openai'
 	embeddingApiKey: string;              // separate key for embeddings (can differ from main provider)
 	embeddingModel: string;               // default: 'text-embedding-3-small'
+	embeddingHost: string;                // local embedding server; blank = reuse the chat server's host
+	embeddingLocalApiStyle: LocalApiStyle; // API the local embedding server speaks; independent of the chat provider
 	resolutionThresholdHigh: number;      // default: 0.90 - auto-merge above this
 	resolutionThresholdLow: number;       // default: 0.80 - LLM verification between low and high
 	enableLLMVerification: boolean;       // default: true - use LLM for ambiguous matches
+	// Migration bookkeeping. Bump when a migration step is added; see
+	// src/settings-migration.ts.
+	settingsVersion: number;
 }
 
 // Legacy type for compatibility with GraphNode references

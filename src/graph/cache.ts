@@ -1,5 +1,6 @@
+import { Notice } from 'obsidian';
 import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, ResolutionCache, EmbeddingIndex, labelToEntityType } from '../types';
-import { DEFAULT_SETTINGS, getEmbeddingDimensions } from '../settings';
+import { DEFAULT_SETTINGS, DEFAULT_EMBEDDING_DIMENSIONS, getEmbeddingDimensions } from '../settings';
 import { loadEmbeddingsBinary, saveEmbeddingsBinary, cosineSimilarity } from '../extraction/llm-client';
 import type SimpleGraphBuilderPlugin from '../main';
 
@@ -626,6 +627,45 @@ export class GraphCache {
 			return;
 		}
 
+		// Stored vectors belong to whichever model produced them. Mixing widths
+		// is silently destructive — saveEmbeddingsBinary writes through
+		// TypedArray.set, which zero-pads a shorter source, and cosineSimilarity
+		// throws on any length mismatch — so discard rather than mix.
+		//
+		// The model name is the reliable signal: it is recorded in the index and
+		// works for custom or self-hosted models the dimension catalogue has
+		// never heard of. The width check is a backstop for an index written
+		// before the model was recorded.
+		const settings = this.plugin.settings;
+		const storedModel = this.embeddingIndex.model;
+		const catalogueDimensions = getEmbeddingDimensions(
+			settings.embeddingProvider,
+			settings.embeddingModel
+		);
+		const inCatalogue = settings.embeddingModel
+			? catalogueDimensions !== DEFAULT_EMBEDDING_DIMENSIONS ||
+				settings.embeddingModel === 'text-embedding-3-small'
+			: false;
+
+		const modelChanged = !!storedModel && storedModel !== settings.embeddingModel;
+		const widthChanged = inCatalogue && this.embeddingIndex.dimensions !== catalogueDimensions;
+
+		if (modelChanged || widthChanged) {
+			console.warn(
+				`[simple-graph-builder] Stored embeddings came from "${storedModel ?? 'unknown'}" ` +
+					`(${this.embeddingIndex.dimensions} dims) but the configured model is ` +
+					`"${settings.embeddingModel}". Discarding the stale index.`
+			);
+			new Notice(
+				'Embedding model changed. Recompute embeddings in settings to re-enable entity resolution.',
+				8000
+			);
+			this.embeddingIndex = null;
+			this.embeddings.clear();
+			this.embeddingsLoaded = true;
+			return;
+		}
+
 		// Load embeddings from binary file
 		const pluginDir = this.plugin.manifest.dir || '';
 		this.embeddings = await loadEmbeddingsBinary(
@@ -646,10 +686,18 @@ export class GraphCache {
 		if (!this.embeddingsDirty) return;
 
 		const settings = this.plugin.settings;
-		const dimensions = getEmbeddingDimensions(settings.embeddingProvider, settings.embeddingModel);
 
 		// Build ordered list of node IDs
 		const nodeIds = Array.from(this.embeddings.keys());
+
+		// Take the width from the vectors themselves rather than the model
+		// catalogue. A custom or self-hosted embedding model is not in the
+		// catalogue, and the catalogue's fallback width would be wrong — which
+		// saveEmbeddingsBinary now (correctly) refuses to write.
+		const firstVector = this.embeddings.values().next().value as Float32Array | undefined;
+		const dimensions =
+			firstVector?.length ??
+			getEmbeddingDimensions(settings.embeddingProvider, settings.embeddingModel);
 
 		// Update embedding index (will be saved by flush())
 		this.embeddingIndex = {

@@ -1,7 +1,9 @@
-import { App, Notice, PluginSettingTab, Setting } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, TextComponent } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
-import { ApiProvider, EmbeddingProvider, ExtractionMode } from '../types';
+import { ApiProvider, EmbeddingProvider, ExtractionMode, LocalApiStyle } from '../types';
 import { MODEL_OPTIONS, EMBEDDING_MODEL_OPTIONS } from '../settings';
+import { getAdapter } from '../extraction/providers/index';
+import { EFFORT_LABELS, EFFORT_LEVELS, EffortLevel } from '../extraction/providers/effort';
 import { clearHashes } from '../graph/hashes';
 import { analyzeEntireVault, isAnalyzingVault, cancelVaultAnalysis } from '../commands/analyze';
 import { getEmbeddings, settingsToEmbeddingOptions } from '../extraction/llm-client';
@@ -14,6 +16,121 @@ export class SettingsTab extends PluginSettingTab {
 	constructor(app: App, plugin: SimpleGraphBuilderPlugin) {
 		super(app, plugin);
 		this.plugin = plugin;
+	}
+
+	/**
+	 * A model picker: a dropdown of known models plus a "Custom…" escape hatch.
+	 *
+	 * Replaces eight near-identical dropdown+textbox pairs. Only the Ollama pair
+	 * used to guard against a stored model that is missing from the list; the
+	 * others called `setValue` with an off-list value, which Obsidian silently
+	 * ignores, leaving the dropdown showing the first option while the setting
+	 * held something else entirely.
+	 */
+	private addModelSetting(
+		container: HTMLElement,
+		opts: {
+			name: string;
+			desc: string;
+			provider: ApiProvider;
+			get: () => string;
+			set: (value: string) => Promise<void>;
+		}
+	): void {
+		const CUSTOM = '__custom__';
+		const options = MODEL_OPTIONS[opts.provider];
+
+		const setting = new Setting(container).setName(opts.name).setDesc(opts.desc);
+		const warningEl = setting.descEl.createDiv({ cls: 'sgb-model-warning' });
+
+		const refreshWarning = () => {
+			warningEl.empty();
+			warningEl.removeClass('sgb-model-warning-error');
+
+			const model = opts.get();
+			if (!model) return;
+
+			const caps = getAdapter(opts.provider, {
+				apiKey: this.plugin.settings.apiKey,
+				ollamaHost: this.plugin.settings.ollamaHost,
+				localApiStyle: this.plugin.settings.localApiStyle,
+			}).capabilities(model);
+			if (!caps.structuredOutput) {
+				warningEl.addClass('sgb-model-warning-error');
+				warningEl.appendText(
+					`${model} cannot return structured output, which note analysis requires. Choose another model.`
+				);
+			} else if (!caps.effort) {
+				warningEl.appendText(`${model} does not support the reasoning effort setting; it will be ignored.`);
+			}
+		};
+
+		let textInput: TextComponent | undefined;
+
+		setting
+			.addDropdown(dropdown => {
+				for (const model of options) {
+					dropdown.addOption(model, model);
+				}
+				dropdown.addOption(CUSTOM, 'Custom…');
+
+				const current = opts.get();
+				dropdown.setValue(options.includes(current) ? current : CUSTOM);
+
+				dropdown.onChange(async (value) => {
+					if (value === CUSTOM) {
+						// Wait for the text field rather than storing the sentinel.
+						if (textInput) {
+							textInput.inputEl.disabled = false;
+							textInput.inputEl.focus();
+						}
+						return;
+					}
+					textInput?.setValue('');
+					if (textInput) textInput.inputEl.disabled = true;
+					await opts.set(value);
+					refreshWarning();
+				});
+			})
+			.addText(text => {
+				textInput = text;
+				const current = opts.get();
+				const isCustom = !options.includes(current);
+
+				text
+					.setPlaceholder('Custom model ID')
+					.setValue(isCustom ? current : '')
+					.onChange(async (value) => {
+						const trimmed = value.trim();
+						if (trimmed) {
+							await opts.set(trimmed);
+							refreshWarning();
+						}
+					});
+
+				text.inputEl.disabled = !isCustom;
+				text.inputEl.addClass('sgb-setting-input-wide');
+			});
+
+		refreshWarning();
+	}
+
+	/** Reasoning-effort picker, shared by extraction and Smart Search. */
+	private addEffortSetting(
+		container: HTMLElement,
+		opts: { name: string; desc: string; get: () => EffortLevel; set: (value: EffortLevel) => Promise<void> }
+	): void {
+		new Setting(container)
+			.setName(opts.name)
+			.setDesc(opts.desc)
+			.addDropdown(dropdown => {
+				for (const level of EFFORT_LEVELS) {
+					dropdown.addOption(level, EFFORT_LABELS[level]);
+				}
+				dropdown.setValue(opts.get()).onChange(async (value) => {
+					await opts.set(value as EffortLevel);
+				});
+			});
 	}
 
 	display(): void {
@@ -55,32 +172,16 @@ export class SettingsTab extends PluginSettingTab {
 					});
 				text.inputEl.type = 'password';
 			});
-		new Setting(this.providerSettingsEls.claude)
-			.setName('Model')
-			.setDesc('Claude model to use')
-			.addDropdown(dropdown => {
-				for (const model of MODEL_OPTIONS.claude) {
-					dropdown.addOption(model, model);
-				}
-				dropdown
-					.setValue(this.plugin.settings.claudeModel)
-					.onChange(async (value) => {
-						this.plugin.settings.claudeModel = value;
-						await this.plugin.saveSettings();
-					});
-			})
-			.addText(text => {
-				text
-					.setPlaceholder('Or enter custom model')
-					.setValue(MODEL_OPTIONS.claude.includes(this.plugin.settings.claudeModel) ? '' : this.plugin.settings.claudeModel)
-					.onChange(async (value) => {
-						if (value.trim()) {
-							this.plugin.settings.claudeModel = value.trim();
-							await this.plugin.saveSettings();
-						}
-					});
-				text.inputEl.addClass('sgb-setting-input-wide');
-			});
+		this.addModelSetting(this.providerSettingsEls.claude, {
+			name: 'Model',
+			desc: 'Claude model to use',
+			provider: 'claude',
+			get: () => this.plugin.settings.claudeModel,
+			set: async (value) => {
+				this.plugin.settings.claudeModel = value;
+				await this.plugin.saveSettings();
+			},
+		});
 
 		// OpenAI settings
 		this.providerSettingsEls.openai = containerEl.createDiv();
@@ -97,32 +198,16 @@ export class SettingsTab extends PluginSettingTab {
 					});
 				text.inputEl.type = 'password';
 			});
-		new Setting(this.providerSettingsEls.openai)
-			.setName('Model')
-			.setDesc('OpenAI model to use')
-			.addDropdown(dropdown => {
-				for (const model of MODEL_OPTIONS.openai) {
-					dropdown.addOption(model, model);
-				}
-				dropdown
-					.setValue(this.plugin.settings.openaiModel)
-					.onChange(async (value) => {
-						this.plugin.settings.openaiModel = value;
-						await this.plugin.saveSettings();
-					});
-			})
-			.addText(text => {
-				text
-					.setPlaceholder('Or enter custom model')
-					.setValue(MODEL_OPTIONS.openai.includes(this.plugin.settings.openaiModel) ? '' : this.plugin.settings.openaiModel)
-					.onChange(async (value) => {
-						if (value.trim()) {
-							this.plugin.settings.openaiModel = value.trim();
-							await this.plugin.saveSettings();
-						}
-					});
-				text.inputEl.addClass('sgb-setting-input-wide');
-			});
+		this.addModelSetting(this.providerSettingsEls.openai, {
+			name: 'Model',
+			desc: 'OpenAI model to use',
+			provider: 'openai',
+			get: () => this.plugin.settings.openaiModel,
+			set: async (value) => {
+				this.plugin.settings.openaiModel = value;
+				await this.plugin.saveSettings();
+			},
+		});
 
 		// Gemini settings
 		this.providerSettingsEls.gemini = containerEl.createDiv();
@@ -139,38 +224,43 @@ export class SettingsTab extends PluginSettingTab {
 					});
 				text.inputEl.type = 'password';
 			});
-		new Setting(this.providerSettingsEls.gemini)
-			.setName('Model')
-			.setDesc('Gemini model to use')
-			.addDropdown(dropdown => {
-				for (const model of MODEL_OPTIONS.gemini) {
-					dropdown.addOption(model, model);
-				}
-				dropdown
-					.setValue(this.plugin.settings.geminiModel)
-					.onChange(async (value) => {
-						this.plugin.settings.geminiModel = value;
-						await this.plugin.saveSettings();
-					});
-			})
-			.addText(text => {
-				text
-					.setPlaceholder('Or enter custom model')
-					.setValue(MODEL_OPTIONS.gemini.includes(this.plugin.settings.geminiModel) ? '' : this.plugin.settings.geminiModel)
-					.onChange(async (value) => {
-						if (value.trim()) {
-							this.plugin.settings.geminiModel = value.trim();
-							await this.plugin.saveSettings();
-						}
-					});
-				text.inputEl.addClass('sgb-setting-input-wide');
-			});
+		this.addModelSetting(this.providerSettingsEls.gemini, {
+			name: 'Model',
+			desc: 'Gemini model to use',
+			provider: 'gemini',
+			get: () => this.plugin.settings.geminiModel,
+			set: async (value) => {
+				this.plugin.settings.geminiModel = value;
+				await this.plugin.saveSettings();
+			},
+		});
 
 		// Ollama settings
 		this.providerSettingsEls.ollama = containerEl.createDiv();
 		new Setting(this.providerSettingsEls.ollama)
+			.setName('Server API')
+			.setDesc(
+				'Which API the local server speaks. Use OpenAI-compatible for llama.cpp (llama-server), LM Studio, vLLM and similar.'
+			)
+			.addDropdown(dropdown => {
+				dropdown
+					.addOption('ollama', 'Ollama (/api/chat)')
+					.addOption('openai', 'OpenAI-compatible (/v1/chat/completions)')
+					.setValue(this.plugin.settings.localApiStyle ?? 'ollama')
+					.onChange(async (value) => {
+						this.plugin.settings.localApiStyle = value as LocalApiStyle;
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+
+		new Setting(this.providerSettingsEls.ollama)
 			.setName('Host')
-			.setDesc('Ollama server address')
+			.setDesc(
+				this.plugin.settings.localApiStyle === 'openai'
+					? 'Base address of the server, without the /v1 suffix (e.g. http://127.0.0.1:8091)'
+					: 'Ollama server address'
+			)
 			.addText(text => {
 				text
 					.setPlaceholder('Server address')
@@ -180,32 +270,16 @@ export class SettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
-		new Setting(this.providerSettingsEls.ollama)
-			.setName('Model')
-			.setDesc('Ollama model to use')
-			.addDropdown(dropdown => {
-				for (const model of MODEL_OPTIONS.ollama) {
-					dropdown.addOption(model, model);
-				}
-				dropdown
-					.setValue(MODEL_OPTIONS.ollama.includes(this.plugin.settings.ollamaModel) ? this.plugin.settings.ollamaModel : MODEL_OPTIONS.ollama[0])
-					.onChange(async (value) => {
-						this.plugin.settings.ollamaModel = value;
-						await this.plugin.saveSettings();
-					});
-			})
-			.addText(text => {
-				text
-					.setPlaceholder('Or enter custom model')
-					.setValue(MODEL_OPTIONS.ollama.includes(this.plugin.settings.ollamaModel) ? '' : this.plugin.settings.ollamaModel)
-					.onChange(async (value) => {
-						if (value.trim()) {
-							this.plugin.settings.ollamaModel = value.trim();
-							await this.plugin.saveSettings();
-						}
-					});
-				text.inputEl.addClass('sgb-setting-input-wide');
-			});
+		this.addModelSetting(this.providerSettingsEls.ollama, {
+			name: 'Model',
+			desc: 'Ollama model to use',
+			provider: 'ollama',
+			get: () => this.plugin.settings.ollamaModel,
+			set: async (value) => {
+				this.plugin.settings.ollamaModel = value;
+				await this.plugin.saveSettings();
+			},
+		});
 
 		// Tool calling warning for Ollama
 		const ollamaWarning = this.providerSettingsEls.ollama.createEl('div', { cls: 'setting-item-description sgb-ollama-warning' });
@@ -238,6 +312,16 @@ export class SettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
+
+		this.addEffortSetting(containerEl, {
+			name: 'Reasoning effort',
+			desc: 'How much the model reasons before extracting. Notes are processed in many parallel chunks, so higher levels raise cost and latency noticeably.',
+			get: () => this.plugin.settings.extractionEffort,
+			set: async (value) => {
+				this.plugin.settings.extractionEffort = value;
+				await this.plugin.saveSettings();
+			},
+		});
 
 		// Auto-analysis toggle
 		new Setting(containerEl)
@@ -294,122 +378,57 @@ export class SettingsTab extends PluginSettingTab {
 
 			// Smart Search model for selected provider
 			const smartSearchProvider = this.plugin.settings.smartSearchProvider;
+			const smartSearchModelKeys = {
+				claude: 'smartSearchClaudeModel',
+				openai: 'smartSearchOpenaiModel',
+				gemini: 'smartSearchGeminiModel',
+				ollama: 'smartSearchOllamaModel',
+			} as const;
+			const smartSearchLabels: Record<ApiProvider, string> = {
+				claude: 'Claude',
+				openai: 'OpenAI',
+				gemini: 'Gemini',
+				ollama: 'Ollama',
+			};
+			const smartSearchKey = smartSearchModelKeys[smartSearchProvider];
 
-			if (smartSearchProvider === 'claude') {
-				new Setting(containerEl)
-					.setName('Claude model for smart search')
-					.addDropdown(dropdown => {
-						for (const model of MODEL_OPTIONS.claude) {
-							dropdown.addOption(model, model);
-						}
-						dropdown
-							.setValue(this.plugin.settings.smartSearchClaudeModel)
-							.onChange(async (value) => {
-								this.plugin.settings.smartSearchClaudeModel = value;
-								await this.plugin.saveSettings();
-							});
-					})
-					.addText(text => {
-						text
-							.setPlaceholder('Or enter custom model')
-							.setValue(MODEL_OPTIONS.claude.includes(this.plugin.settings.smartSearchClaudeModel) ? '' : this.plugin.settings.smartSearchClaudeModel)
-							.onChange(async (value) => {
-								if (value.trim()) {
-									this.plugin.settings.smartSearchClaudeModel = value.trim();
-									await this.plugin.saveSettings();
-								}
-							});
-						text.inputEl.addClass('sgb-setting-input-wide');
-					});
-			} else if (smartSearchProvider === 'openai') {
-				new Setting(containerEl)
-					.setName('Smart search OpenAI model')
-					.addDropdown(dropdown => {
-						for (const model of MODEL_OPTIONS.openai) {
-							dropdown.addOption(model, model);
-						}
-						dropdown
-							.setValue(this.plugin.settings.smartSearchOpenaiModel)
-							.onChange(async (value) => {
-								this.plugin.settings.smartSearchOpenaiModel = value;
-								await this.plugin.saveSettings();
-							});
-					})
-					.addText(text => {
-						text
-							.setPlaceholder('Or enter custom model')
-							.setValue(MODEL_OPTIONS.openai.includes(this.plugin.settings.smartSearchOpenaiModel) ? '' : this.plugin.settings.smartSearchOpenaiModel)
-							.onChange(async (value) => {
-								if (value.trim()) {
-									this.plugin.settings.smartSearchOpenaiModel = value.trim();
-									await this.plugin.saveSettings();
-								}
-							});
-						text.inputEl.addClass('sgb-setting-input-wide');
-					});
-			} else if (smartSearchProvider === 'gemini') {
-				new Setting(containerEl)
-					.setName('Gemini model for smart search')
-					.addDropdown(dropdown => {
-						for (const model of MODEL_OPTIONS.gemini) {
-							dropdown.addOption(model, model);
-						}
-						dropdown
-							.setValue(this.plugin.settings.smartSearchGeminiModel)
-							.onChange(async (value) => {
-								this.plugin.settings.smartSearchGeminiModel = value;
-								await this.plugin.saveSettings();
-							});
-					})
-					.addText(text => {
-						text
-							.setPlaceholder('Or enter custom model')
-							.setValue(MODEL_OPTIONS.gemini.includes(this.plugin.settings.smartSearchGeminiModel) ? '' : this.plugin.settings.smartSearchGeminiModel)
-							.onChange(async (value) => {
-								if (value.trim()) {
-									this.plugin.settings.smartSearchGeminiModel = value.trim();
-									await this.plugin.saveSettings();
-								}
-							});
-						text.inputEl.addClass('sgb-setting-input-wide');
-					});
-			} else if (smartSearchProvider === 'ollama') {
-				new Setting(containerEl)
-					.setName('Ollama model for smart search')
-					.addDropdown(dropdown => {
-						for (const model of MODEL_OPTIONS.ollama) {
-							dropdown.addOption(model, model);
-						}
-						dropdown
-							.setValue(MODEL_OPTIONS.ollama.includes(this.plugin.settings.smartSearchOllamaModel) ? this.plugin.settings.smartSearchOllamaModel : MODEL_OPTIONS.ollama[0])
-							.onChange(async (value) => {
-								this.plugin.settings.smartSearchOllamaModel = value;
-								await this.plugin.saveSettings();
-							});
-					})
-					.addText(text => {
-						text
-							.setPlaceholder('Or enter custom model')
-							.setValue(MODEL_OPTIONS.ollama.includes(this.plugin.settings.smartSearchOllamaModel) ? '' : this.plugin.settings.smartSearchOllamaModel)
-							.onChange(async (value) => {
-								if (value.trim()) {
-									this.plugin.settings.smartSearchOllamaModel = value.trim();
-									await this.plugin.saveSettings();
-								}
-							});
-						text.inputEl.addClass('sgb-setting-input-wide');
-					});
+			this.addModelSetting(containerEl, {
+				name: `${smartSearchLabels[smartSearchProvider]} model for smart search`,
+				desc: 'Model used to answer smart search queries.',
+				provider: smartSearchProvider,
+				get: () => this.plugin.settings[smartSearchKey],
+				set: async (value) => {
+					this.plugin.settings[smartSearchKey] = value;
+					await this.plugin.saveSettings();
+				},
+			});
 
-				// Tool calling warning for Ollama Smart Search
-				const smartSearchOllamaWarning = containerEl.createEl('div', { cls: 'setting-item-description sgb-ollama-warning' });
-				smartSearchOllamaWarning.createEl('strong', { text: 'Note:' });
-				smartSearchOllamaWarning.appendText(' Smart search requires tool calling support. ');
-				smartSearchOllamaWarning.createEl('code', { text: 'Deepseek-r1:*' });
-				smartSearchOllamaWarning.appendText(' and ');
-				smartSearchOllamaWarning.createEl('code', { text: 'Gemma3:*' });
-				smartSearchOllamaWarning.appendText(' may not work. Recommended: ');
-				smartSearchOllamaWarning.createEl('code', { text: 'Qwen3:*' });
-				smartSearchOllamaWarning.appendText('.');
+			this.addEffortSetting(containerEl, {
+				name: 'Smart search reasoning effort',
+				desc: 'How much the model reasons while exploring the graph. Higher levels answer harder questions but cost more.',
+				get: () => this.plugin.settings.smartSearchEffort,
+				set: async (value) => {
+					this.plugin.settings.smartSearchEffort = value;
+					await this.plugin.saveSettings();
+				},
+			});
+
+			if (smartSearchProvider === 'ollama') {
+				const warning = containerEl.createEl('div', {
+					cls: 'setting-item-description sgb-ollama-warning',
+				});
+				warning.createEl('strong', { text: 'Tool calling required:' });
+				warning.appendText(' smart search works by querying the graph, so the model must support tool calls.');
+				warning.createEl('br');
+				warning.appendText('Limited support: ');
+				warning.createEl('code', { text: 'deepseek-r1:*' });
+				warning.appendText(', ');
+				warning.createEl('code', { text: 'gemma3:*' });
+				warning.createEl('br');
+				warning.appendText('Recommended: ');
+				warning.createEl('code', { text: 'qwen3:*' });
+				warning.appendText(', ');
+				warning.createEl('code', { text: 'gpt-oss:*' });
 			}
 		}
 
@@ -489,7 +508,7 @@ export class SettingsTab extends PluginSettingTab {
 			// Embedding API key (separate from main key)
 			const embeddingProvider = this.plugin.settings.embeddingProvider;
 			if (embeddingProvider !== 'ollama') {
-				new Setting(containerEl)
+				const keySetting = new Setting(containerEl)
 					.setName('Embedding API key')
 					.setDesc('API key for embeddings. Leave blank to use the main API key.')
 					.addText(text => {
@@ -499,26 +518,108 @@ export class SettingsTab extends PluginSettingTab {
 							.onChange(async (value) => {
 								this.plugin.settings.embeddingApiKey = value;
 								await this.plugin.saveSettings();
+								this.display();
 							});
 						text.inputEl.type = 'password';
+					});
+
+				// The fallback to the main key is empty when the chat provider is
+				// a local server, which needs no key. Say so here rather than
+				// letting it surface as a failure on the first resolution pass.
+				if (!this.plugin.settings.embeddingApiKey && !this.plugin.settings.apiKey) {
+					keySetting.descEl
+						.createDiv({ cls: 'sgb-model-warning sgb-model-warning-error' })
+						.appendText(
+							`No key set, and there is no main API key to fall back on (the ${this.plugin.settings.apiProvider} provider does not use one). Entity resolution will fail until a key is entered here.`
+						);
+				}
+			}
+
+			// A local chat model does not imply a local embedding model, so the
+			// embedding server is configured independently of the chat provider.
+			if (embeddingProvider === 'ollama') {
+				new Setting(containerEl)
+					.setName('Embedding server API')
+					.setDesc('Which API the embedding server speaks. Set independently of the chat provider.')
+					.addDropdown(dropdown => {
+						dropdown
+							.addOption('ollama', 'Ollama (/api/embed)')
+							.addOption('openai', 'OpenAI-compatible (/v1/embeddings)')
+							.setValue(this.plugin.settings.embeddingLocalApiStyle ?? 'ollama')
+							.onChange(async (value) => {
+								this.plugin.settings.embeddingLocalApiStyle = value as LocalApiStyle;
+								await this.plugin.saveSettings();
+								this.display();
+							});
+					});
+
+				new Setting(containerEl)
+					.setName('Embedding server host')
+					.setDesc('Leave blank to reuse the chat provider’s host. Set this when embeddings run on a different server.')
+					.addText(text => {
+						text
+							.setPlaceholder(this.plugin.settings.ollamaHost || 'http://localhost:11434')
+							.setValue(this.plugin.settings.embeddingHost)
+							.onChange(async (value) => {
+								this.plugin.settings.embeddingHost = value.trim();
+								await this.plugin.saveSettings();
+							});
+						text.inputEl.addClass('sgb-setting-input-wide');
 					});
 			}
 
 			// Embedding model
 			const embeddingModels = EMBEDDING_MODEL_OPTIONS[embeddingProvider as keyof typeof EMBEDDING_MODEL_OPTIONS] || [];
+			const EMBEDDING_CUSTOM = '__custom__';
+			const knownEmbeddingIds = embeddingModels.map(m => m.id);
+			let embeddingCustomInput: TextComponent | undefined;
+
 			new Setting(containerEl)
 				.setName('Embedding model')
-				.setDesc('Select the embedding model to use.')
+				.setDesc(
+					'Select the embedding model to use. Vector width is taken from the model’s actual output, so custom models work; changing model requires recomputing embeddings.'
+				)
 				.addDropdown(dropdown => {
 					for (const model of embeddingModels) {
 						dropdown.addOption(model.id, model.name);
 					}
-					dropdown
-						.setValue(this.plugin.settings.embeddingModel)
+					dropdown.addOption(EMBEDDING_CUSTOM, 'Custom…');
+
+					const current = this.plugin.settings.embeddingModel;
+					dropdown.setValue(knownEmbeddingIds.includes(current) ? current : EMBEDDING_CUSTOM);
+
+					dropdown.onChange(async (value) => {
+						if (value === EMBEDDING_CUSTOM) {
+							if (embeddingCustomInput) {
+								embeddingCustomInput.inputEl.disabled = false;
+								embeddingCustomInput.inputEl.focus();
+							}
+							return;
+						}
+						embeddingCustomInput?.setValue('');
+						if (embeddingCustomInput) embeddingCustomInput.inputEl.disabled = true;
+						this.plugin.settings.embeddingModel = value;
+						await this.plugin.saveSettings();
+					});
+				})
+				.addText(text => {
+					embeddingCustomInput = text;
+					const current = this.plugin.settings.embeddingModel;
+					const isCustom = !knownEmbeddingIds.includes(current);
+
+					text
+						.setPlaceholder('Custom model ID')
+						.setValue(isCustom ? current : '')
 						.onChange(async (value) => {
-							this.plugin.settings.embeddingModel = value;
-							await this.plugin.saveSettings();
+							const trimmed = value.trim();
+							if (trimmed) {
+								this.plugin.settings.embeddingModel = trimmed;
+								await this.plugin.saveSettings();
+							}
 						});
+
+					text.inputEl.disabled = !isCustom;
+					text.inputEl.addClass('sgb-setting-input-wide');
 				});
 
 			// High confidence threshold

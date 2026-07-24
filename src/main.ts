@@ -1,6 +1,7 @@
 import { Plugin, TFile, debounce, Menu, WorkspaceLeaf } from 'obsidian';
 import { Settings, PluginData } from './types';
 import { DEFAULT_SETTINGS } from './settings';
+import { migrateSettings } from './settings-migration';
 import { SettingsTab } from './ui/settings-tab';
 import { GraphView, GRAPH_VIEW_TYPE } from './ui/graph-view';
 import { NeighborhoodView, NEIGHBORHOOD_VIEW_TYPE } from './ui/neighborhood-view';
@@ -194,14 +195,22 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 
 	async loadSettings() {
 		const data: PluginData | null = await this.loadData();
+
+		// Read the stored version before merging: Object.assign fills a missing
+		// settingsVersion in from DEFAULT_SETTINGS, which would make an
+		// un-migrated install look current.
+		const storedVersion = (data?.settings as Partial<Settings> | undefined)?.settingsVersion ?? 0;
+
 		this.settings = Object.assign({}, DEFAULT_SETTINGS, data?.settings);
 
-		// Migrate old extractionMode values (v2 -> v3)
-		const mode = this.settings.extractionMode as string;
-		if (mode === 'simple') {
-			this.settings.extractionMode = 'standard';
-		} else if (mode === 'advanced' || mode === 'maximum') {
-			this.settings.extractionMode = 'thorough';
+		const { settings, changed, notes } = migrateSettings(this.settings, storedVersion);
+		this.settings = settings;
+
+		if (changed) {
+			if (notes.length) {
+				console.info('[simple-graph-builder] Migrated settings:', notes.join('; '));
+			}
+			await this.saveSettings();
 		}
 	}
 
