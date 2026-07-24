@@ -512,9 +512,11 @@ export async function saveEmbeddingsBinary(
 		// Remove file if no embeddings
 		try {
 			const filePath = `${pluginDir}/${EMBEDDINGS_FILENAME}`;
-			const existingFile = vault.getAbstractFileByPath(filePath);
-			if (existingFile) {
-				await vault.delete(existingFile, true);
+			// adapter.remove, not vault.delete: this is the plugin's own binary
+			// cache inside .obsidian, not a vault file, so it should not go to
+			// the user's trash. It is written with adapter.writeBinary too.
+			if (await vault.adapter.exists(filePath)) {
+				await vault.adapter.remove(filePath);
 			}
 		} catch {
 			// Ignore if file doesn't exist

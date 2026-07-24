@@ -160,7 +160,7 @@ function toInput(turns: Turn[]): unknown[] {
 				break;
 
 			case 'assistant':
-				if (Array.isArray(turn.raw)) {
+				if (isUnknownArray(turn.raw)) {
 					// Spread the native output items so reasoning and
 					// function_call entries replay unchanged.
 					input.push(...turn.raw);
@@ -195,4 +195,9 @@ function parseArguments(raw: string | undefined): unknown {
 
 function stringifyResult(result: unknown): string {
 	return typeof result === 'string' ? result : JSON.stringify(result);
+}
+
+/** Narrows the opaque replay payload without widening it to `any`. */
+function isUnknownArray(value: unknown): value is unknown[] {
+	return Array.isArray(value);
 }

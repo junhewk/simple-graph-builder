@@ -32,17 +32,17 @@ export class EntityMergeModal extends Modal {
 		sourceSection.createEl('h4', { text: 'Source entity (will be merged into target)' });
 
 		const sourceInfo = sourceSection.createDiv({ cls: 'entity-info' });
-		sourceInfo.createEl('span', { text: this.sourceNode.properties.name, cls: 'entity-name' });
-		sourceInfo.createEl('span', { text: this.sourceNode.entityType || this.sourceNode.label || 'CONCEPT', cls: 'entity-label' });
+		sourceInfo.createSpan({ text: this.sourceNode.properties.name, cls: 'entity-name' });
+		sourceInfo.createSpan({ text: this.sourceNode.entityType || this.sourceNode.label || 'CONCEPT', cls: 'entity-label' });
 
 		if (this.sourceNode.properties.aliases && this.sourceNode.properties.aliases.length > 0) {
 			const aliasesEl = sourceSection.createDiv({ cls: 'entity-aliases' });
-			aliasesEl.createEl('span', { text: 'Aliases: ' });
-			aliasesEl.createEl('span', { text: this.sourceNode.properties.aliases.join(', '), cls: 'alias-list' });
+			aliasesEl.createSpan({ text: 'Aliases: ' });
+			aliasesEl.createSpan({ text: this.sourceNode.properties.aliases.join(', '), cls: 'alias-list' });
 		}
 
 		const sourceNotesEl = sourceSection.createDiv({ cls: 'entity-sources' });
-		sourceNotesEl.createEl('span', { text: `Source notes: ${this.sourceNode.sourceNotes.length}` });
+		sourceNotesEl.createSpan({ text: `Source notes: ${this.sourceNode.sourceNotes.length}` });
 
 		// Target entity search
 		const targetSection = contentEl.createDiv({ cls: 'entity-merge-target' });
@@ -122,23 +122,23 @@ export class EntityMergeModal extends Modal {
 		container.empty();
 
 		if (this.searchQuery.length < 2) {
-			container.createEl('div', { text: 'Type at least 2 characters to search', cls: 'search-hint' });
+			container.createDiv({ text: 'Type at least 2 characters to search', cls: 'search-hint' });
 			return;
 		}
 
 		if (this.searchResults.length === 0) {
-			container.createEl('div', { text: 'No matching entities found', cls: 'search-hint' });
+			container.createDiv({ text: 'No matching entities found', cls: 'search-hint' });
 			return;
 		}
 
 		for (const node of this.searchResults) {
 			const resultEl = container.createDiv({ cls: 'entity-search-result' });
-			resultEl.createEl('span', { text: node.properties.name, cls: 'entity-name' });
-			resultEl.createEl('span', { text: node.entityType || node.label || 'CONCEPT', cls: 'entity-label' });
+			resultEl.createSpan({ text: node.properties.name, cls: 'entity-name' });
+			resultEl.createSpan({ text: node.entityType || node.label || 'CONCEPT', cls: 'entity-label' });
 
 			const aliases = node.properties.aliases || [];
 			if (aliases.length > 0) {
-				resultEl.createEl('span', { text: ` (${aliases.slice(0, 3).join(', ')}${aliases.length > 3 ? '...' : ''})`, cls: 'alias-preview' });
+				resultEl.createSpan({ text: ` (${aliases.slice(0, 3).join(', ')}${aliases.length > 3 ? '...' : ''})`, cls: 'alias-preview' });
 			}
 
 			resultEl.onclick = () => {
@@ -160,21 +160,21 @@ export class EntityMergeModal extends Modal {
 		container.empty();
 
 		if (!this.targetNode) {
-			container.createEl('div', { text: 'Select a target entity from the search results above', cls: 'select-hint' });
+			container.createDiv({ text: 'Select a target entity from the search results above', cls: 'select-hint' });
 			return;
 		}
 
 		container.createEl('h5', { text: 'Selected target:' });
 
 		const targetInfo = container.createDiv({ cls: 'entity-info selected' });
-		targetInfo.createEl('span', { text: this.targetNode.properties.name, cls: 'entity-name' });
-		targetInfo.createEl('span', { text: this.targetNode.entityType || this.targetNode.label || 'CONCEPT', cls: 'entity-label' });
+		targetInfo.createSpan({ text: this.targetNode.properties.name, cls: 'entity-name' });
+		targetInfo.createSpan({ text: this.targetNode.entityType || this.targetNode.label || 'CONCEPT', cls: 'entity-label' });
 
 		const aliases = this.targetNode.properties.aliases || [];
 		if (aliases.length > 0) {
 			const aliasesEl = container.createDiv({ cls: 'entity-aliases' });
-			aliasesEl.createEl('span', { text: 'Existing aliases: ' });
-			aliasesEl.createEl('span', { text: aliases.join(', '), cls: 'alias-list' });
+			aliasesEl.createSpan({ text: 'Existing aliases: ' });
+			aliasesEl.createSpan({ text: aliases.join(', '), cls: 'alias-list' });
 		}
 
 		// Preview what will happen

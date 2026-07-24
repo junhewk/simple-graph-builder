@@ -2,12 +2,12 @@ import { HashData, NoteHash, PluginData } from '../types';
 import SimpleGraphBuilderPlugin from '../main';
 
 export async function loadHashes(plugin: SimpleGraphBuilderPlugin): Promise<HashData> {
-	const data: PluginData | null = await plugin.loadData();
+	const data = (await plugin.loadData()) as PluginData | null;
 	return data?.hashes ?? { hashes: [] };
 }
 
 export async function saveHashes(plugin: SimpleGraphBuilderPlugin, hashes: HashData): Promise<void> {
-	const data: PluginData = (await plugin.loadData()) ?? {
+	const data = ((await plugin.loadData()) as PluginData | null) ?? {
 		settings: plugin.settings,
 		graph: { nodes: [], edges: [], version: 1 },
 		hashes: { hashes: [] },

@@ -282,7 +282,7 @@ export class SettingsTab extends PluginSettingTab {
 		});
 
 		// Tool calling warning for Ollama
-		const ollamaWarning = this.providerSettingsEls.ollama.createEl('div', { cls: 'setting-item-description sgb-ollama-warning' });
+		const ollamaWarning = this.providerSettingsEls.ollama.createDiv({ cls: 'setting-item-description sgb-ollama-warning' });
 		ollamaWarning.createEl('strong', { text: 'Smart search compatibility:' });
 		ollamaWarning.appendText(' Some models have limited tool calling support.');
 		ollamaWarning.createEl('br');
@@ -339,7 +339,7 @@ export class SettingsTab extends PluginSettingTab {
 		// Smart Search model section
 		new Setting(containerEl).setName('Smart search model').setHeading();
 
-		const smartSearchInfo = containerEl.createEl('div', { cls: 'setting-item-description sgb-smart-search-info' });
+		const smartSearchInfo = containerEl.createDiv({ cls: 'setting-item-description sgb-smart-search-info' });
 		smartSearchInfo.appendText('By default, Smart search uses the same model as extraction. You can configure a separate model for better search results (e.g., use a faster model for extraction and a more capable model for search).');
 
 		// Use separate Smart Search model toggle
@@ -441,7 +441,7 @@ export class SettingsTab extends PluginSettingTab {
 			});
 
 			if (smartSearchProvider === 'ollama') {
-				const warning = containerEl.createEl('div', {
+				const warning = containerEl.createDiv({
 					cls: 'setting-item-description sgb-ollama-warning',
 				});
 				warning.createEl('strong', { text: 'Tool calling required:' });
@@ -491,7 +491,7 @@ export class SettingsTab extends PluginSettingTab {
 		// Entity Resolution section
 		new Setting(containerEl).setName('Entity resolution (advanced)').setHeading();
 
-		const resolutionInfo = containerEl.createEl('div', { cls: 'setting-item-description sgb-resolution-info' });
+		const resolutionInfo = containerEl.createDiv({ cls: 'setting-item-description sgb-resolution-info' });
 		resolutionInfo.appendText('Entity resolution uses embeddings to detect semantically similar entities (e.g., "AI" and "Artificial Intelligence") and merge them automatically. This is optional and incurs additional API costs.');
 
 		// Enable embeddings toggle
@@ -597,7 +597,7 @@ export class SettingsTab extends PluginSettingTab {
 			}
 
 			// Embedding model
-			const embeddingModels = EMBEDDING_MODEL_OPTIONS[embeddingProvider as keyof typeof EMBEDDING_MODEL_OPTIONS] || [];
+			const embeddingModels = EMBEDDING_MODEL_OPTIONS[embeddingProvider] || [];
 			const EMBEDDING_CUSTOM = '__custom__';
 			const knownEmbeddingIds = embeddingModels.map(m => m.id);
 			let embeddingCustomInput: TextComponent | undefined;
@@ -738,7 +738,7 @@ export class SettingsTab extends PluginSettingTab {
 		// Vault analysis section
 		new Setting(containerEl).setName('Vault analysis').setHeading();
 
-		const vaultWarning = containerEl.createEl('div', { cls: 'setting-item-description vault-analysis-warning' });
+		const vaultWarning = containerEl.createDiv({ cls: 'setting-item-description vault-analysis-warning' });
 		vaultWarning.createEl('strong', { text: 'Warning:' });
 		vaultWarning.appendText(' Analyzing the entire vault will:');
 		const warningList = vaultWarning.createEl('ul');
@@ -768,7 +768,7 @@ export class SettingsTab extends PluginSettingTab {
 						cancelVaultAnalysis();
 						new Notice('Cancelling vault analysis...');
 						// Button will update after analysis stops
-						activeWindow.setTimeout(updateButtonState, 1000);
+						window.setTimeout(updateButtonState, 1000);
 					} else {
 						const fileCount = this.plugin.app.vault.getMarkdownFiles().length;
 						const message = `Analyze ${fileCount} notes in your vault?\n\n` +
@@ -909,7 +909,7 @@ export class SettingsTab extends PluginSettingTab {
 
 				// Small delay between batches
 				if (i + batchSize < nodesToProcess.length) {
-					await new Promise(resolve => activeWindow.setTimeout(resolve, 100));
+					await new Promise(resolve => window.setTimeout(resolve, 100));
 				}
 			}
 

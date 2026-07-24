@@ -13,7 +13,7 @@ export interface ToolLoopOptions {
 	request: Omit<LlmRequest, 'turns'>;
 	creds: Credentials;
 	initialUserText: string;
-	execute: (call: ToolInvocation) => Promise<unknown> | unknown;
+	execute: (call: ToolInvocation) => unknown;
 	onProgress?: (status: string) => void;
 	maxIterations?: number;
 }

@@ -141,21 +141,21 @@ class SearchModal extends Modal {
 				const headerRow = item.createDiv({ cls: 'search-result-header' });
 
 				// Node name
-				headerRow.createEl('span', {
+				headerRow.createSpan({
 					text: result.nodeName,
 					cls: 'search-result-name',
 				});
 
 				// Score badge
-				headerRow.createEl('span', {
+				headerRow.createSpan({
 					text: `${Math.round(result.score * 100)}%`,
 					cls: 'search-result-score',
 				});
 
 				// Source notes
 				if (result.sourceNotes.length > 0) {
-					const notesEl = item.createEl('div', { cls: 'search-result-notes' });
-					notesEl.createEl('span', { text: 'Found in: ', cls: 'search-result-notes-label' });
+					const notesEl = item.createDiv({ cls: 'search-result-notes' });
+					notesEl.createSpan({ text: 'Found in: ', cls: 'search-result-notes-label' });
 
 					for (let i = 0; i < Math.min(result.sourceNotes.length, 3); i++) {
 						const notePath = result.sourceNotes[i];
@@ -169,12 +169,12 @@ class SearchModal extends Modal {
 						});
 
 						if (i < Math.min(result.sourceNotes.length, 3) - 1) {
-							notesEl.createEl('span', { text: ', ' });
+							notesEl.createSpan({ text: ', ' });
 						}
 					}
 
 					if (result.sourceNotes.length > 3) {
-						notesEl.createEl('span', {
+						notesEl.createSpan({
 							text: ` +${result.sourceNotes.length - 3} more`,
 							cls: 'search-result-more',
 						});

@@ -84,7 +84,7 @@ export class SmartSearchModal extends Modal {
 		});
 
 		// Focus input
-		activeWindow.setTimeout(() => this.inputEl?.focus(), 50);
+		window.setTimeout(() => this.inputEl?.focus(), 50);
 	}
 
 	private async performSearch() {
@@ -166,7 +166,7 @@ export class SmartSearchModal extends Modal {
 
 				// Left side: badge + clickable name
 				const nameContainer = item.createDiv({ cls: 'smart-search-node-name-container' });
-				const badge = nameContainer.createEl('span', { cls: 'smart-search-label-badge', text: node.entityType });
+				const badge = nameContainer.createSpan({ cls: 'smart-search-label-badge', text: node.entityType });
 				badge.style.backgroundColor = getEntityTypeColor(node.entityType);
 				const nameLink = nameContainer.createEl('a', { cls: 'smart-search-node-link', text: node.name });
 				nameLink.setAttribute('href', '#');
@@ -180,9 +180,9 @@ export class SmartSearchModal extends Modal {
 
 				// Right side: explanation (visually separated)
 				if (node.relevance) {
-					const relevanceEl = item.createEl('span', { cls: 'smart-search-node-relevance' });
-					relevanceEl.createEl('span', { cls: 'smart-search-separator', text: '—' });
-					relevanceEl.createEl('span', { text: node.relevance });
+					const relevanceEl = item.createSpan({ cls: 'smart-search-node-relevance' });
+					relevanceEl.createSpan({ cls: 'smart-search-separator', text: '—' });
+					relevanceEl.createSpan({ text: node.relevance });
 				}
 			}
 		}
@@ -207,9 +207,9 @@ export class SmartSearchModal extends Modal {
 
 				// Right side: explanation (visually separated)
 				if (note.relevance) {
-					const relevanceEl = item.createEl('span', { cls: 'smart-search-note-relevance' });
-					relevanceEl.createEl('span', { cls: 'smart-search-separator', text: '—' });
-					relevanceEl.createEl('span', { text: note.relevance });
+					const relevanceEl = item.createSpan({ cls: 'smart-search-note-relevance' });
+					relevanceEl.createSpan({ cls: 'smart-search-separator', text: '—' });
+					relevanceEl.createSpan({ text: note.relevance });
 				}
 			}
 		}

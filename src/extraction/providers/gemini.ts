@@ -171,7 +171,7 @@ function toInput(turns: Turn[]): unknown[] {
 				break;
 
 			case 'assistant':
-				if (Array.isArray(turn.raw)) {
+				if (isUnknownArray(turn.raw)) {
 					// Verbatim replay — thought steps carry signatures that are
 					// invalidated if the step is rebuilt by hand.
 					input.push(...turn.raw);
@@ -201,4 +201,9 @@ function toInput(turns: Turn[]): unknown[] {
 
 function stringifyResult(result: unknown): string {
 	return typeof result === 'string' ? result : JSON.stringify(result);
+}
+
+/** Narrows the opaque replay payload without widening it to `any`. */
+function isUnknownArray(value: unknown): value is unknown[] {
+	return Array.isArray(value);
 }

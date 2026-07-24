@@ -115,10 +115,10 @@ function parseSmartSearchResponse(response: string): SmartSearchResult {
 	}
 
 	try {
-		const parsed = JSON.parse(jsonStr);
+		const parsed = JSON.parse(jsonStr) as Partial<SmartSearchResult>;
 
 		return {
-			answer: parsed.answer || response,
+			answer: typeof parsed.answer === 'string' ? parsed.answer : response,
 			relevantNodes: Array.isArray(parsed.relevantNodes) ? parsed.relevantNodes : [],
 			sourceNotes: Array.isArray(parsed.sourceNotes) ? parsed.sourceNotes : [],
 		};

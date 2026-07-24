@@ -39,7 +39,7 @@ export class NeighborhoodView extends ItemView {
 		container.addClass('neighborhood-view-container');
 
 		// Header
-		container.createEl('div', { cls: 'neighborhood-header', text: 'Note neighborhood' });
+		container.createDiv({ cls: 'neighborhood-header', text: 'Note neighborhood' });
 
 		// Content area
 		this.neighborhoodContentEl = container.createDiv({ cls: 'neighborhood-content' });
@@ -97,8 +97,8 @@ export class NeighborhoodView extends ItemView {
 
 		// Render current note info
 		const currentSection = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-section' });
-		currentSection.createEl('div', { cls: 'neighborhood-section-title', text: 'Current note' });
-		currentSection.createEl('div', { cls: 'neighborhood-current-note', text: file.basename });
+		currentSection.createDiv({ cls: 'neighborhood-section-title', text: 'Current note' });
+		currentSection.createDiv({ cls: 'neighborhood-current-note', text: file.basename });
 
 		// Get all connected nodes (from this note's nodes)
 		const connectionMap = new Map<string, ConnectionInfo>();
@@ -157,7 +157,7 @@ export class NeighborhoodView extends ItemView {
 		if (!this.neighborhoodContentEl || nodes.length === 0) return;
 
 		const section = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-section' });
-		section.createEl('div', {
+		section.createDiv({
 			cls: 'neighborhood-section-title',
 			text: `Extracted nodes (${nodes.length})`,
 		});
@@ -166,9 +166,9 @@ export class NeighborhoodView extends ItemView {
 		for (const node of nodes) {
 			const item = list.createEl('li', { cls: 'neighborhood-item neighborhood-item-extracted' });
 			const entityType = node.entityType || node.label || 'CONCEPT';
-			const labelBadge = item.createEl('span', { cls: 'neighborhood-label-badge', text: entityType });
+			const labelBadge = item.createSpan({ cls: 'neighborhood-label-badge', text: entityType });
 			labelBadge.style.backgroundColor = getEntityTypeColor(entityType);
-			item.createEl('span', { cls: 'neighborhood-link', text: node.properties.name });
+			item.createSpan({ cls: 'neighborhood-link', text: node.properties.name });
 		}
 	}
 
@@ -179,7 +179,7 @@ export class NeighborhoodView extends ItemView {
 		if (!this.neighborhoodContentEl) return;
 
 		const section = this.neighborhoodContentEl.createDiv({ cls: 'neighborhood-section' });
-		section.createEl('div', {
+		section.createDiv({
 			cls: 'neighborhood-section-title',
 			text: `${entityType} (${connections.length})`,
 		});
@@ -188,7 +188,7 @@ export class NeighborhoodView extends ItemView {
 		for (const connection of connections) {
 			const item = list.createEl('li', { cls: 'neighborhood-item' });
 
-			const link = item.createEl('span', {
+			const link = item.createSpan({
 				cls: 'neighborhood-link clickable',
 				text: connection.node.properties.name,
 			});
@@ -223,20 +223,20 @@ export class NeighborhoodView extends ItemView {
 
 		const header = popup.createDiv({ cls: 'neighborhood-popup-header' });
 		const entityType = node.entityType || node.label || 'CONCEPT';
-		const labelBadge = header.createEl('span', { cls: 'neighborhood-label-badge', text: entityType });
+		const labelBadge = header.createSpan({ cls: 'neighborhood-label-badge', text: entityType });
 		labelBadge.style.backgroundColor = getEntityTypeColor(entityType);
-		header.createEl('span', { text: node.properties.name });
+		header.createSpan({ text: node.properties.name });
 		const closeBtn = header.createEl('button', { cls: 'neighborhood-popup-close', text: '×' });
 		closeBtn.addEventListener('click', () => popup.remove());
 
 		// Show source notes
 		if (node.sourceNotes.length > 0) {
-			popup.createEl('div', { cls: 'neighborhood-popup-subtitle', text: 'Found in:' });
+			popup.createDiv({ cls: 'neighborhood-popup-subtitle', text: 'Found in:' });
 			const list = popup.createEl('ul', { cls: 'neighborhood-popup-list' });
 			for (const notePath of node.sourceNotes) {
 				const item = list.createEl('li');
 				const title = notePath.replace(/\.md$/, '').split('/').pop() || notePath;
-				const link = item.createEl('span', { cls: 'neighborhood-link clickable', text: title });
+				const link = item.createSpan({ cls: 'neighborhood-link clickable', text: title });
 				link.addEventListener('click', () => {
 					void this.app.workspace.openLinkText(notePath, '', false);
 					popup.remove();
@@ -247,7 +247,7 @@ export class NeighborhoodView extends ItemView {
 		// Show relationships
 		const edges = this.plugin.graphCache.getConnectedEdges(node.id);
 		if (edges.length > 0) {
-			popup.createEl('div', { cls: 'neighborhood-popup-subtitle', text: 'Relationships:' });
+			popup.createDiv({ cls: 'neighborhood-popup-subtitle', text: 'Relationships:' });
 			const relList = popup.createEl('ul', { cls: 'neighborhood-popup-list' });
 			for (const edge of edges.slice(0, 10)) {
 				const sourceNode = this.plugin.graphCache.getNodeById(edge.source);
@@ -256,11 +256,11 @@ export class NeighborhoodView extends ItemView {
 					const relItem = relList.createEl('li', { cls: 'neighborhood-relationship' });
 					const relationship = edge.relationship || edge.type || 'relates to';
 					const detail = edge.properties?.detail || '';
-					relItem.createEl('span', { cls: 'rel-from', text: sourceNode.properties.name });
-					relItem.createEl('span', { cls: 'rel-type', text: relationship });
-					relItem.createEl('span', { cls: 'rel-to', text: targetNode.properties.name });
+					relItem.createSpan({ cls: 'rel-from', text: sourceNode.properties.name });
+					relItem.createSpan({ cls: 'rel-type', text: relationship });
+					relItem.createSpan({ cls: 'rel-to', text: targetNode.properties.name });
 					if (detail) {
-						relItem.createEl('span', { cls: 'rel-detail', text: detail });
+						relItem.createSpan({ cls: 'rel-detail', text: detail });
 					}
 				}
 			}

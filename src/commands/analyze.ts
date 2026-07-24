@@ -437,5 +437,5 @@ export async function autoAnalyzeFile(plugin: SimpleGraphBuilderPlugin, file: TF
 
 // Helper function
 function sleep(ms: number): Promise<void> {
-	return new Promise(resolve => activeWindow.setTimeout(resolve, ms));
+	return new Promise(resolve => window.setTimeout(resolve, ms));
 }

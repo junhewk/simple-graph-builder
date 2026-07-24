@@ -194,7 +194,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const data: PluginData | null = await this.loadData();
+		const data = (await this.loadData()) as PluginData | null;
 
 		// Read the stored version before merging: Object.assign fills a missing
 		// settingsVersion in from DEFAULT_SETTINGS, which would make an
@@ -208,14 +208,14 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 
 		if (changed) {
 			if (notes.length) {
-				console.info('[simple-graph-builder] Migrated settings:', notes.join('; '));
+				console.debug('[simple-graph-builder] Migrated settings:', notes.join('; '));
 			}
 			await this.saveSettings();
 		}
 	}
 
 	async saveSettings() {
-		const data: PluginData = (await this.loadData()) ?? {
+		const data = ((await this.loadData()) as PluginData | null) ?? {
 			settings: DEFAULT_SETTINGS,
 			graph: { nodes: [], edges: [], version: 1 },
 			hashes: { hashes: [] },

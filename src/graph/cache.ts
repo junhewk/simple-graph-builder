@@ -54,7 +54,7 @@ export class GraphCache {
 	async ensureLoaded(): Promise<void> {
 		if (this.loaded) return;
 
-		const data: PluginData | null = await this.plugin.loadData();
+		const data = (await this.plugin.loadData()) as PluginData | null;
 		const graph = data?.graph;
 
 		if (graph) {
@@ -619,7 +619,7 @@ export class GraphCache {
 		if (this.embeddingsLoaded) return;
 
 		// Load embedding index from plugin data
-		const data: PluginData | null = await this.plugin.loadData();
+		const data = (await this.plugin.loadData()) as PluginData | null;
 		this.embeddingIndex = data?.embeddingIndex || null;
 
 		if (!this.embeddingIndex || this.embeddingIndex.nodeIds.length === 0) {
@@ -828,9 +828,9 @@ export class GraphCache {
 
 	private scheduleSave(): void {
 		if (this.saveTimeout) {
-			activeWindow.clearTimeout(this.saveTimeout);
+			window.clearTimeout(this.saveTimeout);
 		}
-		this.saveTimeout = activeWindow.setTimeout(() => {
+		this.saveTimeout = window.setTimeout(() => {
 			void this.flush();
 		}, SAVE_DEBOUNCE_MS);
 	}
@@ -840,7 +840,7 @@ export class GraphCache {
 	 */
 	async flush(): Promise<void> {
 		if (this.saveTimeout) {
-			activeWindow.clearTimeout(this.saveTimeout);
+			window.clearTimeout(this.saveTimeout);
 			this.saveTimeout = null;
 		}
 
@@ -852,7 +852,7 @@ export class GraphCache {
 		const needsSave = this.dirty || this.resolutionCacheDirty || this.embeddingIndex;
 		if (!needsSave) return;
 
-		const data: PluginData = (await this.plugin.loadData()) ?? {
+		const data = ((await this.plugin.loadData()) as PluginData | null) ?? {
 			settings: DEFAULT_SETTINGS,
 			graph: { nodes: [], edges: [], version: GRAPH_SCHEMA_VERSION },
 			hashes: { hashes: [] },

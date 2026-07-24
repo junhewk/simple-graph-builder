@@ -161,7 +161,7 @@ export class GraphView extends ItemView {
 
 		// Show empty state if no data
 		if (graph.nodes.length === 0) {
-			this.graphContainer.createEl('div', {
+			this.graphContainer.createDiv({
 				cls: 'graph-empty-state',
 				text: 'No graph data yet. Analyze some notes to build your knowledge graph.',
 			});
@@ -173,13 +173,13 @@ export class GraphView extends ItemView {
 
 		// Show loading indicator for large graphs
 		if (isLargeGraph) {
-			const loadingEl = this.graphContainer.createEl('div', {
+			const loadingEl = this.graphContainer.createDiv({
 				cls: 'graph-loading',
 				text: `Loading graph (${graph.nodes.length} nodes, ${graph.edges.length} edges)...`,
 			});
 
 			// Allow UI to update before heavy computation
-			await new Promise(resolve => activeWindow.setTimeout(resolve, 50));
+			await new Promise(resolve => window.setTimeout(resolve, 50));
 			loadingEl.remove();
 		}
 

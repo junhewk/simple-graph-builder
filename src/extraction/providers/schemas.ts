@@ -173,5 +173,5 @@ function stripAdditionalProperties(value: unknown): JsonSchemaObject {
 		if (key === 'additionalProperties') continue;
 		out[key] = child && typeof child === 'object' ? stripAdditionalProperties(child) : child;
 	}
-	return out as JsonSchemaObject;
+	return out;
 }

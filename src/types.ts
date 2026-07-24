@@ -311,7 +311,10 @@ export type LocalApiStyle = 'ollama' | 'openai';
 
 export interface Settings {
 	apiProvider: ApiProvider;
-	/** @deprecated Single shared key. Kept as a fallback; use apiKeys. */
+	/**
+	 * Legacy single shared key, superseded by `apiKeys` but still honoured as a
+	 * fallback so installs that predate per-provider keys keep working.
+	 */
 	apiKey: string;
 	/** Per-provider API keys, so a cross-provider Smart Search sends the right one. */
 	apiKeys: Partial<Record<ApiProvider, string>>;
