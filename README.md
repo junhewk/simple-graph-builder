@@ -119,7 +119,7 @@ Right-click a node to:
 
 ### API Configuration
 - **API Provider**: Choose between Claude, OpenAI, Gemini, or Ollama (local)
-- **API Key**: Your API key (not needed for a local server unless it was started with `--api-key`)
+- **API Key**: Stored per provider, so extraction and Smart Search can use different providers without one overwriting the other's key. Not needed for a local server unless it was started with `--api-key`.
 - **Server API** (local only): Which API the local server speaks — *Ollama* (`/api/chat`) or *OpenAI-compatible* (`/v1/chat/completions`). Use OpenAI-compatible for llama.cpp's `llama-server`, LM Studio, vLLM and similar; set **Host** to the base address without the `/v1` suffix.
 - **Model**: Select or enter a custom model name
 
@@ -138,6 +138,7 @@ You can configure a separate model for Smart Search queries, allowing you to use
 - **Smart search provider**: Choose provider (Claude, OpenAI, Gemini, Ollama)
 - **Smart search model**: Select or enter a custom model name
 - **Smart search reasoning effort**: Set independently from extraction — searching benefits from more reasoning than extraction does
+- **API key**: Shown when Smart Search uses a different provider than extraction, since that provider's own settings block is hidden
 
 This is useful for optimizing cost vs. quality - e.g., use `gpt-5.4-mini` for extraction and `gpt-5.6-luna` for search.
 

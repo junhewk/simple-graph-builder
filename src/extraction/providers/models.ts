@@ -89,7 +89,8 @@ export function resolveModelConfig(settings: Settings, purpose: ModelPurpose): R
 	return {
 		provider,
 		model,
-		apiKey: settings.apiKey,
+		// The provider's own key, falling back to the legacy shared one.
+		apiKey: settings.apiKeys?.[provider] || settings.apiKey,
 		ollamaHost: settings.ollamaHost,
 		localApiStyle: settings.localApiStyle ?? 'ollama',
 		effort,

@@ -165,9 +165,9 @@ export class SettingsTab extends PluginSettingTab {
 			.addText(text => {
 				text
 					.setPlaceholder('Enter API key')
-					.setValue(this.plugin.settings.apiKey)
+					.setValue(this.plugin.settings.apiKeys?.claude ?? '')
 					.onChange(async (value) => {
-						this.plugin.settings.apiKey = value;
+						this.plugin.settings.apiKeys = { ...this.plugin.settings.apiKeys, claude: value };
 						await this.plugin.saveSettings();
 					});
 				text.inputEl.type = 'password';
@@ -191,9 +191,9 @@ export class SettingsTab extends PluginSettingTab {
 			.addText(text => {
 				text
 					.setPlaceholder('Enter API key')
-					.setValue(this.plugin.settings.apiKey)
+					.setValue(this.plugin.settings.apiKeys?.openai ?? '')
 					.onChange(async (value) => {
-						this.plugin.settings.apiKey = value;
+						this.plugin.settings.apiKeys = { ...this.plugin.settings.apiKeys, openai: value };
 						await this.plugin.saveSettings();
 					});
 				text.inputEl.type = 'password';
@@ -216,10 +216,10 @@ export class SettingsTab extends PluginSettingTab {
 			.setDesc('Gemini key')
 			.addText(text => {
 				text
-					.setPlaceholder('Enter your API key')
-					.setValue(this.plugin.settings.apiKey)
+					.setPlaceholder('Enter API key')
+					.setValue(this.plugin.settings.apiKeys?.gemini ?? '')
 					.onChange(async (value) => {
-						this.plugin.settings.apiKey = value;
+						this.plugin.settings.apiKeys = { ...this.plugin.settings.apiKeys, gemini: value };
 						await this.plugin.saveSettings();
 					});
 				text.inputEl.type = 'password';
@@ -392,6 +392,33 @@ export class SettingsTab extends PluginSettingTab {
 			};
 			const smartSearchKey = smartSearchModelKeys[smartSearchProvider];
 
+			if (smartSearchProvider !== 'ollama' && smartSearchProvider !== this.plugin.settings.apiProvider) {
+				// That provider's own settings block is hidden, so surface its key here.
+				const ssKey = new Setting(containerEl)
+					.setName(`${smartSearchLabels[smartSearchProvider]} API key`)
+					.setDesc('Smart search uses a different provider, so it needs that provider’s key.')
+					.addText(text => {
+						text
+							.setPlaceholder('Enter API key')
+							.setValue(this.plugin.settings.apiKeys?.[smartSearchProvider] ?? '')
+							.onChange(async (value) => {
+								this.plugin.settings.apiKeys = {
+									...this.plugin.settings.apiKeys,
+									[smartSearchProvider]: value,
+								};
+								await this.plugin.saveSettings();
+								this.display();
+							});
+						text.inputEl.type = 'password';
+					});
+
+				if (!this.plugin.settings.apiKeys?.[smartSearchProvider]) {
+					ssKey.descEl
+						.createDiv({ cls: 'sgb-model-warning sgb-model-warning-error' })
+						.appendText(`No ${smartSearchLabels[smartSearchProvider]} key set. Smart search will fail until one is entered.`);
+				}
+			}
+
 			this.addModelSetting(containerEl, {
 				name: `${smartSearchLabels[smartSearchProvider]} model for smart search`,
 				desc: 'Model used to answer smart search queries.',
@@ -526,11 +553,12 @@ export class SettingsTab extends PluginSettingTab {
 				// The fallback to the main key is empty when the chat provider is
 				// a local server, which needs no key. Say so here rather than
 				// letting it surface as a failure on the first resolution pass.
-				if (!this.plugin.settings.embeddingApiKey && !this.plugin.settings.apiKey) {
+				const providerKey = this.plugin.settings.apiKeys?.[embeddingProvider];
+				if (!this.plugin.settings.embeddingApiKey && !providerKey && !this.plugin.settings.apiKey) {
 					keySetting.descEl
 						.createDiv({ cls: 'sgb-model-warning sgb-model-warning-error' })
 						.appendText(
-							`No key set, and there is no main API key to fall back on (the ${this.plugin.settings.apiProvider} provider does not use one). Entity resolution will fail until a key is entered here.`
+							`No key set for ${embeddingProvider}, and no other key to fall back on. Entity resolution will fail until a key is entered here.`
 						);
 				}
 			}

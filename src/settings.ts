@@ -6,8 +6,9 @@ import { DEFAULT_EFFORT } from './extraction/providers/effort';
  * Bumped whenever a migration step is added. See src/settings-migration.ts.
  * 1 = pre-versioning (extractionMode rename only)
  * 2 = July 2026 model IDs + effort levels
+ * 3 = per-provider API keys
  */
-export const CURRENT_SETTINGS_VERSION = 2;
+export const CURRENT_SETTINGS_VERSION = 3;
 
 // The model catalog and the provider/model/key resolver now live with the
 // provider adapters. Re-exported here so existing importers keep working.
@@ -28,6 +29,7 @@ export function getSmartSearchConfig(settings: Settings): ResolvedModel {
 export const DEFAULT_SETTINGS: Settings = {
 	apiProvider: 'claude',
 	apiKey: '',
+	apiKeys: {},
 	claudeModel: 'claude-sonnet-5',
 	openaiModel: 'gpt-5.4-mini',
 	geminiModel: 'gemini-3.6-flash',

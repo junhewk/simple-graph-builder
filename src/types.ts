@@ -311,7 +311,10 @@ export type LocalApiStyle = 'ollama' | 'openai';
 
 export interface Settings {
 	apiProvider: ApiProvider;
+	/** @deprecated Single shared key. Kept as a fallback; use apiKeys. */
 	apiKey: string;
+	/** Per-provider API keys, so a cross-provider Smart Search sends the right one. */
+	apiKeys: Partial<Record<ApiProvider, string>>;
 	// Model selection per provider (for KG building / extraction)
 	claudeModel: string;
 	openaiModel: string;

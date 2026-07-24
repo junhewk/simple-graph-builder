@@ -283,7 +283,11 @@ export async function getEmbeddings(
 export function settingsToEmbeddingOptions(settings: Settings): EmbeddingOptions {
 	return {
 		provider: settings.embeddingProvider,
-		apiKey: settings.embeddingApiKey || settings.apiKey, // Fall back to main API key
+		// Dedicated embedding key, then that provider's key, then the legacy shared one.
+		apiKey:
+			settings.embeddingApiKey ||
+			settings.apiKeys?.[settings.embeddingProvider] ||
+			settings.apiKey,
 		model: settings.embeddingModel,
 		// The embedding server need not be the chat server: a local chat model
 		// does not imply a local embedding model. Fall back to the chat host

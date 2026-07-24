@@ -101,6 +101,18 @@ export function migrateSettings(settings: Settings, storedVersion: number): Migr
 		}
 	}
 
+	// v3: the single shared API key becomes a per-provider map, so a
+	// cross-provider Smart Search stops sending the wrong one. The old value is
+	// attributed to the provider it was actually entered for.
+	if (storedVersion < 3) {
+		const keys = { ...(next.apiKeys ?? {}) };
+		if (next.apiKey && !keys[next.apiProvider]) {
+			keys[next.apiProvider] = next.apiKey;
+			notes.push(`apiKeys.${next.apiProvider}: seeded from the shared key`);
+		}
+		next.apiKeys = keys;
+	}
+
 	next.settingsVersion = CURRENT_SETTINGS_VERSION;
 
 	const changed = notes.length > 0 || storedVersion !== CURRENT_SETTINGS_VERSION;
