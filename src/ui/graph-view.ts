@@ -3,96 +3,161 @@ import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import SimpleGraphBuilderPlugin from '../main';
 import { openSearchModal } from '../commands/search';
-import { getEntityTypeColor } from '../types';
+import { getEntityTypeColor, OntologyEdge } from '../types';
 
 // Register fCoSE layout extension
 cytoscape.use(fcose);
 
 export const GRAPH_VIEW_TYPE = 'simple-graph-view';
 
-// Performance thresholds
-const LARGE_GRAPH_THRESHOLD = 500; // nodes + edges
-const MAX_RENDER_ELEMENTS = 2000; // maximum elements to render
+// Performance thresholds.
+//
+// Above LARGE_GRAPH_THRESHOLD the view trades fidelity for frame rate: straight
+// edges instead of bezier, no arrowheads, 1x pixel ratio, draft-quality layout.
+//
+// The render budgets cap nodes AND edges. An earlier version capped only nodes
+// and then took the entire induced subgraph, which on a real vault meant 1000
+// nodes dragging 107,855 edges into fCoSE — the cap did essentially nothing.
+const LARGE_GRAPH_THRESHOLD = 2000; // nodes + edges
+const MAX_RENDER_NODES = 5000;
+const MAX_RENDER_EDGES = 15000;
 
 // ============================================
 // Graph Styles
 // ============================================
 
-const GRAPH_STYLES: cytoscape.StylesheetStyle[] = [
-	// Base node style
-	{
-		selector: 'node',
-		style: {
-			'label': 'data(name)',
-			'text-valign': 'bottom',
-			'text-halign': 'center',
-			'text-margin-y': 5,
-			'font-size': '10px',
-			'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-			'color': '#a8a8a8',
-			'text-wrap': 'ellipsis',
-			'text-max-width': '80px',
-			'width': 12,
-			'height': 12,
-			'border-width': 0,
-			'background-opacity': 0.9,
-			'background-color': 'data(color)',
+/**
+ * Build the stylesheet. Edge rendering depends on graph size: bezier curves and
+ * arrowheads are the two most expensive per-edge primitives, so large graphs
+ * drop both.
+ */
+function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
+	const edgeStyle: cytoscape.Css.Edge = {
+		'width': 1,
+		'line-color': '#cbd5e1',
+		'curve-style': isLargeGraph ? 'straight' : 'bezier',
+		'opacity': 0.4,
+		'line-style': 'solid',
+	};
+
+	if (!isLargeGraph) {
+		edgeStyle['target-arrow-shape'] = 'triangle';
+		edgeStyle['target-arrow-color'] = '#cbd5e1';
+		edgeStyle['arrow-scale'] = 0.5;
+	}
+
+	return [
+		// Base node style
+		{
+			selector: 'node',
+			style: {
+				'label': 'data(name)',
+				'text-valign': 'bottom',
+				'text-halign': 'center',
+				'text-margin-y': 5,
+				'font-size': '10px',
+				'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+				'color': '#a8a8a8',
+				'text-wrap': 'ellipsis',
+				'text-max-width': '80px',
+				// Stop measuring and drawing labels once they'd be unreadable
+				// anyway. This is what keeps the zoomed-out view responsive, and
+				// it's how Obsidian's own graph behaves.
+				'min-zoomed-font-size': 8,
+				'width': 12,
+				'height': 12,
+				'border-width': 0,
+				'background-opacity': 0.9,
+				'background-color': 'data(color)',
+			},
 		},
-	},
-	// Base edge style (unified for free-form relationships)
-	{
-		selector: 'edge',
-		style: {
-			'width': 1,
-			'line-color': '#cbd5e1',
-			'curve-style': 'bezier',
-			'opacity': 0.4,
-			'line-style': 'solid',
-			'target-arrow-shape': 'triangle',
-			'target-arrow-color': '#cbd5e1',
-			'arrow-scale': 0.5,
+		// Vault notes: squared off and slightly larger, so the note layer reads as
+		// distinct from the entities it connects
+		{
+			selector: 'node[entityType = "NOTE"]',
+			style: {
+				'shape': 'round-rectangle',
+				'width': 16,
+				'height': 16,
+			},
 		},
-	},
-	// Highlighted state (selected node and neighbors)
-	{
-		selector: '.highlighted',
-		style: {
-			'opacity': 1,
+		// Base edge style (unified for free-form relationships)
+		{
+			selector: 'edge',
+			style: edgeStyle,
 		},
-	},
-	{
-		selector: 'node.highlighted',
-		style: {
-			'border-width': 2,
-			'border-color': '#ffffff',
-			'width': 16,
-			'height': 16,
+		// Highlighted state (selected node and neighbors)
+		{
+			selector: '.highlighted',
+			style: {
+				'opacity': 1,
+			},
 		},
-	},
-	{
-		selector: 'edge.highlighted',
-		style: {
-			'width': 2,
-			'opacity': 1,
+		{
+			selector: 'node.highlighted',
+			style: {
+				'border-width': 2,
+				'border-color': '#ffffff',
+				'width': 16,
+				'height': 16,
+			},
 		},
-	},
-	// Faded state (non-selected elements)
-	{
-		selector: '.faded',
-		style: {
-			'opacity': 0.15,
+		{
+			selector: 'edge.highlighted',
+			style: {
+				'width': 2,
+				'opacity': 1,
+			},
 		},
-	},
-	// Hover state
-	{
-		selector: 'node.hover',
-		style: {
-			'width': 16,
-			'height': 16,
-			'z-index': 999,
+		// Faded state (non-selected elements)
+		{
+			selector: '.faded',
+			style: {
+				'opacity': 0.15,
+			},
 		},
-	},
-];
+		// Hover state
+		{
+			selector: 'node.hover',
+			style: {
+				'width': 16,
+				'height': 16,
+				'z-index': 999,
+			},
+		},
+	];
+}
+
+/**
+ * Whether cytoscape's WebGL renderer can be used here.
+ *
+ * It needs WebGL2, which is normally present in Electron but can be missing
+ * under software rendering or a blocked GPU. Falling back to the 2D canvas is
+ * slower but correct; failing to start the renderer is not. Probed once.
+ */
+let webglSupport: boolean | null = null;
+function supportsWebgl(): boolean {
+	if (webglSupport === null) {
+		try {
+			webglSupport = !!document.createElement('canvas').getContext('webgl2');
+		} catch {
+			webglSupport = false;
+		}
+	}
+	return webglSupport;
+}
+
+/**
+ * Count how many of the given edges touch each node.
+ */
+function countDegrees(edges: OntologyEdge[]): Map<string, number> {
+	const degrees = new Map<string, number>();
+	for (const edge of edges) {
+		degrees.set(edge.source, (degrees.get(edge.source) || 0) + 1);
+		degrees.set(edge.target, (degrees.get(edge.target) || 0) + 1);
+	}
+	return degrees;
+}
 
 // ============================================
 // Graph View
@@ -103,6 +168,8 @@ export class GraphView extends ItemView {
 	cy: cytoscape.Core | null = null;
 	private graphContainer: HTMLElement | null = null;
 	private tooltipEl: HTMLElement | null = null;
+	/** Guards against overlapping renders; see renderGraph. */
+	private renderToken = 0;
 
 	constructor(leaf: WorkspaceLeaf, plugin: SimpleGraphBuilderPlugin) {
 		super(leaf);
@@ -149,6 +216,8 @@ export class GraphView extends ItemView {
 	async renderGraph(): Promise<void> {
 		if (!this.graphContainer) return;
 
+		const token = ++this.renderToken;
+
 		// Destroy existing graph if any
 		if (this.cy) {
 			this.cy.destroy();
@@ -171,42 +240,33 @@ export class GraphView extends ItemView {
 		const totalElements = graph.nodes.length + graph.edges.length;
 		const isLargeGraph = totalElements > LARGE_GRAPH_THRESHOLD;
 
-		// Show loading indicator for large graphs
+		// Show a loading indicator for large graphs. It stays up until the layout
+		// settles — removing it before the blocking work, as an earlier version
+		// did, just showed the user a frozen blank pane instead.
+		let loadingEl: HTMLElement | null = null;
 		if (isLargeGraph) {
-			const loadingEl = this.graphContainer.createDiv({
+			loadingEl = this.graphContainer.createDiv({
 				cls: 'graph-loading',
 				text: `Loading graph (${graph.nodes.length} nodes, ${graph.edges.length} edges)...`,
 			});
 
 			// Allow UI to update before heavy computation
 			await new Promise(resolve => window.setTimeout(resolve, 50));
-			loadingEl.remove();
 		}
 
-		// Calculate connection count for all nodes (needed for filtering and large graph handling)
-		const connectionCount = new Map<string, number>();
-		for (const edge of graph.edges) {
-			connectionCount.set(edge.source, (connectionCount.get(edge.source) || 0) + 1);
-			connectionCount.set(edge.target, (connectionCount.get(edge.target) || 0) + 1);
-		}
-
-		// For very large graphs, limit what we render
 		let nodesToRender = graph.nodes;
 		let edgesToRender = graph.edges;
 
-		if (totalElements > MAX_RENDER_ELEMENTS) {
-			// Sort by connection count and take top nodes
-			nodesToRender = [...graph.nodes]
-				.sort((a, b) => (connectionCount.get(b.id) || 0) - (connectionCount.get(a.id) || 0))
-				.slice(0, MAX_RENDER_ELEMENTS / 2);
-
-			const nodeIds = new Set(nodesToRender.map(n => n.id));
-			edgesToRender = graph.edges.filter(
-				e => nodeIds.has(e.source) && nodeIds.has(e.target)
-			);
-
-			new Notice(`Large graph: showing ${nodesToRender.length} most connected nodes`);
+		// Hide the note layer if the user prefers an entity-only graph
+		if (!this.plugin.settings.graphShowNotes) {
+			nodesToRender = nodesToRender.filter(n => n.entityType !== 'NOTE');
+			const visible = new Set(nodesToRender.map(n => n.id));
+			edgesToRender = edgesToRender.filter(e => visible.has(e.source) && visible.has(e.target));
 		}
+
+		// Degree over the currently visible edge set, not the whole graph, so
+		// truncation and the min-degree filter rank what's actually on screen
+		let connectionCount = countDegrees(edgesToRender);
 
 		// Apply minimum degree filter from settings
 		const minDegree = this.plugin.settings.graphMinDegree;
@@ -214,10 +274,36 @@ export class GraphView extends ItemView {
 			nodesToRender = nodesToRender.filter(node =>
 				(connectionCount.get(node.id) || 0) >= minDegree
 			);
-			const filteredNodeIds = new Set(nodesToRender.map(n => n.id));
-			edgesToRender = edgesToRender.filter(
-				e => filteredNodeIds.has(e.source) && filteredNodeIds.has(e.target)
-			);
+			const visible = new Set(nodesToRender.map(n => n.id));
+			edgesToRender = edgesToRender.filter(e => visible.has(e.source) && visible.has(e.target));
+			connectionCount = countDegrees(edgesToRender);
+		}
+
+		// Budget nodes and edges separately, keeping the best-connected of each
+		const truncated: string[] = [];
+
+		if (nodesToRender.length > MAX_RENDER_NODES) {
+			truncated.push(`${nodesToRender.length} nodes to ${MAX_RENDER_NODES}`);
+			nodesToRender = [...nodesToRender]
+				.sort((a, b) => (connectionCount.get(b.id) || 0) - (connectionCount.get(a.id) || 0))
+				.slice(0, MAX_RENDER_NODES);
+			const visible = new Set(nodesToRender.map(n => n.id));
+			edgesToRender = edgesToRender.filter(e => visible.has(e.source) && visible.has(e.target));
+		}
+
+		if (edgesToRender.length > MAX_RENDER_EDGES) {
+			truncated.push(`${edgesToRender.length} edges to ${MAX_RENDER_EDGES}`);
+			// Keep edges between the best-connected endpoints
+			edgesToRender = [...edgesToRender]
+				.sort((a, b) =>
+					((connectionCount.get(b.source) || 0) + (connectionCount.get(b.target) || 0)) -
+					((connectionCount.get(a.source) || 0) + (connectionCount.get(a.target) || 0))
+				)
+				.slice(0, MAX_RENDER_EDGES);
+		}
+
+		if (truncated.length > 0) {
+			new Notice(`Large graph: trimmed ${truncated.join(' and ')}`);
 		}
 
 		const elements: cytoscape.ElementDefinition[] = [];
@@ -255,18 +341,52 @@ export class GraphView extends ItemView {
 		// Choose layout based on graph size
 		const layoutConfig = this.getLayoutConfig(elements.length, isLargeGraph);
 
+		// WebGL is a plain canvas-renderer flag in cytoscape 3.31+. It falls back
+		// to 2D above zoom 7.99, which maxZoom below keeps out of reach, so it
+		// stays active at every zoom level the user can get to.
+		const dark = document.body.hasClass('theme-dark');
+		const rendererOptions = {
+			webgl: supportsWebgl(),
+			// The WebGL renderer reads this but cytoscape's bundled .d.ts doesn't
+			// declare it, hence the cast. It defaults to white, which flashes
+			// wrong against a dark Obsidian theme.
+			webglBgColor: dark ? [0, 0, 0] : [255, 255, 255],
+			// Unset means full device pixel ratio, which is a 2-4x fill-rate cost
+			// on a retina display for a graph that is mostly 1px lines
+			...(isLargeGraph ? { pixelRatio: 1 } : {}),
+		} as Partial<cytoscape.CytoscapeOptions>;
+
 		this.cy = cytoscape({
 			container: this.graphContainer,
 			elements: elements,
-			style: GRAPH_STYLES,
-			layout: layoutConfig,
+			style: buildGraphStyles(isLargeGraph),
+			// Lay out explicitly after construction so the loading indicator can
+			// stay up until the graph is actually positioned
+			layout: { name: 'preset' },
 			minZoom: 0.1,
 			maxZoom: 3,
 			// Performance optimizations
+			...rendererOptions,
 			textureOnViewport: isLargeGraph,
 			hideEdgesOnViewport: isLargeGraph,
 			hideLabelsOnViewport: isLargeGraph,
 		});
+
+		try {
+			const layout = this.cy.layout(layoutConfig);
+			const settled = layout.promiseOn('layoutstop');
+			layout.run();
+			await settled;
+		} finally {
+			// Even on a layout error the indicator has to go, or the view is stuck
+			// showing "Loading graph..." forever
+			loadingEl?.remove();
+		}
+
+		// A second render may have started and destroyed this instance while the
+		// layout was running -- opening the graph view twice in quick succession
+		// is enough. Binding handlers to the old instance would leak them.
+		if (token !== this.renderToken) return;
 
 		// Click handler: highlight connected nodes
 		this.cy.on('tap', 'node', (evt: cytoscape.EventObject) => {
@@ -374,7 +494,10 @@ export class GraphView extends ItemView {
 		if (isLarge || elementCount > 1000) {
 			return {
 				...baseConfig,
-				quality: 'default',
+				// 'default' runs the spectral placement AND a full CoSE refinement
+				// at numIter; 'draft' stops after spectral. On a big graph that
+				// refinement is the whole cost of opening the view.
+				quality: 'draft',
 				nodeDimensionsIncludeLabels: false,
 				nodeRepulsion: () => 20000,
 				idealEdgeLength: () => 120,
@@ -414,18 +537,28 @@ export class GraphView extends ItemView {
 	private highlightConnected(node: cytoscape.NodeSingular): void {
 		if (!this.cy) return;
 
-		this.cy.elements().removeClass('highlighted faded');
+		// Batched: without this, each of the three class operations triggers its
+		// own style recalculation and redraw across every element in the graph.
+		this.cy.batch(() => {
+			if (!this.cy) return;
+			this.cy.elements().removeClass('highlighted faded');
 
-		const neighborhood = node.neighborhood().add(node);
-		const others = this.cy.elements().difference(neighborhood);
+			const neighborhood = node.neighborhood().add(node);
+			const others = this.cy.elements().difference(neighborhood);
 
-		neighborhood.addClass('highlighted');
-		others.addClass('faded');
+			neighborhood.addClass('highlighted');
+			others.addClass('faded');
+		});
 	}
 
 	private resetHighlights(): void {
 		if (!this.cy) return;
-		this.cy.elements().removeClass('highlighted faded');
+
+		// Scoped to what is actually marked. Every background tap used to sweep
+		// the whole graph, even with nothing highlighted.
+		const marked = this.cy.elements('.highlighted, .faded');
+		if (marked.length === 0) return;
+		marked.removeClass('highlighted faded');
 	}
 
 	async onClose(): Promise<void> {

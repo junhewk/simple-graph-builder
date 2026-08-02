@@ -1,10 +1,58 @@
 import { Notice } from 'obsidian';
-import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, ResolutionCache, EmbeddingIndex, labelToEntityType } from '../types';
+import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, isLegacyWikilinkEdge, ResolutionCache, EmbeddingIndex, labelToEntityType, normalizeKey, normalizeUnicode } from '../types';
 import { DEFAULT_SETTINGS, DEFAULT_EMBEDDING_DIMENSIONS, getEmbeddingDimensions } from '../settings';
 import { loadEmbeddingsBinary, saveEmbeddingsBinary, cosineSimilarity } from '../extraction/llm-client';
 import type SimpleGraphBuilderPlugin from '../main';
 
 const SAVE_DEBOUNCE_MS = 1000;
+
+/**
+ * Canonical alias list: NFC, no duplicates, never repeating the display name.
+ */
+function dedupeAliases(aliases: unknown[], name: string): string[] {
+	const seen = new Set<string>([normalizeKey(name)]);
+	const out: string[] = [];
+
+	for (const alias of aliases) {
+		if (typeof alias !== 'string') continue;
+		const canonical = normalizeUnicode(alias).trim();
+		const key = normalizeKey(canonical);
+		if (!key || seen.has(key)) continue;
+		seen.add(key);
+		out.push(canonical);
+	}
+
+	return out;
+}
+
+/**
+ * Fold a duplicate node's provenance into the node that survives.
+ *
+ * The duplicate's own name becomes an alias: it was a real spelling of the
+ * entity, and keeping it means a search for that form still resolves.
+ */
+function mergeNodeInto(survivor: OntologyNode, duplicate: OntologyNode): void {
+	const notes = new Set([...survivor.sourceNotes, ...duplicate.sourceNotes].map(normalizeUnicode));
+	survivor.sourceNotes = [...notes];
+
+	const aliases: unknown[] = [
+		...(Array.isArray(survivor.properties.aliases) ? survivor.properties.aliases : []),
+		...(Array.isArray(duplicate.properties.aliases) ? duplicate.properties.aliases : []),
+		duplicate.properties.name,
+	];
+	const deduped = dedupeAliases(aliases, survivor.properties.name);
+	if (deduped.length > 0) survivor.properties.aliases = deduped;
+
+	// Prefer whichever description actually says something
+	const theirs = duplicate.properties.description;
+	const ours = survivor.properties.description;
+	if (typeof theirs === 'string' && theirs.length > (typeof ours === 'string' ? ours.length : 0)) {
+		survivor.properties.description = normalizeUnicode(theirs);
+	}
+
+	survivor.createdAt = Math.min(survivor.createdAt ?? Infinity, duplicate.createdAt ?? Infinity) || undefined;
+	survivor.updatedAt = Math.max(survivor.updatedAt ?? 0, duplicate.updatedAt ?? 0) || undefined;
+}
 
 /**
  * GraphCache provides O(1) lookups via Maps and debounced persistence.
@@ -20,21 +68,23 @@ export class GraphCache {
 	private nodes: OntologyNode[] = [];
 	private edges: OntologyEdge[] = [];
 	private version = GRAPH_SCHEMA_VERSION;
+	private prunedLegacyEdgeCount = 0;
+	private mergedDuplicateCount = 0;
 
 	// Indexes for O(1) lookups
 	private nodeById: Map<string, OntologyNode> = new Map();
 	private nodesByEntityType: Map<string, OntologyNode[]> = new Map();
 	private nodesByLabel: Map<string, OntologyNode[]> = new Map(); // Legacy
 	private nodesBySourceNote: Map<string, OntologyNode[]> = new Map();
-	private nodeByName: Map<string, OntologyNode> = new Map(); // lowercase name -> node
-	private nodeByAlias: Map<string, OntologyNode> = new Map(); // lowercase alias -> node
+	private nodeByName: Map<string, OntologyNode> = new Map(); // normalizeKey(name) -> node
+	private nodeByAlias: Map<string, OntologyNode> = new Map(); // normalizeKey(alias) -> node
 	private edgeById: Map<string, OntologyEdge> = new Map();
 	private edgesBySource: Map<string, OntologyEdge[]> = new Map();
 	private edgesByTarget: Map<string, OntologyEdge[]> = new Map();
 	private edgesBySourceNote: Map<string, OntologyEdge[]> = new Map();
 
 	// Resolution cache (persistent across sessions)
-	private resolutionCache: Map<string, string> = new Map(); // lowercase token -> node ID
+	private resolutionCache: Map<string, string> = new Map(); // normalizeKey(token) -> node ID
 	private resolutionCacheDirty = false;
 
 	// Embeddings (lazy loaded from binary file)
@@ -83,6 +133,9 @@ export class GraphCache {
 		// Migrate v2 -> v3 schema (populate entityType and relationship)
 		this.migrateToV3();
 
+		// Repair graphs damaged by the old entity-level wikilink pass
+		this.pruneLegacyWikilinkEdges();
+
 		// Load resolution cache
 		if (data?.resolutionCache) {
 			for (const [token, nodeId] of Object.entries(data.resolutionCache)) {
@@ -92,6 +145,10 @@ export class GraphCache {
 
 		// Load embedding index (embeddings are loaded lazily)
 		this.embeddingIndex = data?.embeddingIndex || null;
+
+		// Fold NFD/NFC duplicates together. Runs after the embedding index is in
+		// place so its node ids can be remapped alongside everything else.
+		this.normalizeIdentities();
 
 		this.rebuildIndexes();
 		this.loaded = true;
@@ -152,6 +209,178 @@ export class GraphCache {
 			console.debug('Migrated graph data from v2 to v3 schema');
 			this.dirty = true;
 		}
+
+		// Record that the migration ran. Without this the stored version keeps
+		// reporting whatever it was written as — real v3 graphs in the wild still
+		// claim `version: 1` — which makes it useless as a migration gate.
+		if (this.version !== GRAPH_SCHEMA_VERSION) {
+			this.version = GRAPH_SCHEMA_VERSION;
+			this.dirty = true;
+		}
+	}
+
+	/**
+	 * Strip edges left behind by the old entity-level wikilink pass.
+	 *
+	 * That pass connected every entity in a note to every entity in each linked
+	 * note, so a 141-note vault ended up with 188,097 junk edges out of 191,436
+	 * and a 115 MB data.json. The note layer replaces them with one `links to`
+	 * edge per note pair, but the damage is already persisted, so it has to be
+	 * cleaned up on load rather than only fixed going forward.
+	 *
+	 * Deliberately a single bulk filter rather than a loop over removeEdge():
+	 * removeEdge does an indexOf + splice, so removing 188k edges one at a time
+	 * is ~10^10 operations and would hang Obsidian at startup. Callers run
+	 * rebuildIndexes() afterwards, which repairs every index in one pass.
+	 */
+	private pruneLegacyWikilinkEdges(): void {
+		const before = this.edges.length;
+		this.edges = this.edges.filter(e => !isLegacyWikilinkEdge(e));
+		this.prunedLegacyEdgeCount = before - this.edges.length;
+
+		if (this.prunedLegacyEdgeCount > 0) {
+			console.debug(`Removed ${this.prunedLegacyEdgeCount} redundant wikilink edges`);
+			this.dirty = true;
+		}
+	}
+
+	/**
+	 * How many legacy wikilink edges the last load removed. Lets the plugin tell
+	 * the user why their graph suddenly got smaller.
+	 */
+	getPrunedLegacyEdgeCount(): number {
+		return this.prunedLegacyEdgeCount;
+	}
+
+	/**
+	 * How many duplicate nodes the last load merged while normalizing Unicode.
+	 */
+	getMergedDuplicateCount(): number {
+		return this.mergedDuplicateCount;
+	}
+
+	/**
+	 * Fold nodes whose ids differ only by Unicode normal form.
+	 *
+	 * Node ids were built with `toLowerCase()` alone, which does nothing for
+	 * Hangul. Composed (NFC) and decomposed (NFD) spellings of the same Korean
+	 * word render identically but produce different ids, so one concept could
+	 * become two unconnected nodes. macOS supplies NFD in file paths, so vaults
+	 * mixing typed text with path-derived names accumulated these silently.
+	 *
+	 * Ids are re-keyed with normalizeKey (which is also what generateNodeId now
+	 * uses), colliding nodes are merged, and every reference is rewritten:
+	 * edge endpoints, edge ids, the resolution cache, and the embedding index.
+	 * Does nothing when the graph is already canonical, so it costs one pass per
+	 * load and never marks a clean graph dirty.
+	 */
+	private normalizeIdentities(): void {
+		const remap = new Map<string, string>();
+		const survivors = new Map<string, OntologyNode>();
+		const kept: OntologyNode[] = [];
+		this.mergedDuplicateCount = 0;
+		let changed = false;
+
+		for (const node of this.nodes) {
+			const canonicalId = normalizeKey(node.id);
+			remap.set(node.id, canonicalId);
+
+			const existing = survivors.get(canonicalId);
+			if (!existing) {
+				if (node.id !== canonicalId) changed = true;
+				node.id = canonicalId;
+				changed = this.canonicalizeNodeText(node) || changed;
+				survivors.set(canonicalId, node);
+				kept.push(node);
+				continue;
+			}
+
+			// Duplicate: fold this node's provenance into the survivor
+			mergeNodeInto(existing, node);
+			this.mergedDuplicateCount++;
+			changed = true;
+		}
+
+		if (!changed) return;
+
+		this.nodes = kept;
+
+		// Rewrite edges onto the surviving ids, dropping self-loops created by a
+		// merge and any duplicates that collapse onto the same id
+		const seenEdges = new Set<string>();
+		const rewritten: OntologyEdge[] = [];
+		for (const edge of this.edges) {
+			const source = remap.get(edge.source) ?? normalizeKey(edge.source);
+			const target = remap.get(edge.target) ?? normalizeKey(edge.target);
+			if (source === target) continue;
+
+			edge.source = source;
+			edge.target = target;
+			edge.relationship = normalizeUnicode(edge.relationship ?? 'relates to');
+			edge.id = `${source}->${target}:${normalizeKey(edge.relationship)}`;
+
+			if (seenEdges.has(edge.id)) continue;
+			seenEdges.add(edge.id);
+			rewritten.push(edge);
+		}
+		this.edges = rewritten;
+
+		// Resolution cache: canonical tokens, canonical targets
+		const resolution = new Map<string, string>();
+		for (const [token, nodeId] of this.resolutionCache) {
+			const mapped = remap.get(nodeId) ?? normalizeKey(nodeId);
+			if (survivors.has(mapped)) resolution.set(normalizeKey(token), mapped);
+		}
+		this.resolutionCache = resolution;
+		this.resolutionCacheDirty = true;
+
+		// Embedding index: same order and length, so the binary stays aligned
+		if (this.embeddingIndex) {
+			this.embeddingIndex.nodeIds = this.embeddingIndex.nodeIds.map(
+				id => remap.get(id) ?? normalizeKey(id)
+			);
+		}
+		for (const [id, vector] of [...this.embeddings]) {
+			const mapped = remap.get(id) ?? normalizeKey(id);
+			if (mapped === id) continue;
+			this.embeddings.delete(id);
+			this.embeddings.set(mapped, vector);
+		}
+
+		console.debug(
+			`Normalized graph identities: merged ${this.mergedDuplicateCount} duplicate nodes`
+		);
+		this.dirty = true;
+	}
+
+	/**
+	 * Put a node's own text into canonical form. Returns true if it changed.
+	 */
+	private canonicalizeNodeText(node: OntologyNode): boolean {
+		let changed = false;
+
+		const name = normalizeUnicode(node.properties.name ?? '');
+		if (name !== node.properties.name) {
+			node.properties.name = name;
+			changed = true;
+		}
+
+		const aliases = node.properties.aliases;
+		if (Array.isArray(aliases)) {
+			const canonical = dedupeAliases(aliases, name);
+			if (canonical.length !== aliases.length || canonical.some((a, i) => a !== aliases[i])) {
+				node.properties.aliases = canonical;
+				changed = true;
+			}
+		}
+
+		const sourceNotes = node.sourceNotes.map(normalizeUnicode);
+		if (sourceNotes.some((p, i) => p !== node.sourceNotes[i])) {
+			node.sourceNotes = sourceNotes;
+			changed = true;
+		}
+
+		return changed;
 	}
 
 	/**
@@ -210,14 +439,14 @@ export class GraphCache {
 		}
 
 		// Index by name (lowercase for case-insensitive lookup)
-		this.nodeByName.set(node.properties.name.toLowerCase(), node);
+		this.nodeByName.set(normalizeKey(node.properties.name), node);
 
 		// Index by aliases
 		const aliases = node.properties.aliases;
 		if (aliases && Array.isArray(aliases)) {
 			for (const alias of aliases) {
 				if (typeof alias === 'string') {
-					this.nodeByAlias.set(alias.toLowerCase(), node);
+					this.nodeByAlias.set(normalizeKey(alias), node);
 				}
 			}
 		}
@@ -228,14 +457,14 @@ export class GraphCache {
 	 */
 	private unindexNode(node: OntologyNode): void {
 		this.nodeById.delete(node.id);
-		this.nodeByName.delete(node.properties.name.toLowerCase());
+		this.nodeByName.delete(normalizeKey(node.properties.name));
 
 		// Remove from alias index
 		const aliases = node.properties.aliases;
 		if (aliases && Array.isArray(aliases)) {
 			for (const alias of aliases) {
 				if (typeof alias === 'string') {
-					this.nodeByAlias.delete(alias.toLowerCase());
+					this.nodeByAlias.delete(normalizeKey(alias));
 				}
 			}
 		}
@@ -348,14 +577,14 @@ export class GraphCache {
 	}
 
 	getNodeByName(name: string): OntologyNode | undefined {
-		return this.nodeByName.get(name.toLowerCase());
+		return this.nodeByName.get(normalizeKey(name));
 	}
 
 	/**
 	 * Get node by alias (O(1) lookup).
 	 */
 	getNodeByAlias(alias: string): OntologyNode | undefined {
-		return this.nodeByAlias.get(alias.toLowerCase());
+		return this.nodeByAlias.get(normalizeKey(alias));
 	}
 
 	/**
@@ -363,7 +592,7 @@ export class GraphCache {
 	 * Checks exact name first, then aliases.
 	 */
 	getNodeByNameOrAlias(nameOrAlias: string): OntologyNode | undefined {
-		const lower = nameOrAlias.toLowerCase();
+		const lower = normalizeKey(nameOrAlias);
 		return this.nodeByName.get(lower) || this.nodeByAlias.get(lower);
 	}
 
@@ -374,14 +603,14 @@ export class GraphCache {
 		const node = this.nodeById.get(nodeId);
 		if (!node) return false;
 
-		const lowerAlias = alias.toLowerCase();
+		const lowerAlias = normalizeKey(alias);
 
 		// Don't add if it's the same as the node's name
-		if (lowerAlias === node.properties.name.toLowerCase()) return false;
+		if (lowerAlias === normalizeKey(node.properties.name)) return false;
 
 		// Don't add if alias already exists on this node
 		const existingAliases = node.properties.aliases || [];
-		if (existingAliases.some(a => a.toLowerCase() === lowerAlias)) return false;
+		if (existingAliases.some(a => normalizeKey(a) === lowerAlias)) return false;
 
 		// Don't add if alias belongs to another node
 		const existingNode = this.nodeByAlias.get(lowerAlias) || this.nodeByName.get(lowerAlias);
@@ -571,7 +800,7 @@ export class GraphCache {
 	 * Returns undefined if not cached.
 	 */
 	getResolvedNodeId(token: string): string | undefined {
-		return this.resolutionCache.get(token.toLowerCase());
+		return this.resolutionCache.get(normalizeKey(token));
 	}
 
 	/**
@@ -579,7 +808,7 @@ export class GraphCache {
 	 * This persists across sessions.
 	 */
 	cacheResolution(token: string, nodeId: string): void {
-		this.resolutionCache.set(token.toLowerCase(), nodeId);
+		this.resolutionCache.set(normalizeKey(token), nodeId);
 		this.resolutionCacheDirty = true;
 		this.scheduleSave();
 	}
@@ -588,7 +817,7 @@ export class GraphCache {
 	 * Remove a resolution from the cache.
 	 */
 	uncacheResolution(token: string): void {
-		if (this.resolutionCache.delete(token.toLowerCase())) {
+		if (this.resolutionCache.delete(normalizeKey(token))) {
 			this.resolutionCacheDirty = true;
 			this.scheduleSave();
 		}

@@ -1,4 +1,4 @@
-import { GraphData, OntologyNode, getNodeEntityType } from '../types';
+import { GraphData, OntologyNode, getNodeEntityType, normalizeKey } from '../types';
 import type { GraphCache } from './cache';
 
 export interface SearchResult {
@@ -19,7 +19,7 @@ export interface SearchOptions {
  * Searches nodes by name and optionally filters by label.
  */
 export function searchGraphCache(cache: GraphCache, query: string, options?: SearchOptions): SearchResult[] {
-	const queryLower = query.toLowerCase().trim();
+	const queryLower = normalizeKey(query);
 	if (!queryLower) return [];
 
 	const exactMatch = options?.exactMatch ?? false;
@@ -35,7 +35,7 @@ export function searchGraphCache(cache: GraphCache, query: string, options?: Sea
 			continue;
 		}
 
-		const nameLower = node.properties.name.toLowerCase();
+		const nameLower = normalizeKey(node.properties.name);
 		const typeLower = entityType.toLowerCase();
 
 		let score = 0;
@@ -87,7 +87,7 @@ export function searchGraphCache(cache: GraphCache, query: string, options?: Sea
  * @deprecated Use searchGraphCache for better performance.
  */
 export function searchGraph(graph: GraphData, query: string, options?: SearchOptions): SearchResult[] {
-	const queryLower = query.toLowerCase().trim();
+	const queryLower = normalizeKey(query);
 	if (!queryLower) return [];
 
 	const exactMatch = options?.exactMatch ?? false;
@@ -103,7 +103,7 @@ export function searchGraph(graph: GraphData, query: string, options?: SearchOpt
 			continue;
 		}
 
-		const nameLower = node.properties.name.toLowerCase();
+		const nameLower = normalizeKey(node.properties.name);
 		const typeLower = entityType.toLowerCase();
 
 		let score = 0;

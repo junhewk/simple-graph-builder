@@ -1,5 +1,5 @@
 import { App, Modal, Setting, Notice } from 'obsidian';
-import { OntologyNode } from '../types';
+import { OntologyNode, normalizeKey } from '../types';
 import { EntityResolver } from '../graph/resolver';
 import type SimpleGraphBuilderPlugin from '../main';
 
@@ -97,18 +97,18 @@ export class EntityMergeModal extends Modal {
 		if (this.searchQuery.length < 2) {
 			this.searchResults = [];
 		} else {
-			const query = this.searchQuery.toLowerCase();
+			const query = normalizeKey(this.searchQuery);
 			this.searchResults = this.plugin.graphCache.getAllNodes()
 				.filter(node => {
 					// Don't include the source node
 					if (node.id === this.sourceNode.id) return false;
 
 					// Match name
-					if (node.properties.name.toLowerCase().includes(query)) return true;
+					if (normalizeKey(node.properties.name).includes(query)) return true;
 
 					// Match aliases
 					const aliases = node.properties.aliases || [];
-					if (aliases.some(a => a.toLowerCase().includes(query))) return true;
+					if (aliases.some(a => normalizeKey(a).includes(query))) return true;
 
 					return false;
 				})

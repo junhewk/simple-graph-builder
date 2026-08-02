@@ -28,7 +28,7 @@ This design provides **structured entity classification with expressive relation
 - **Internal Link Support**: Automatically processes `[[wikilinks]]` to build note-to-note connections
 - **Multiple LLM Support**: Works with Claude, OpenAI, Gemini, and local servers — Ollama plus anything OpenAI-compatible (llama.cpp, LM Studio, vLLM)
 - **Reasoning Effort Control**: Tune how hard the model thinks, separately for extraction and Smart Search
-- **Korean Language Support**: Bigram Jaccard similarity for robust Korean text matching (handles particles and spacing variations)
+- **Korean Language Support**: Bigram Jaccard similarity for robust Korean text matching (handles particles and spacing variations), with all names normalized to Unicode NFC so composed and decomposed Hangul resolve to the same entity
 - **Interactive Graph View**: Visualize your knowledge graph with fCoSE force-directed layout
 - **Large Graph Support**: Optimized for thousands of nodes with fast rendering
 - **Note Neighborhood Panel**: See connections for the current note in a sidebar
@@ -64,6 +64,7 @@ This approach resolves most entities via fast hash lookups, reserving expensive 
 | `Open graph view` | Show the knowledge graph visualization |
 | `Open note neighborhood panel` | Show current note's connections in sidebar |
 | `Remove current note from graph` | Remove active note from the graph |
+| `Rebuild note layer` | Recreate note nodes and their links from existing data (no API calls) |
 | `Clear all graph data` | Reset the entire graph |
 
 ## Data Model
@@ -83,6 +84,11 @@ The LLM must classify each entity into one of these types:
 | `DOCUMENT` | Papers, books, articles, notes | "Attention Is All You Need" |
 | `METHOD` | Techniques, approaches, workflows | Agile, TDD, fine-tuning |
 | `TOPIC` | Subjects, themes, fields, domains | NLP, distributed systems |
+
+One further type, `NOTE`, is created by the plugin rather than the LLM. Each
+analyzed note becomes a `NOTE` node that `mentions` the entities extracted from
+it and `links to` the notes it wikilinks, which is what ties separate notes into
+one graph. Turn them off with **Show note nodes** for an entity-only view.
 
 ### Relationships (Free-form Verbs)
 Relationships are expressed as active verbs describing how entities relate:
@@ -165,6 +171,8 @@ Enable embedding-based entity resolution for intelligent deduplication:
 
 ### View Settings
 - **Open graph in main window**: Toggle to open the graph visualization in a main tab instead of the right sidebar
+- **Show note nodes**: Include your notes in the graph alongside the entities they mention. Turn off for an entity-only view
+- **Minimum connections**: Hide nodes with fewer than this many connections
 
 ### Data Management
 - View graph statistics (nodes by entity type, total relationships)
@@ -182,6 +190,17 @@ Note analysis requires a model that can return **structured output** (JSON schem
 | Local | any model your server exposes — Ollama, or an OpenAI-compatible server such as llama.cpp's `llama-server`, LM Studio or vLLM |
 
 Any other model can be typed into the **Custom…** field. Smart Search additionally needs tool calling; for local servers, start `llama-server` with `--jinja`, and prefer `qwen3:*` or `gpt-oss:*` on Ollama.
+
+## Upgrading to 0.5.0
+
+This release fixes a bug that made large graphs dense and slow to load, and repairs the damage automatically on first load. Nothing is re-analyzed and no API calls are made.
+
+- **Redundant link edges are removed.** Wikilinks used to connect every entity in a note to every entity in each linked note, which grows as the square of the entities per note. One 141-note vault carried 188,097 such edges out of 191,436 — 98% of its graph, in a 115 MB data file. They are deleted on load.
+- **Notes become nodes.** Each analyzed note now appears as a `NOTE` node that `mentions` its entities and `links to` the notes it wikilinks — one edge per link, as intended. The note layer is rebuilt from Obsidian's own link index. Turn it off with **Show note nodes**, or rebuild it any time with the **Rebuild note layer** command.
+- **Duplicate Korean entities are merged.** Names were compared without Unicode normalization, so composed (NFC) and decomposed (NFD) Hangul — identical on screen, and what macOS puts in file paths — produced two separate nodes for one concept, and made Korean search miss. Names are now normalized to NFC everywhere, and existing duplicates are folded together, keeping both notes' references and the alternate spelling as an alias.
+- **Rendering is faster.** The graph view uses WebGL where available, budgets edges as well as nodes, hides labels when zoomed out, and simplifies edges on large graphs.
+
+The same vault above went from 191,436 edges / 115 MB to 7,449 edges / 6.3 MB, with average connections per node dropping from 178 to 6.6.
 
 ## Upgrading to 0.4.0
 
@@ -265,6 +284,20 @@ Consider using Ollama for cost-free operation, or batch analyze during off-peak 
 - No data is stored externally; all graph data stays in your vault
 - Consider using Ollama for fully local, private processing
 - Embeddings are stored locally in binary format (`embeddings.bin`)
+
+### If you version-control your vault
+
+Obsidian stores plugin settings — **including your API keys** — in
+`.obsidian/plugins/simple-graph-builder/data.json`, together with the graph
+itself. If your vault is a git repository, add this to your `.gitignore`:
+
+```gitignore
+.obsidian/plugins/simple-graph-builder/data.json
+```
+
+Pushing that file to a public repository publishes your keys in plaintext, and
+deleting it later does not help — git keeps the history. If it has already been
+pushed, revoke the key at your provider's console and issue a new one.
 
 ## Technical Background
 

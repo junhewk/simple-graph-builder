@@ -14,3 +14,8 @@ export async function requestUrl(opts: any) {
   return { status: s.status, headers: s.headers || {}, text, arrayBuffer: new ArrayBuffer(0), get json() { return JSON.parse(text); } };
 }
 export class Vault {}
+/** Graph suites pull in cache.ts, which surfaces load-time repairs via Notice. */
+export const notices: string[] = [];
+export class Notice {
+  constructor(message: string) { notices.push(message); }
+}

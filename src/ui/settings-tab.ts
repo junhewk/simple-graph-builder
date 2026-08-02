@@ -475,6 +475,18 @@ export class SettingsTab extends PluginSettingTab {
 			});
 
 		new Setting(containerEl)
+			.setName('Show note nodes')
+			.setDesc('Include your notes in the graph, linked to the entities they mention. Turn off for an entity-only view.')
+			.addToggle(toggle => {
+				toggle
+					.setValue(this.plugin.settings.graphShowNotes)
+					.onChange(async (value) => {
+						this.plugin.settings.graphShowNotes = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
 			.setName('Minimum connections')
 			.setDesc(`Hide nodes with fewer than this many connections (current: ${this.plugin.settings.graphMinDegree})`)
 			.addSlider(slider => {

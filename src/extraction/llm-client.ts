@@ -1,4 +1,4 @@
-import { ApiProvider, EmbeddingProvider, LocalApiStyle, OntologyExtractionResult, Settings, EntityType, ExtractionMode, RawExtractionNode, RawExtractionRelationship } from '../types';
+import { ApiProvider, EmbeddingProvider, LocalApiStyle, OntologyExtractionResult, Settings, EntityType, ExtractionMode, RawExtractionNode, RawExtractionRelationship, normalizeKey } from '../types';
 import { Vault } from 'obsidian';
 import { chunkContent, buildExtractionPrompt } from './prompts';
 import { getEmbeddingRequestConfig } from '../settings';
@@ -126,7 +126,7 @@ function mergeChunkResults(results: OntologyExtractionResult[]): OntologyExtract
 		const idMap = new Map<string, string>();
 
 		for (const node of result.nodes) {
-			const key = node.properties.name.toLowerCase();
+			const key = normalizeKey(node.properties.name);
 			if (!seenNames.has(key)) {
 				seenNames.add(key);
 				const newId = String(nodeIdCounter++);
@@ -134,7 +134,7 @@ function mergeChunkResults(results: OntologyExtractionResult[]): OntologyExtract
 				nodes.push({ ...node, id: newId });
 			} else {
 				// Find existing node with same name and map to its ID
-				const existing = nodes.find(n => n.properties.name.toLowerCase() === key);
+				const existing = nodes.find(n => normalizeKey(n.properties.name) === key);
 				if (existing) {
 					idMap.set(node.id, existing.id);
 				}
@@ -784,7 +784,7 @@ function resolveId(
 	}
 
 	// Try to resolve as a name
-	return nameToId.get(id.toLowerCase()) || id;
+	return nameToId.get(normalizeKey(id)) || id;
 }
 
 
@@ -830,7 +830,7 @@ function parseRelationships(
 		relationships.push({
 			source: sourceId,
 			target: targetId,
-			relationship: relationship.toLowerCase(),
+			relationship: normalizeKey(relationship),
 			properties: {
 				detail: detail || undefined,
 			},
@@ -874,7 +874,7 @@ function parseOntologyResponse(response: string): OntologyExtractionResult {
 	// Build name-to-id map for relationship resolution
 	const nameToId = new Map<string, string>();
 	for (const node of nodes) {
-		nameToId.set(node.properties.name.toLowerCase(), node.id);
+		nameToId.set(normalizeKey(node.properties.name), node.id);
 	}
 
 	const relationships = parseRelationships(parsed, nodes, nameToId);

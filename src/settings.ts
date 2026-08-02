@@ -50,6 +50,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	// View settings
 	openGraphInMain: false,
 	graphMinDegree: 0,
+	graphShowNotes: true,
 	// Embedding-based resolution (opt-in)
 	enableEmbeddings: false,
 	embeddingProvider: 'openai',

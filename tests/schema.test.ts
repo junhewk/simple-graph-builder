@@ -1,5 +1,5 @@
 import { ONTOLOGY_JSON_SCHEMA, toProviderSchema, EXTRACTION_SCHEMA_NAME } from '../src/extraction/providers/schemas';
-import { VALID_ENTITY_TYPES } from '../src/types';
+import { EXTRACTION_ENTITY_TYPES, VALID_ENTITY_TYPES } from '../src/types';
 
 let fail = 0;
 const check = (n: string, c: boolean, extra = '') => { if (!c) fail++; console.log(`${c ? 'ok  ' : 'FAIL'} ${n}${extra ? ' :: ' + extra : ''}`); };
@@ -27,10 +27,15 @@ check('schema satisfies OpenAI strict mode', strictErrs.length === 0, strictErrs
 check('top level requires entities + relationships', JSON.stringify(s.required) === '["entities","relationships"]');
 const ent = s.properties.entities.items;
 const rel = s.properties.relationships.items;
-check('entity_type enum matches VALID_ENTITY_TYPES exactly',
-  JSON.stringify(ent.properties.entity_type.enum) === JSON.stringify([...VALID_ENTITY_TYPES]),
+check('entity_type enum matches EXTRACTION_ENTITY_TYPES exactly',
+  JSON.stringify(ent.properties.entity_type.enum) === JSON.stringify([...EXTRACTION_ENTITY_TYPES]),
   JSON.stringify(ent.properties.entity_type.enum));
 check('enum has all 10 types', ent.properties.entity_type.enum.length === 10);
+// NOTE is a plugin-generated type for vault notes. If it leaks into the schema
+// models will start labelling entities as notes.
+check('enum EXCLUDES the plugin-generated NOTE type',
+  !ent.properties.entity_type.enum.includes('NOTE'));
+check('NOTE is still a valid node type', VALID_ENTITY_TYPES.includes('NOTE' as never));
 check('description is required (strict mode needs it)', ent.required.includes('description') && rel.required.includes('description'));
 check('relationship endpoints are names not ids', 'source' in rel.properties && 'target' in rel.properties && !('source_id' in rel.properties));
 check('schema shape matches what the prompt asks for', 'name' in ent.properties && 'entity_type' in ent.properties && 'relationship' in rel.properties);

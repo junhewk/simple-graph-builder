@@ -1,4 +1,4 @@
-import { Plugin, TFile, debounce, Menu, WorkspaceLeaf } from 'obsidian';
+import { Plugin, TFile, debounce, Menu, Notice, WorkspaceLeaf } from 'obsidian';
 import { Settings, PluginData } from './types';
 import { DEFAULT_SETTINGS } from './settings';
 import { migrateSettings } from './settings-migration';
@@ -6,6 +6,7 @@ import { SettingsTab } from './ui/settings-tab';
 import { GraphView, GRAPH_VIEW_TYPE } from './ui/graph-view';
 import { NeighborhoodView, NEIGHBORHOOD_VIEW_TYPE } from './ui/neighborhood-view';
 import { GraphCache } from './graph/cache';
+import { rebuildNoteLayer } from './graph/merge';
 import { analyzeCurrentNote, removeCurrentNoteFromGraph, clearAllGraphData, autoAnalyzeFile } from './commands/analyze';
 import { openSearchModal } from './commands/search';
 import { openSmartSearch } from './commands/smart-search';
@@ -85,6 +86,12 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			callback: () => void openSmartSearch(this),
 		});
 
+		this.addCommand({
+			id: 'rebuild-note-layer',
+			name: 'Rebuild note layer',
+			callback: () => this.repairNoteLayer(true),
+		});
+
 		// Add settings tab
 		this.addSettingTab(new SettingsTab(this.app, this));
 
@@ -112,6 +119,46 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		// Add status bar item
 		this.statusBarItem = this.addStatusBarItem();
 		this.updateStatusBar();
+
+		// The note layer needs metadataCache.resolvedLinks, which is not populated
+		// at plugin load. Only runs when there is something to do.
+		this.app.workspace.onLayoutReady(() => this.repairNoteLayer(false));
+	}
+
+	/**
+	 * Build (or repair) the NOTE node layer from data already in the graph.
+	 *
+	 * Runs automatically once per load so that graphs damaged by the old
+	 * entity-level wikilink pass recover without the user re-analyzing their
+	 * vault: `ensureLoaded` strips the junk edges, and this puts the note-to-note
+	 * links back using Obsidian's own link index. No LLM calls, no file reads.
+	 *
+	 * `verbose` distinguishes the manual command, which should always say what it
+	 * did, from the automatic pass, which stays quiet unless it changed something.
+	 */
+	repairNoteLayer(verbose: boolean): void {
+		const pruned = this.graphCache.getPrunedLegacyEdgeCount();
+		const merged = this.graphCache.getMergedDuplicateCount();
+		const { noteNodesAdded, edgesAdded } = rebuildNoteLayer(this.graphCache, this.app);
+
+		if (pruned > 0 || merged > 0) {
+			const parts: string[] = [];
+			if (pruned > 0) parts.push(`removed ${pruned.toLocaleString()} redundant link edges`);
+			if (merged > 0) parts.push(`merged ${merged.toLocaleString()} duplicate entities`);
+			if (noteNodesAdded > 0) parts.push(`added ${noteNodesAdded} note nodes`);
+			new Notice(`Graph repaired: ${parts.join(', ')}.`);
+		} else if (verbose) {
+			new Notice(
+				noteNodesAdded || edgesAdded
+					? `Note layer rebuilt: ${noteNodesAdded} note nodes, ${edgesAdded} edges added.`
+					: 'Note layer is already up to date.'
+			);
+		}
+
+		if (noteNodesAdded || edgesAdded || pruned || merged) {
+			this.updateStatusBar();
+			void this.graphCache.flush();
+		}
 	}
 
 	/**

@@ -55,3 +55,22 @@ export function getResolvedLinks(app: App, file: TFile, content: string): string
 
 	return resolvedPaths;
 }
+
+/**
+ * Get a note's outgoing links from Obsidian's own link index, without reading
+ * the file.
+ *
+ * The content-based `getResolvedLinks` above is what analysis uses, since it
+ * already holds the note text and shouldn't wait on metadataCache to catch up.
+ * This variant exists for the repair path, which walks every note in the graph
+ * and has neither the content nor any reason to read thousands of files.
+ *
+ * Only valid once the metadata cache is populated — call it from
+ * `workspace.onLayoutReady`, not at plugin load.
+ */
+export function getResolvedLinksFromCache(app: App, path: string): string[] {
+	const links = app.metadataCache.resolvedLinks[path];
+	if (!links) return [];
+
+	return Object.keys(links).filter(target => target !== path);
+}

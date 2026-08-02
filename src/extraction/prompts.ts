@@ -1,4 +1,4 @@
-import { ExtractionMode, VALID_ENTITY_TYPES } from '../types';
+import { ExtractionMode, EXTRACTION_ENTITY_TYPES } from '../types';
 
 // ============================================
 // Content Chunking
@@ -65,7 +65,7 @@ ${existingNodeNames.slice(0, 100).join(', ')}${existingNodeNames.length > 100 ? 
 		? `Extract up to ${limits.maxEntities} most significant entities.`
 		: `Extract ALL significant entities.`;
 
-	const entityTypesList = VALID_ENTITY_TYPES.join(', ');
+	const entityTypesList = EXTRACTION_ENTITY_TYPES.join(', ');
 
 	return `You are a knowledge graph builder. Extract entities and relationships from the text below.
 

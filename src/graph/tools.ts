@@ -7,6 +7,7 @@ import type { GraphCache } from './cache';
 import {
 	OntologyEdge,
 	EntityType,
+	normalizeKey,
 	SearchNodeResult,
 	RelationshipResult,
 	ConnectedNodeResult,
@@ -40,7 +41,7 @@ export interface NodeDetails {
  * Ignores whitespace for better Korean matching (handles spacing variations).
  */
 function generateBigrams(text: string): Set<string> {
-	const normalized = text.toLowerCase().replace(/\s+/g, '');
+	const normalized = normalizeKey(text).replace(/\s+/g, '');
 	const bigrams = new Set<string>();
 
 	for (let i = 0; i < normalized.length - 1; i++) {
@@ -79,8 +80,8 @@ function jaccardSimilarity(setA: Set<string>, setB: Set<string>): number {
  * 4. Bigram Jaccard similarity: 0.3-0.6 range (threshold > 0.3)
  */
 function calculateMatchScore(query: string, name: string): number {
-	const queryLower = query.toLowerCase().replace(/\s+/g, '');
-	const nameLower = name.toLowerCase().replace(/\s+/g, '');
+	const queryLower = normalizeKey(query).replace(/\s+/g, '');
+	const nameLower = normalizeKey(name).replace(/\s+/g, '');
 
 	// 1. Exact match (highest priority)
 	if (nameLower === queryLower) {

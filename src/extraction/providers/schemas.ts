@@ -1,4 +1,4 @@
-import { ApiProvider, VALID_ENTITY_TYPES } from '../../types';
+import { ApiProvider, EXTRACTION_ENTITY_TYPES } from '../../types';
 import { JsonSchemaObject } from './types';
 
 export const EXTRACTION_SCHEMA_NAME = 'ontology_extraction';
@@ -16,8 +16,10 @@ export const EXTRACTION_SCHEMA_NAME = 'ontology_extraction';
  *   already asks for and what parseOntologyResponse already resolves. Switching
  *   to ids here would break that resolution step.
  *
- * `entity_type` draws its enum from VALID_ENTITY_TYPES so the schema cannot
- * drift away from the EntityType union.
+ * `entity_type` draws its enum from EXTRACTION_ENTITY_TYPES so the schema cannot
+ * drift away from the EntityType union. Note that is the 10-type extraction
+ * vocabulary, not VALID_ENTITY_TYPES — the latter also contains NOTE, which the
+ * plugin generates for vault notes and no model should ever return.
  */
 export const ONTOLOGY_JSON_SCHEMA: JsonSchemaObject = {
 	type: 'object',
@@ -32,7 +34,7 @@ export const ONTOLOGY_JSON_SCHEMA: JsonSchemaObject = {
 				required: ['name', 'entity_type', 'description'],
 				properties: {
 					name: { type: 'string', description: 'Canonical entity name, 1-4 words' },
-					entity_type: { type: 'string', enum: [...VALID_ENTITY_TYPES] },
+					entity_type: { type: 'string', enum: [...EXTRACTION_ENTITY_TYPES] },
 					description: { type: 'string', description: 'Brief description, may be empty' },
 				},
 			},

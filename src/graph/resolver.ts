@@ -1,4 +1,4 @@
-import { OntologyNode, RawExtractionNode, ResolutionResult, ResolutionStats, Settings, getNodeEntityType, getEdgeRelationship } from '../types';
+import { OntologyNode, RawExtractionNode, ResolutionResult, ResolutionStats, Settings, getNodeEntityType, getEdgeRelationship, normalizeKey } from '../types';
 import { GraphCache } from './cache';
 import { getEmbeddings, settingsToEmbeddingOptions, verifyEntityMatch, settingsToExtractionOptions, EmbeddingOptions } from '../extraction/llm-client';
 import { generateNodeId, generateEdgeId } from './merge';
@@ -148,7 +148,7 @@ export class EntityResolver {
 	 */
 	async resolve(rawNode: RawExtractionNode): Promise<ResolutionResult> {
 		const name = rawNode.properties.name;
-		const lowerName = name.toLowerCase().trim();
+		const lowerName = normalizeKey(name);
 
 		// Steps 1-4: Try cache lookups
 		const cacheResult = this.tryResolveFromCaches(lowerName);
@@ -179,7 +179,7 @@ export class EntityResolver {
 
 		// First pass: resolve using cache lookups
 		for (const rawNode of rawNodes) {
-			const lowerName = rawNode.properties.name.toLowerCase().trim();
+			const lowerName = normalizeKey(rawNode.properties.name);
 			const cacheResult = this.tryResolveFromCaches(lowerName);
 
 			if (cacheResult) {
@@ -194,7 +194,7 @@ export class EntityResolver {
 			await this.resolveByEmbeddingBatch(needsEmbedding, results);
 		} else {
 			for (const rawNode of needsEmbedding) {
-				const lowerName = rawNode.properties.name.toLowerCase().trim();
+				const lowerName = normalizeKey(rawNode.properties.name);
 				results.set(rawNode.id, this.createNewEntityResult(rawNode, lowerName));
 			}
 		}
@@ -246,7 +246,7 @@ export class EntityResolver {
 			this.stats.embeddingHigh++;
 
 			this.cache.addAliasToNode(best.node.id, name);
-			this.cache.cacheResolution(name.toLowerCase(), best.node.id);
+			this.cache.cacheResolution(normalizeKey(name), best.node.id);
 			this.cache.setEmbedding(best.node.id, queryEmbedding);
 
 			return {
@@ -286,7 +286,7 @@ export class EntityResolver {
 					this.stats.embeddingVerified++;
 
 					this.cache.addAliasToNode(candidate.node.id, name);
-					this.cache.cacheResolution(name.toLowerCase(), candidate.node.id);
+					this.cache.cacheResolution(normalizeKey(name), candidate.node.id);
 
 					return {
 						nodeId: candidate.node.id,
@@ -325,7 +325,7 @@ export class EntityResolver {
 			console.error('Failed to get batch embeddings:', e);
 			// Fall back to creating new entities
 			for (const rawNode of rawNodes) {
-				const lowerName = rawNode.properties.name.toLowerCase().trim();
+				const lowerName = normalizeKey(rawNode.properties.name);
 				results.set(rawNode.id, this.createNewEntityResult(rawNode, lowerName));
 			}
 			return;
@@ -335,7 +335,7 @@ export class EntityResolver {
 		for (let i = 0; i < rawNodes.length; i++) {
 			const rawNode = rawNodes[i];
 			const name = rawNode.properties.name;
-			const lowerName = name.toLowerCase().trim();
+			const lowerName = normalizeKey(name);
 			const queryEmbedding = queryEmbeddings[i];
 
 			const embeddingResult = await this.matchByEmbedding(rawNode, name, queryEmbedding);
@@ -394,12 +394,12 @@ export class EntityResolver {
 	 */
 	private mergeAliases(sourceNode: OntologyNode, targetNodeId: string): void {
 		this.cache.addAliasToNode(targetNodeId, sourceNode.properties.name);
-		this.cache.cacheResolution(sourceNode.properties.name.toLowerCase(), targetNodeId);
+		this.cache.cacheResolution(normalizeKey(sourceNode.properties.name), targetNodeId);
 
 		const sourceAliases = sourceNode.properties.aliases || [];
 		for (const alias of sourceAliases) {
 			this.cache.addAliasToNode(targetNodeId, alias);
-			this.cache.cacheResolution(alias.toLowerCase(), targetNodeId);
+			this.cache.cacheResolution(normalizeKey(alias), targetNodeId);
 		}
 	}
 

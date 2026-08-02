@@ -1,7 +1,7 @@
-import { OntologyNode, OntologyEdge, OntologyExtractionResult, RawExtractionRelationship, ResolutionStats, Settings } from '../types';
+import { OntologyNode, OntologyEdge, OntologyExtractionResult, RawExtractionRelationship, ResolutionStats, Settings, normalizeKey, normalizeUnicode } from '../types';
 import type { GraphCache } from './cache';
 import type { App, TFile } from 'obsidian';
-import { getResolvedLinks } from './links';
+import { getResolvedLinks, getResolvedLinksFromCache } from './links';
 import { EntityResolver } from './resolver';
 
 /**
@@ -9,21 +9,22 @@ import { EntityResolver } from './resolver';
  * Uses lowercase normalized name for deduplication.
  */
 export function generateNodeId(entityType: string, name: string): string {
-	return `${entityType.toLowerCase()}:${name.toLowerCase().trim()}`;
+	return `${entityType.toLowerCase()}:${normalizeKey(name)}`;
 }
 
 /**
  * Generate a unique edge ID from source, target, and relationship verb.
  */
 export function generateEdgeId(source: string, target: string, relationship: string): string {
-	return `${source}->${target}:${relationship.toLowerCase()}`;
+	return `${source}->${target}:${normalizeKey(relationship)}`;
 }
 
 /**
- * Normalize a node name for consistent matching.
+ * Normalize a node's display name. Keeps case, but fixes the Unicode form so
+ * two encodings of the same Korean word can't become two nodes.
  */
 export function normalizeName(name: string): string {
-	return name.trim();
+	return normalizeUnicode(name).trim();
 }
 
 /**
@@ -280,52 +281,182 @@ export function removeNoteFromCache(cache: GraphCache, notePath: string): { node
 }
 
 /**
- * Process internal links ([[wikilinks]]) and add RELATED_TO edges.
+ * Generate the node ID for a vault note.
+ *
+ * Keyed on the full path, not the basename: two notes in different folders can
+ * share a basename, and collapsing them would silently merge their link graphs.
  */
-export function mergeInternalLinksIntoCache(
+export function generateNoteNodeId(notePath: string): string {
+	return `note:${normalizeKey(notePath)}`;
+}
+
+/**
+ * Ensure a note has a NOTE node, returning its id.
+ */
+function ensureNoteNode(cache: GraphCache, notePath: string, now: number): string {
+	const id = generateNoteNodeId(notePath);
+	if (cache.getNodeById(id)) return id;
+
+	const basename = notePath.split('/').pop()?.replace(/\.md$/i, '') ?? notePath;
+	cache.addNode({
+		id,
+		entityType: 'NOTE',
+		properties: { name: basename, path: notePath },
+		sourceNotes: [notePath],
+		createdAt: now,
+		updatedAt: now,
+	});
+	return id;
+}
+
+/**
+ * Build the note layer for a single note: a NOTE node, `mentions` edges to the
+ * entities extracted from it, and `links to` edges to the notes it wikilinks.
+ *
+ * Replaces the old entity-level cross product (see isLegacyWikilinkEdge). Cost
+ * is O(L + k) per note instead of O(L*k^2), and the note-to-note edge is what
+ * CLAUDE.md described in the first place.
+ *
+ * Link targets that have never been analyzed are skipped, matching the previous
+ * behaviour — the graph shouldn't sprout nodes for notes it knows nothing about.
+ */
+export function mergeNoteLayerIntoCache(
 	cache: GraphCache,
 	app: App,
 	file: TFile,
 	content: string
 ): number {
 	const now = Date.now();
-	const linkedPaths = getResolvedLinks(app, file, content);
-	let linksAdded = 0;
 
-	const sourceNoteNodes = cache.getNodesBySourceNote(file.path);
-	if (sourceNoteNodes.length === 0) {
+	const entityNodes = cache.getNodesBySourceNote(file.path)
+		.filter(n => n.entityType !== 'NOTE');
+	if (entityNodes.length === 0) {
 		return 0;
 	}
 
-	for (const targetPath of linkedPaths) {
-		const targetNoteNodes = cache.getNodesBySourceNote(targetPath);
-		if (targetNoteNodes.length === 0) {
-			continue;
+	const noteId = ensureNoteNode(cache, file.path, now);
+	let edgesAdded = 0;
+
+	// note -> entity
+	for (const entity of entityNodes) {
+		const edgeId = generateEdgeId(noteId, entity.id, 'mentions');
+		if (!cache.getEdgeById(edgeId)) {
+			cache.addEdge({
+				id: edgeId,
+				source: noteId,
+				target: entity.id,
+				relationship: 'mentions',
+				properties: {},
+				sourceNote: file.path,
+				createdAt: now,
+			});
+			edgesAdded++;
 		}
+	}
 
-		for (const sourceNode of sourceNoteNodes) {
-			for (const targetNode of targetNoteNodes) {
-				if (sourceNode.id === targetNode.id) continue;
+	// note -> note
+	for (const targetPath of getResolvedLinks(app, file, content)) {
+		if (targetPath === file.path) continue;
+		const targetHasEntities = cache.getNodesBySourceNote(targetPath)
+			.some(n => n.entityType !== 'NOTE');
+		if (!targetHasEntities) continue;
 
-				const edgeId = generateEdgeId(sourceNode.id, targetNode.id, 'links to');
+		const targetId = ensureNoteNode(cache, targetPath, now);
+		if (targetId === noteId) continue;
 
-				if (!cache.getEdgeById(edgeId)) {
-					cache.addEdge({
-						id: edgeId,
-						source: sourceNode.id,
-						target: targetNode.id,
-						relationship: 'links to',
-						properties: { detail: 'wikilink' },
-						sourceNote: file.path,
-						createdAt: now,
-					});
-					linksAdded++;
-				}
+		const edgeId = generateEdgeId(noteId, targetId, 'links to');
+		if (!cache.getEdgeById(edgeId)) {
+			cache.addEdge({
+				id: edgeId,
+				source: noteId,
+				target: targetId,
+				relationship: 'links to',
+				properties: {},
+				sourceNote: file.path,
+				createdAt: now,
+			});
+			edgesAdded++;
+		}
+	}
+
+	return edgesAdded;
+}
+
+/**
+ * Rebuild the whole note layer from data already on disk, with no LLM calls and
+ * no file reads.
+ *
+ * Everything needed is already available: which entities came from which note
+ * lives in each node's `sourceNotes`, and the vault's link graph lives in
+ * Obsidian's `metadataCache.resolvedLinks`. That makes it possible to repair a
+ * graph damaged by the old cross-product pass without asking the user to
+ * re-analyze their vault.
+ *
+ * Requires a populated metadata cache — call from `workspace.onLayoutReady`.
+ */
+export function rebuildNoteLayer(
+	cache: GraphCache,
+	app: App
+): { noteNodesAdded: number; edgesAdded: number } {
+	const now = Date.now();
+
+	// Which notes contributed entities? Derived from the nodes themselves, so
+	// this works even when the hash index has been cleared.
+	const notePaths = new Set<string>();
+	for (const node of cache.getAllNodes()) {
+		if (node.entityType === 'NOTE') continue;
+		for (const path of node.sourceNotes) notePaths.add(path);
+	}
+
+	let noteNodesAdded = 0;
+	let edgesAdded = 0;
+
+	for (const path of notePaths) {
+		if (!cache.getNodeById(generateNoteNodeId(path))) noteNodesAdded++;
+		const noteId = ensureNoteNode(cache, path, now);
+
+		for (const entity of cache.getNodesBySourceNote(path)) {
+			if (entity.entityType === 'NOTE') continue;
+			const edgeId = generateEdgeId(noteId, entity.id, 'mentions');
+			if (!cache.getEdgeById(edgeId)) {
+				cache.addEdge({
+					id: edgeId,
+					source: noteId,
+					target: entity.id,
+					relationship: 'mentions',
+					properties: {},
+					sourceNote: path,
+					createdAt: now,
+				});
+				edgesAdded++;
 			}
 		}
 	}
 
-	return linksAdded;
+	for (const path of notePaths) {
+		const noteId = generateNoteNodeId(path);
+		for (const targetPath of getResolvedLinksFromCache(app, path)) {
+			if (!notePaths.has(targetPath)) continue;
+			const targetId = generateNoteNodeId(targetPath);
+			if (targetId === noteId) continue;
+
+			const edgeId = generateEdgeId(noteId, targetId, 'links to');
+			if (!cache.getEdgeById(edgeId)) {
+				cache.addEdge({
+					id: edgeId,
+					source: noteId,
+					target: targetId,
+					relationship: 'links to',
+					properties: {},
+					sourceNote: path,
+					createdAt: now,
+				});
+				edgesAdded++;
+			}
+		}
+	}
+
+	return { noteNodesAdded, edgesAdded };
 }
 
 /**

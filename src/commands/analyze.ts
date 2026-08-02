@@ -1,7 +1,7 @@
 import { Notice, MarkdownView, TFile } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
 import { loadHashes, saveHashes, computeHash, hasNoteChanged, updateNoteHash, removeNoteHash, clearHashes } from '../graph/hashes';
-import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeInternalLinksIntoCache, removeNoteFromCache } from '../graph/merge';
+import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeNoteLayerIntoCache, removeNoteFromCache } from '../graph/merge';
 import { truncateContent } from '../extraction/prompts';
 import { extractOntologyChunked, settingsToExtractionOptions, ExtractionError } from '../extraction/llm-client';
 import { getExtractionConfigError } from '../extraction/providers/models';
@@ -100,8 +100,9 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 			relationshipsAdded = mergeResult.relationshipsAdded;
 		}
 
-		// Process internal links ([[wikilinks]])
-		const linksAdded = mergeInternalLinksIntoCache(plugin.graphCache, plugin.app, file, content);
+		// Build the note layer: a NOTE node, its `mentions` edges, and `links to`
+		// edges for its [[wikilinks]]
+		const linksAdded = mergeNoteLayerIntoCache(plugin.graphCache, plugin.app, file, content);
 
 		// Update hash
 		const updatedHashes = updateNoteHash(hashes, file.path, currentHash);
@@ -256,7 +257,7 @@ export async function analyzeFile(
 		}
 
 		// Process internal links ([[wikilinks]])
-		mergeInternalLinksIntoCache(plugin.graphCache, plugin.app, file, content);
+		mergeNoteLayerIntoCache(plugin.graphCache, plugin.app, file, content);
 
 		// Update hash in the passed hashes object
 		const existingIndex = hashes.hashes.findIndex(h => h.path === file.path);
