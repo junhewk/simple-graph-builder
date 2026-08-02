@@ -14,6 +14,11 @@ export async function requestUrl(opts: any) {
   return { status: s.status, headers: s.headers || {}, text, arrayBuffer: new ArrayBuffer(0), get json() { return JSON.parse(text); } };
 }
 export class Vault {}
+/** Enough of the view/modal surface for suites that import UI modules. */
+export class ItemView { constructor(_leaf?: unknown) { /* stub */ } }
+export class Modal { constructor(_app?: unknown) { /* stub */ } }
+export class Setting { constructor(_el?: unknown) { /* stub */ } }
+export class WorkspaceLeaf {}
 /** Graph suites pull in cache.ts, which surfaces load-time repairs via Notice. */
 export const notices: string[] = [];
 export class Notice {

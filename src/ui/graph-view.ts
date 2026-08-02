@@ -22,6 +22,15 @@ const LARGE_GRAPH_THRESHOLD = 2000; // nodes + edges
 const MAX_RENDER_NODES = 5000;
 const MAX_RENDER_EDGES = 15000;
 
+// Above this node count fCoSE's force-directed refinement stops being
+// affordable -- its cost is roughly quadratic. Measured on a 2:1 edge/node
+// graph: 500 nodes 1.8s, 1000 nodes 5.7s, 2500 nodes 38s, 5177 nodes 164s.
+const DRAFT_LAYOUT_NODE_THRESHOLD = 1000;
+
+// Roughly the on-screen room one node needs before its neighbours start
+// overlapping it, labels included. Used to spread a draft layout.
+const NODE_SPACING = 60;
+
 // ============================================
 // Graph Styles
 // ============================================
@@ -139,12 +148,59 @@ let webglSupport: boolean | null = null;
 function supportsWebgl(): boolean {
 	if (webglSupport === null) {
 		try {
-			webglSupport = !!document.createElement('canvas').getContext('webgl2');
+			webglSupport = !!createEl('canvas').getContext('webgl2');
 		} catch {
 			webglSupport = false;
 		}
 	}
 	return webglSupport;
+}
+
+/**
+ * What we attach to each cytoscape element. Cytoscape types `data()` and
+ * `evt.target` as `any`, so reading them through these keeps the view code
+ * type-checked instead of silently untyped.
+ */
+interface GraphNodeData {
+	id: string;
+	name: string;
+	entityType?: string;
+	label?: string;
+	color: string;
+	sourceNotes: string[];
+}
+
+interface GraphEdgeData {
+	id: string;
+	source: string;
+	target: string;
+	relationship: string;
+	detail?: string;
+}
+
+/**
+ * Grid offsets in rings of increasing radius, nearest first. Used to find the
+ * closest free cell to a stacked node.
+ */
+function buildSpiral(maxRadius: number): Array<[number, number]> {
+	const offsets: Array<[number, number]> = [];
+	for (let r = 1; r <= maxRadius; r++) {
+		for (let d = -r; d <= r; d++) {
+			offsets.push([d, -r], [d, r]);
+		}
+		for (let d = -r + 1; d <= r - 1; d++) {
+			offsets.push([-r, d], [r, d]);
+		}
+	}
+	return offsets;
+}
+
+function nodeData(node: cytoscape.NodeSingular): GraphNodeData {
+	return node.data() as GraphNodeData;
+}
+
+function edgeData(edge: cytoscape.EdgeSingular): GraphEdgeData {
+	return edge.data() as GraphEdgeData;
 }
 
 /**
@@ -339,7 +395,8 @@ export class GraphView extends ItemView {
 		}
 
 		// Choose layout based on graph size
-		const layoutConfig = this.getLayoutConfig(elements.length, isLargeGraph);
+		const usesDraftLayout = nodesToRender.length > DRAFT_LAYOUT_NODE_THRESHOLD;
+		const layoutConfig = this.getLayoutConfig(nodesToRender.length, elements.length);
 
 		// WebGL is a plain canvas-renderer flag in cytoscape 3.31+. It falls back
 		// to 2D above zoom 7.99, which maxZoom below keeps out of reach, so it
@@ -363,7 +420,11 @@ export class GraphView extends ItemView {
 			// Lay out explicitly after construction so the loading indicator can
 			// stay up until the graph is actually positioned
 			layout: { name: 'preset' },
-			minZoom: 0.1,
+			// A spread-out large graph can need to zoom well past 0.1 to fit,
+			// especially in the right sidebar, which is only a few hundred pixels
+			// wide. Clamping there is what leaves the user staring at one corner
+			// of the graph with no way to zoom out.
+			minZoom: isLargeGraph ? 0.01 : 0.1,
 			maxZoom: 3,
 			// Performance optimizations
 			...rendererOptions,
@@ -377,6 +438,13 @@ export class GraphView extends ItemView {
 			const settled = layout.promiseOn('layoutstop');
 			layout.run();
 			await settled;
+
+			// Draft placement is tightly packed; spread it, then re-fit since the
+			// layout's own fit ran against the pre-scaled coordinates.
+			if (usesDraftLayout) {
+				this.spreadDraftLayout();
+				this.cy.fit(undefined, 30);
+			}
 		} finally {
 			// Even on a layout error the indicator has to go, or the view is stuck
 			// showing "Loading graph..." forever
@@ -390,13 +458,12 @@ export class GraphView extends ItemView {
 
 		// Click handler: highlight connected nodes
 		this.cy.on('tap', 'node', (evt: cytoscape.EventObject) => {
-			const node = evt.target;
-			this.highlightConnected(node);
+			this.highlightConnected(evt.target as cytoscape.NodeSingular);
 		});
 
 		// Double-click on node to search
 		this.cy.on('dbltap', 'node', (evt: cytoscape.EventObject) => {
-			const name = evt.target.data('name');
+			const { name } = nodeData(evt.target as cytoscape.NodeSingular);
 			if (name) {
 				openSearchModal(this.plugin, name);
 			}
@@ -412,20 +479,19 @@ export class GraphView extends ItemView {
 
 		// Hover effects for nodes
 		this.cy.on('mouseover', 'node', (evt: cytoscape.EventObject) => {
-			const node = evt.target;
+			const node = evt.target as cytoscape.NodeSingular;
 			node.addClass('hover');
 			this.showNodeTooltip(node, evt.renderedPosition);
 		});
 
 		this.cy.on('mouseout', 'node', (evt: cytoscape.EventObject) => {
-			evt.target.removeClass('hover');
+			(evt.target as cytoscape.NodeSingular).removeClass('hover');
 			this.hideTooltip();
 		});
 
 		// Hover effects for edges - show relationship type and detail
 		this.cy.on('mouseover', 'edge', (evt: cytoscape.EventObject) => {
-			const edge = evt.target;
-			this.showEdgeTooltip(edge, evt.renderedPosition);
+			this.showEdgeTooltip(evt.target as cytoscape.EdgeSingular, evt.renderedPosition);
 		});
 
 		this.cy.on('mouseout', 'edge', () => {
@@ -436,9 +502,10 @@ export class GraphView extends ItemView {
 	private showNodeTooltip(node: cytoscape.NodeSingular, position: { x: number; y: number }): void {
 		if (!this.tooltipEl) return;
 
-		const name = node.data('name');
-		const entityType = node.data('entityType') || node.data('label');
-		const sourceNotes = node.data('sourceNotes') || [];
+		const data = nodeData(node);
+		const name = data.name;
+		const entityType = data.entityType || data.label || '';
+		const sourceNotes = data.sourceNotes || [];
 
 		this.tooltipEl.empty();
 		this.tooltipEl.createDiv({ cls: 'tooltip-label', text: entityType });
@@ -455,8 +522,7 @@ export class GraphView extends ItemView {
 	private showEdgeTooltip(edge: cytoscape.EdgeSingular, position: { x: number; y: number }): void {
 		if (!this.tooltipEl) return;
 
-		const relationship = edge.data('relationship');
-		const detail = edge.data('detail');
+		const { relationship, detail } = edgeData(edge);
 
 		this.tooltipEl.empty();
 		this.tooltipEl.createDiv({ cls: 'tooltip-type', text: relationship });
@@ -478,7 +544,7 @@ export class GraphView extends ItemView {
 	/**
 	 * Get layout configuration based on graph size.
 	 */
-	private getLayoutConfig(elementCount: number, isLarge: boolean): cytoscape.LayoutOptions {
+	private getLayoutConfig(nodeCount: number, elementCount: number): cytoscape.LayoutOptions {
 		// Base config shared across all sizes
 		const baseConfig = {
 			name: 'fcose',
@@ -490,13 +556,13 @@ export class GraphView extends ItemView {
 			tile: true,
 		};
 
-		// Large graph (1000+ elements or flagged as large)
-		if (isLarge || elementCount > 1000) {
+		// Large graph: skip the refinement pass and spread the result instead.
+		// 'default' runs spectral placement AND a full CoSE refinement; 'draft'
+		// stops after spectral. Past ~1000 nodes that refinement costs tens of
+		// seconds to minutes, so spreadDraftLayout() substitutes for it.
+		if (nodeCount > DRAFT_LAYOUT_NODE_THRESHOLD) {
 			return {
 				...baseConfig,
-				// 'default' runs the spectral placement AND a full CoSE refinement
-				// at numIter; 'draft' stops after spectral. On a big graph that
-				// refinement is the whole cost of opening the view.
 				quality: 'draft',
 				nodeDimensionsIncludeLabels: false,
 				nodeRepulsion: () => 20000,
@@ -534,6 +600,79 @@ export class GraphView extends ItemView {
 		} as cytoscape.LayoutOptions;
 	}
 
+	/**
+	 * Make a draft-quality layout readable.
+	 *
+	 * fCoSE 'draft' does spectral placement only. Spectral coordinates are
+	 * derived from a handful of eigenvectors, so nodes with the same structural
+	 * role -- every entity hanging off one note hub, say -- come out at
+	 * *identical* coordinates. On a real 2263-node vault only 8% of nodes were
+	 * far enough from a neighbour to be individually visible; the rest were
+	 * stacked. That is the "everything clumps together" symptom.
+	 *
+	 * The refinement pass that normally separates them costs ~164s at 5000
+	 * nodes, so this substitutes for it in two cheap steps:
+	 *
+	 *   1. Scale up so the layout has roughly one NODE_SPACING cell per node.
+	 *      Necessary but nowhere near sufficient -- scaling a stack of nodes
+	 *      sharing one coordinate just moves the stack, so visibility plateaued
+	 *      at 32% no matter how far it was scaled.
+	 *   2. Resolve what is still stacked by moving each colliding node to the
+	 *      nearest free cell, searching outward. Nodes that already had a cell
+	 *      to themselves keep their exact position, so the parts of the layout
+	 *      spectral placement got right are left alone.
+	 *
+	 * Measured on that vault: 8% -> 100% visible in ~80ms.
+	 */
+	private spreadDraftLayout(): void {
+		if (!this.cy) return;
+
+		const nodes = this.cy.nodes();
+		const count = nodes.length;
+		if (count < 2) return;
+
+		const bb = nodes.boundingBox({ includeLabels: false, includeOverlays: false });
+		const extent = Math.max(bb.w, bb.h);
+		if (extent <= 0) return;
+
+		// Step 1: enough room for one cell per node
+		const scale = (Math.sqrt(count) * NODE_SPACING) / extent;
+		const positions = nodes.map(node => {
+			const p = node.position();
+			return scale > 1 ? { x: p.x * scale, y: p.y * scale } : { x: p.x, y: p.y };
+		});
+
+		// Step 2: nearest-free-cell for anything still stacked. A stack of n
+		// nodes can need to reach out ~sqrt(n) cells, so size the search to the
+		// graph rather than guessing.
+		const spiral = buildSpiral(Math.ceil(Math.sqrt(count)) + 2);
+		const taken = new Set<string>();
+
+		for (const p of positions) {
+			const cx = Math.round(p.x / NODE_SPACING);
+			const cy = Math.round(p.y / NODE_SPACING);
+			if (!taken.has(`${cx},${cy}`)) {
+				taken.add(`${cx},${cy}`);
+				continue;
+			}
+			for (const [dx, dy] of spiral) {
+				const key = `${cx + dx},${cy + dy}`;
+				if (taken.has(key)) continue;
+				taken.add(key);
+				p.x = (cx + dx) * NODE_SPACING;
+				p.y = (cy + dy) * NODE_SPACING;
+				break;
+			}
+		}
+
+		this.cy.batch(() => {
+			// Block body: cytoscape's forEach treats a returned `false` as "stop"
+			nodes.forEach((node, i) => {
+				node.position(positions[i]);
+			});
+		});
+	}
+
 	private highlightConnected(node: cytoscape.NodeSingular): void {
 		if (!this.cy) return;
 
@@ -561,10 +700,11 @@ export class GraphView extends ItemView {
 		marked.removeClass('highlighted faded');
 	}
 
-	async onClose(): Promise<void> {
+	onClose(): Promise<void> {
 		if (this.cy) {
 			this.cy.destroy();
 			this.cy = null;
 		}
+		return Promise.resolve();
 	}
 }

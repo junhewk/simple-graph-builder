@@ -923,7 +923,14 @@ export class GraphCache {
 		// catalogue. A custom or self-hosted embedding model is not in the
 		// catalogue, and the catalogue's fallback width would be wrong — which
 		// saveEmbeddingsBinary now (correctly) refuses to write.
-		const firstVector = this.embeddings.values().next().value as Float32Array | undefined;
+		// for..of rather than values().next().value: the iterator result is typed
+		// `any` on TypeScript 4.9 and `Float32Array | undefined` on newer ones, so
+		// either a cast or its absence trips a lint rule on one of the two.
+		let firstVector: Float32Array | undefined;
+		for (const vector of this.embeddings.values()) {
+			firstVector = vector;
+			break;
+		}
 		const dimensions =
 			firstVector?.length ??
 			getEmbeddingDimensions(settings.embeddingProvider, settings.embeddingModel);
