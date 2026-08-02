@@ -1,6 +1,6 @@
 {
 	"name": "simple-graph-builder",
-	"version": "0.4.3",
+	"version": "0.4.4",
 	"description": "Build a knowledge graph from your notes using LLM-powered entity extraction. Supports Claude, OpenAI, Gemini, and Ollama.",
 	"main": "main.js",
 	"scripts": {
@@ -8,6 +8,7 @@
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
 		"version": "node version-bump.mjs && git add manifest.json versions.json",
 		"test": "node tests/run.mjs",
+		"eval": "node tests/run.mjs --eval",
 		"lint": "eslint src/",
 		"lint:fix": "eslint src/ --fix"
 	},

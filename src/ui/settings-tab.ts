@@ -51,7 +51,7 @@ export class SettingsTab extends PluginSettingTab {
 			if (!model) return;
 
 			const caps = getAdapter(opts.provider, {
-				apiKey: this.plugin.settings.apiKey,
+				apiKey: this.plugin.settings.apiKeys?.[opts.provider] || this.plugin.settings.apiKey,
 				ollamaHost: this.plugin.settings.ollamaHost,
 				localApiStyle: this.plugin.settings.localApiStyle,
 			}).capabilities(model);

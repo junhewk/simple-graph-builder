@@ -4,6 +4,7 @@ import { loadHashes, saveHashes, computeHash, hasNoteChanged, updateNoteHash, re
 import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeInternalLinksIntoCache, removeNoteFromCache } from '../graph/merge';
 import { truncateContent } from '../extraction/prompts';
 import { extractOntologyChunked, settingsToExtractionOptions, ExtractionError } from '../extraction/llm-client';
+import { getExtractionConfigError } from '../extraction/providers/models';
 
 // Vault analysis state (encapsulated to avoid module-level mutable variables)
 const vaultAnalysisState = {
@@ -37,13 +38,9 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 	}
 
 	// Check API configuration
-	const { apiProvider, apiKey, ollamaModel } = plugin.settings;
-	if (apiProvider !== 'ollama' && !apiKey) {
-		new Notice('Please configure your API key in settings');
-		return;
-	}
-	if (apiProvider === 'ollama' && !ollamaModel) {
-		new Notice('Ollama model must be set in settings first');
+	const configError = getExtractionConfigError(plugin.settings);
+	if (configError) {
+		new Notice(configError);
 		return;
 	}
 
@@ -305,13 +302,9 @@ export async function analyzeEntireVault(
 	}
 
 	// Check API configuration
-	const { apiProvider, apiKey, ollamaModel } = plugin.settings;
-	if (apiProvider !== 'ollama' && !apiKey) {
-		new Notice('Please configure your API key in settings');
-		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
-	}
-	if (apiProvider === 'ollama' && !ollamaModel) {
-		new Notice('Ollama model must be set in settings first');
+	const configError = getExtractionConfigError(plugin.settings);
+	if (configError) {
+		new Notice(configError);
 		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	}
 
@@ -401,12 +394,8 @@ export async function autoAnalyzeFile(plugin: SimpleGraphBuilderPlugin, file: TF
 		return;
 	}
 
-	// Check API configuration
-	const { apiProvider, apiKey, ollamaModel } = plugin.settings;
-	if (apiProvider !== 'ollama' && !apiKey) {
-		return; // Silently skip if not configured
-	}
-	if (apiProvider === 'ollama' && !ollamaModel) {
+	// Check API configuration; silently skip if not configured
+	if (getExtractionConfigError(plugin.settings)) {
 		return;
 	}
 

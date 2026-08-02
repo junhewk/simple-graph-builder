@@ -13,6 +13,12 @@
  *
  *   npm test              run everything
  *   npm test -- gemini    run files matching a substring
+ *
+ * `--eval` switches to LIVE mode: *.eval.ts files are bundled against
+ * obsidian-live-stub.ts (requestUrl does real HTTP) and hit the real provider
+ * APIs using keys from the environment. Never part of `npm test`.
+ *
+ *   ANTHROPIC_API_KEY=... npm run eval
  */
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
@@ -21,11 +27,15 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const filter = process.argv[2] ?? '';
+const argv = process.argv.slice(2);
+const live = argv.includes('--eval');
+const filter = argv.find((a) => a !== '--eval') ?? '';
+const suffix = live ? '.eval.ts' : '.test.ts';
+const stub = live ? 'obsidian-live-stub.ts' : 'obsidian-stub.ts';
 const outDir = mkdtempSync(join(tmpdir(), 'sgb-tests-'));
 
 const files = readdirSync(here)
-	.filter((f) => f.endsWith('.test.ts'))
+	.filter((f) => f.endsWith(suffix))
 	.filter((f) => f.includes(filter))
 	.sort();
 
@@ -37,7 +47,7 @@ if (files.length === 0) {
 let failed = 0;
 
 for (const file of files) {
-	const name = file.replace('.test.ts', '');
+	const name = file.replace(suffix, '');
 	const bundle = join(outDir, `${name}.cjs`);
 
 	try {
@@ -49,7 +59,7 @@ for (const file of files) {
 				'--bundle',
 				'--platform=node',
 				'--format=cjs',
-				`--alias:obsidian=${join(here, 'obsidian-stub.ts')}`,
+				`--alias:obsidian=${join(here, stub)}`,
 				`--outfile=${bundle}`,
 				'--log-level=error',
 			],
@@ -62,6 +72,12 @@ for (const file of files) {
 	}
 
 	try {
+		if (live) {
+			// Live evals stream their output: they are slow, and every assertion
+			// (including per-provider skips) is interesting.
+			execFileSync('node', [bundle], { stdio: ['ignore', 'inherit', 'inherit'] });
+			continue;
+		}
 		// stderr is piped, not inherited: several suites deliberately exercise
 		// paths that warn (downgrade retries, dropped schema violations), and
 		// that output is expected rather than interesting on a passing run.

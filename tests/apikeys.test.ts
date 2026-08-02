@@ -1,5 +1,5 @@
 import { getSmartSearchConfig, DEFAULT_SETTINGS, CURRENT_SETTINGS_VERSION } from '../src/settings';
-import { resolveModelConfig } from '../src/extraction/providers/models';
+import { resolveModelConfig, getExtractionConfigError } from '../src/extraction/providers/models';
 import { migrateSettings } from '../src/settings-migration';
 import { settingsToEmbeddingOptions } from '../src/extraction/llm-client';
 import { Settings } from '../src/types';
@@ -47,6 +47,18 @@ check('embedding: does NOT borrow another provider key',
   settingsToEmbeddingOptions(S({ embeddingProvider: 'gemini', embeddingApiKey: '', apiKeys: { openai: 'K-O' }, apiKey: '' })).apiKey === '');
 check('embedding: legacy shared key still works',
   settingsToEmbeddingOptions(S({ embeddingProvider: 'openai', embeddingApiKey: '', apiKeys: {}, apiKey: 'LEGACY' })).apiKey === 'LEGACY');
+
+// THE 0.4.3 BUG: fresh install saves a per-provider key, legacy apiKey stays
+// empty, and the analyze guards (which read settings.apiKey directly) blocked
+// analysis with "Please configure your API key in settings".
+const fresh = S({ apiProvider: 'claude', apiKey: '', apiKeys: { claude: 'sk-ant-X', openai: 'sk-O' } });
+check('guard passes with only a per-provider key', getExtractionConfigError(fresh) === null,
+  String(getExtractionConfigError(fresh)));
+check('guard still blocks when no key anywhere', getExtractionConfigError(S({ apiKey: '', apiKeys: {} })) !== null);
+check('guard ignores keys for OTHER providers', getExtractionConfigError(S({ apiProvider: 'claude', apiKey: '', apiKeys: { openai: 'sk-O' } })) !== null);
+check('legacy-only install still passes', getExtractionConfigError(S({ apiKey: 'LEGACY', apiKeys: {} })) === null);
+check('ollama needs no key', getExtractionConfigError(S({ apiProvider: 'ollama', apiKey: '', apiKeys: {} })) === null);
+check('ollama without a model is blocked', getExtractionConfigError(S({ apiProvider: 'ollama', ollamaModel: '' })) !== null);
 
 console.log(fail ? `\n${fail} FAILURES` : '\nall pass');
 process.exit(fail ? 1 : 0);

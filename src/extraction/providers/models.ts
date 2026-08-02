@@ -103,6 +103,24 @@ function pick(provider: ApiProvider, models: Record<ApiProvider, string>): strin
 }
 
 /**
+ * Pre-flight check used by every analysis entry point. Returns a user-facing
+ * error message, or null when extraction can run. Goes through
+ * resolveModelConfig so it sees per-provider keys, not just the legacy shared
+ * one — checking `settings.apiKey` directly blocked installs that only ever
+ * saved a per-provider key.
+ */
+export function getExtractionConfigError(settings: Settings): string | null {
+	const { provider, apiKey, model } = resolveModelConfig(settings, 'extraction');
+	if (provider !== 'ollama' && !apiKey) {
+		return 'Please configure your API key in settings';
+	}
+	if (provider === 'ollama' && !model) {
+		return 'Ollama model must be set in settings first';
+	}
+	return null;
+}
+
+/**
  * Whether the effective Smart Search model can call tools at all. Smart Search
  * is useless without them — it can only answer by querying the graph.
  */
