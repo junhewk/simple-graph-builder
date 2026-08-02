@@ -2,7 +2,6 @@
 
 [![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&query=%24%5B%22simple-graph-builder%22%5D.downloads&label=downloads&color=7c3aed&logo=obsidian)](https://obsidian.md/plugins?id=simple-graph-builder)
 [![Release](https://img.shields.io/github/v/release/junhewk/simple-graph-builder?display_name=tag&label=release&color=7c3aed)](https://github.com/junhewk/simple-graph-builder/releases/latest)
-[![Minimum Obsidian version](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjunhewk%2Fsimple-graph-builder%2Fmaster%2Fmanifest.json&query=%24.minAppVersion&label=obsidian&color=7c3aed&logo=obsidian)](https://obsidian.md/download)
 [![License: MIT](https://img.shields.io/github/license/junhewk/simple-graph-builder?color=7c3aed)](LICENSE)
 
 This plugin builds a lightweight knowledge graph from users' Obsidian notes using LLM-powered entity extraction with a simple yet expressive ontology model to provide knowledge extraction, exploration, and RAG search. Since Obsidian provides wonderful links between notes, implementing ontology model would meet users' (especially researchers') needs.
