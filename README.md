@@ -1,6 +1,6 @@
 # Simple Graph Builder
 
-[![Downloads](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fobsidianmd%2Fobsidian-releases%2Fmaster%2Fcommunity-plugin-stats.json&query=%24%5B%22simple-graph-builder%22%5D.downloads&label=downloads&color=7c3aed&logo=obsidian)](https://obsidian.md/plugins?id=simple-graph-builder)
+[![Downloads](https://img.shields.io/github/downloads/junhewk/simple-graph-builder/manifest.json.svg?label=downloads&color=7c3aed&logo=obsidian&displayAssetName=false)](https://obsidian.md/plugins?id=simple-graph-builder)
 [![Release](https://img.shields.io/github/v/release/junhewk/simple-graph-builder?display_name=tag&label=release&color=7c3aed)](https://github.com/junhewk/simple-graph-builder/releases/latest)
 [![License: MIT](https://img.shields.io/github/license/junhewk/simple-graph-builder?color=7c3aed)](LICENSE)
 
