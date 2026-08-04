@@ -261,6 +261,8 @@ export class GraphView extends ItemView {
 	private renderToken = 0;
 	/** Whether edges currently carry the bold overview weight; see updateEdgeWeight. */
 	private edgesBold = false;
+	/** Node the current highlight is anchored to, if any; see highlightConnected. */
+	private selectedNodeId: string | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: SimpleGraphBuilderPlugin) {
 		super(leaf);
@@ -287,6 +289,18 @@ export class GraphView extends ItemView {
 
 		// Create graph container first (full height)
 		this.graphContainer = container.createDiv({ cls: 'cytoscape-container' });
+		// Focusable so the graph can take key events once clicked, which is what
+		// makes Escape a reliable way to release a highlight
+		this.graphContainer.tabIndex = 0;
+		this.registerDomEvent(this.graphContainer, 'keydown', (evt: KeyboardEvent) => {
+			if (evt.key === 'Escape' && this.selectedNodeId !== null) {
+				this.resetHighlights();
+				this.hideTooltip();
+				// Only swallow the key when it actually released something, so
+				// Escape still closes the pane otherwise
+				evt.preventDefault();
+			}
+		});
 
 		// Create tooltip element (positioned absolutely, won't affect layout)
 		// Styles defined in styles.css via .graph-tooltip class
@@ -470,9 +484,10 @@ export class GraphView extends ItemView {
 			hideLabelsOnViewport: isLargeGraph,
 		});
 
-		// Fresh instance: no edge carries the overview class yet, whatever the
-		// previous render left this set to
+		// Fresh instance: no edge carries the overview class yet and nothing is
+		// selected, whatever the previous render left these set to
 		this.edgesBold = false;
+		this.selectedNodeId = null;
 
 		try {
 			const layout = this.cy.layout(layoutConfig);
@@ -497,9 +512,15 @@ export class GraphView extends ItemView {
 		// is enough. Binding handlers to the old instance would leak them.
 		if (token !== this.renderToken) return;
 
-		// Click handler: highlight connected nodes
+		// Click handler: highlight connected nodes, or release the highlight if
+		// this node already holds it
 		this.cy.on('tap', 'node', (evt: cytoscape.EventObject) => {
-			this.highlightConnected(evt.target as cytoscape.NodeSingular);
+			const node = evt.target as cytoscape.NodeSingular;
+			if (this.selectedNodeId === node.id()) {
+				this.resetHighlights();
+				return;
+			}
+			this.highlightConnected(node);
 		});
 
 		// Double-click on node to search
@@ -510,9 +531,23 @@ export class GraphView extends ItemView {
 			}
 		});
 
-		// Click on background to reset highlights
+		// Cytoscape calls preventDefault on mousedown, which stops a click from
+		// focusing the container the normal way -- and without focus the
+		// container never sees Escape. Focus it explicitly on interaction.
+		this.cy.on('tapstart', () => {
+			this.graphContainer?.focus({ preventScroll: true });
+		});
+
+		// Any tap that is not on a node releases the highlight. Testing for the
+		// background alone is not enough: a dense graph covers its own canvas
+		// with edges, so most clicks that look like empty space land on an edge
+		// and the user is left with no way back.
 		this.cy.on('tap', (evt: cytoscape.EventObject) => {
-			if (evt.target === this.cy) {
+			// evt.target is the core for a background tap and an element
+			// otherwise; cytoscape's types don't express that union
+			const target = evt.target as { isNode?: () => boolean };
+			const onNode = typeof target.isNode === 'function' && target.isNode();
+			if (!onNode) {
 				this.resetHighlights();
 				this.hideTooltip();
 			}
@@ -739,6 +774,7 @@ export class GraphView extends ItemView {
 
 		// Batched: without this, each of the three class operations triggers its
 		// own style recalculation and redraw across every element in the graph.
+		this.selectedNodeId = node.id();
 		this.cy.batch(() => {
 			if (!this.cy) return;
 			this.cy.elements().removeClass('highlighted faded');
@@ -753,6 +789,8 @@ export class GraphView extends ItemView {
 
 	private resetHighlights(): void {
 		if (!this.cy) return;
+
+		this.selectedNodeId = null;
 
 		// Scoped to what is actually marked. Every background tap used to sweep
 		// the whole graph, even with nothing highlighted.
