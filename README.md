@@ -251,7 +251,11 @@ Node colors are determined by entity type (10 predefined colors). Edges use unif
 Graphs are laid out with fCoSE, then refined so the result is readable at vault scale:
 
 - Above 1000 nodes fCoSE runs in its fast spectral mode and **ForceAtlas2** — the force model Gephi uses — does the actual force work. Running fCoSE's own refinement at that size takes minutes; this takes about three seconds on a 2263-node vault.
-- Every graph then gets a spacing pass that scales the layout out and separates whatever still overlaps, so each node keeps room for its label. This matters below 1000 nodes too: fCoSE alone packs an 871-node graph tightly enough that only 5% of nodes have space for their label.
+- Every graph then gets a spacing pass that scales the layout out and separates whatever still overlaps. This matters below 1000 nodes too: fCoSE alone packs an 871-node graph tightly enough that only 5% of nodes have space for their label.
+
+How much space that pass aims for depends on how big the graph is. Small graphs get the full width of a label, so nothing collides at the zoom they open at. Large ones get less: the whole layout is fitted to the pane, so spacing every node a label apart makes a 5000-node graph so wide that each node lands on a fraction of a pixel and the view looks empty. Those are read by zooming in, where the tighter spacing is still ample.
+
+Edges follow the same logic. Zoomed out they are drawn bold, because a 1px line covers a fraction of a pixel there and only the mass of them registers; zoom in and they thin out so they sit behind the nodes and labels rather than across them.
 
 The result is a graph of distinct clusters rather than one dense block. If yours still looks crowded, raise **Minimum connections** or turn off **Show note nodes** to thin it out.
 

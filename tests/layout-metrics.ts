@@ -198,6 +198,31 @@ export function clusterSeparation(
   return (intraSum / intraCount) / (interSum / interCount);
 }
 
+/**
+ * How many screen pixels a node covers once the layout is fitted to a pane.
+ *
+ * The view always fits the graph to the viewport, so a layout's extent -- not
+ * its absolute coordinates -- decides whether anything is visible. Under about
+ * one pixel per node the graph reads as an empty pane.
+ */
+export function overviewNodePixels(
+  nodes: LayoutNode[],
+  paneSize: number,
+  nodeSize: number
+): number {
+  if (nodes.length < 2) return nodeSize;
+  let x1 = Infinity, y1 = Infinity, x2 = -Infinity, y2 = -Infinity;
+  for (const n of nodes) {
+    x1 = Math.min(x1, n.x);
+    y1 = Math.min(y1, n.y);
+    x2 = Math.max(x2, n.x);
+    y2 = Math.max(y2, n.y);
+  }
+  const extent = Math.max(x2 - x1, y2 - y1);
+  if (extent <= 0) return nodeSize;
+  return nodeSize * (paneSize / extent);
+}
+
 /** Whether any two components' padded bounding boxes intersect. */
 export function componentBoxesOverlap(
   nodes: LayoutNode[],

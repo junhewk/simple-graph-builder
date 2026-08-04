@@ -12,6 +12,7 @@
  */
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
+import { spacingForNodeCount } from '../src/graph/layout';
 import type { LayoutNode, LayoutEdge } from '../src/graph/layout';
 
 cytoscape.use(fcose);
@@ -28,9 +29,12 @@ export function mulberry32(seed: number): () => number {
   };
 }
 
-/** Radii mirror the view's label-aware collision radii (80px label budget). */
-export const NOTE_RADIUS = 44;
-export const ENTITY_RADIUS = 40;
+/**
+ * Radii are assigned after generation, from the same size-aware rule the view
+ * uses (spacingForNodeCount): the node count is not known until the graph is
+ * built. NOTE hubs get the view's +4 bonus.
+ */
+export const NOTE_RADIUS_BONUS = 4;
 
 export interface VaultGraphOptions {
   notes: number;
@@ -86,7 +90,7 @@ export function generateVaultGraph(opts: VaultGraphOptions): VaultGraph {
   for (let i = 0; i < opts.notes; i++) {
     const c = i % opts.clusters;
     const noteId = `note:${i}`;
-    addNode(noteId, NOTE_RADIUS, c);
+    addNode(noteId, 1, c);
     noteIds.add(noteId);
 
     // Each note links back to 1-2 earlier notes of its cluster: the linear
@@ -112,7 +116,7 @@ export function generateVaultGraph(opts: VaultGraphOptions): VaultGraph {
         id = pools[other][Math.floor(rand() * pools[other].length)];
         cluster = other;
       }
-      addNode(id, ENTITY_RADIUS, cluster);
+      addNode(id, 0, cluster);
       if (!mentioned.includes(id)) mentioned.push(id);
       addEdge(noteId, id);
     }
@@ -131,14 +135,22 @@ export function generateVaultGraph(opts: VaultGraphOptions): VaultGraph {
   for (let s = 0; s < opts.satellites; s++) {
     const size = 6 + Math.floor(rand() * 7);
     const hub = `sat:${s}h`;
-    addNode(hub, NOTE_RADIUS, -1);
+    addNode(hub, 1, -1);
     let prev = hub;
     for (let m = 0; m < size; m++) {
       const id = `sat:${s}m${m}`;
-      addNode(id, ENTITY_RADIUS, -1);
+      addNode(id, 0, -1);
       addEdge(m % 2 === 0 ? hub : prev, id);
       prev = id;
     }
+  }
+
+  // Radii come from the same size-aware rule the view applies, which needs the
+  // final node count. Until here `radius` carries 1 for a note hub, 0 for an
+  // entity.
+  const entityRadius = spacingForNodeCount(nodes.length) / 2;
+  for (const n of nodes) {
+    n.radius = n.radius === 1 ? entityRadius + NOTE_RADIUS_BONUS : entityRadius;
   }
 
   return { nodes, edges, clusterOf, noteIds };

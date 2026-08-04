@@ -77,6 +77,41 @@ const DEFAULTS = {
 /** Padding between component bounding boxes when they need packing apart. */
 const COMPONENT_PAD = 90;
 
+/**
+ * Centre-to-centre spacing to aim for, given how many nodes there are.
+ *
+ * Labels ellipsize at 80px, so 80px of separation is what keeps them from
+ * colliding -- but enforcing that on a big graph is self-defeating. Spacing
+ * sets the layout's total size, the view fits that to the pane, and past a
+ * few thousand nodes the fit zoom gets so small that every node renders
+ * sub-pixel: a 5000-node vault came out 21000px wide, fitted at zoom 0.02,
+ * and looked like an empty screen. Labels are hidden at that zoom anyway
+ * (min-zoomed-font-size), so the space bought nothing.
+ *
+ * So spacing is the label budget until the graph is too big to show at a
+ * legible scale, then it shrinks to hold the layout inside that budget.
+ * Large graphs are read by zooming in, where the smaller spacing is still
+ * ample: 40px at zoom 2 is 80px of screen.
+ */
+export function spacingForNodeCount(count: number): number {
+	// Widest layout that still renders nodes as visible dots once fitted:
+	// a 12px node in a ~1000px pane needs roughly this to stay above a pixel.
+	const OVERVIEW_EXTENT_BUDGET = 8000;
+	// Measured ratio of a finished layout's extent to a square packing of the
+	// same node count and spacing -- clusters leave voids and the boundary is
+	// ragged, so an organic layout is several times less compact. Ranges 4.1
+	// (500 nodes) to 5.2 (5000); the upper end keeps the estimate safe.
+	const LAYOUT_SPARSITY = 5;
+	// Enough for a label; never worth exceeding.
+	const MAX_SPACING = 80;
+	// Enough to keep a 16px node clear of its neighbour, whatever the size.
+	const MIN_SPACING = 30;
+
+	if (count < 2) return MAX_SPACING;
+	const affordable = OVERVIEW_EXTENT_BUDGET / (LAYOUT_SPARSITY * Math.sqrt(count));
+	return Math.max(MIN_SPACING, Math.min(MAX_SPACING, affordable));
+}
+
 function defaultSchedule(cb: () => void): void {
 	if (typeof requestAnimationFrame === 'function') {
 		requestAnimationFrame(() => cb());

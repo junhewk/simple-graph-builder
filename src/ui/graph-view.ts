@@ -4,7 +4,7 @@ import fcose from 'cytoscape-fcose';
 import SimpleGraphBuilderPlugin from '../main';
 import { openSearchModal } from '../commands/search';
 import { getEntityTypeColor, OntologyEdge } from '../types';
-import { refineLayout, LayoutNode, LayoutEdge } from '../graph/layout';
+import { refineLayout, spacingForNodeCount, LayoutNode, LayoutEdge } from '../graph/layout';
 
 // Register fCoSE layout extension
 cytoscape.use(fcose);
@@ -32,17 +32,36 @@ const MAX_RENDER_EDGES = 15000;
 // comparable result.
 const DRAFT_LAYOUT_NODE_THRESHOLD = 1000;
 
-// Collision radii for the layout's "prevent node overlap" phase. Twice
-// the radius is the guaranteed centre separation, sized to the label budget:
-// labels ellipsize at 80px (text-max-width below), so neighbouring labels
-// stop colliding at ~80px of horizontal separation. NOTE hubs are drawn
-// larger (16px vs 12px) and get a little more.
-const ENTITY_COLLIDE_RADIUS = 40;
-const NOTE_COLLIDE_RADIUS = 44;
+// NOTE hubs are drawn larger than entities (16px vs 12px), so they claim a
+// little more room in the layout's overlap pass.
+const NOTE_RADIUS_BONUS = 4;
+
+// Zoom at which edges stop being drawn at overview weight. Labels appear at
+// 0.8 (min-zoomed-font-size 8 over a 10px font), so the mesh has already
+// thinned out by the time there is text to read behind it.
+const EDGE_OVERVIEW_MAX_ZOOM = 0.5;
 
 // ============================================
 // Graph Styles
 // ============================================
+
+/**
+ * Colours for the two backgrounds Obsidian can put behind the graph.
+ *
+ * Edges were hardcoded to a light slate (#cbd5e1) picked against a dark
+ * background. On a light theme that is very nearly white on white, and a user
+ * reported a 5177-node graph looking like an empty pane. These pairs were
+ * chosen by rendering a 5000-node graph on both backgrounds and comparing.
+ *
+ * Deliberately fixed values rather than Obsidian's --text-faint and friends:
+ * a theme variable adapts to custom themes, but its actual value is unknown
+ * here, and picking an unverified colour is what caused the bug.
+ */
+function themeColors(): { edge: string; label: string; highlight: string } {
+	return document.body.hasClass('theme-dark')
+		? { edge: '#cbd5e1', label: '#a8a8a8', highlight: '#ffffff' }
+		: { edge: '#64748b', label: '#5c6370', highlight: '#1e1e1e' };
+}
 
 /**
  * Build the stylesheet. Edge rendering depends on graph size: bezier curves and
@@ -50,17 +69,24 @@ const NOTE_COLLIDE_RADIUS = 44;
  * drop both.
  */
 function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
+	const { edge: edgeColor, label: labelColor, highlight } = themeColors();
+
+	// This is the weight edges are drawn at once the user has zoomed in far
+	// enough to read the graph. A dense graph needs them lighter than a sparse
+	// one here, or the mesh buries the nodes and their labels.
 	const edgeStyle: cytoscape.Css.Edge = {
 		'width': 1,
-		'line-color': '#cbd5e1',
+		'line-color': edgeColor,
 		'curve-style': isLargeGraph ? 'straight' : 'bezier',
-		'opacity': 0.4,
+		'opacity': isLargeGraph ? 0.25 : 0.4,
 		'line-style': 'solid',
+		// Keep the mesh under the nodes and labels it connects
+		'z-index': 0,
 	};
 
 	if (!isLargeGraph) {
 		edgeStyle['target-arrow-shape'] = 'triangle';
-		edgeStyle['target-arrow-color'] = '#cbd5e1';
+		edgeStyle['target-arrow-color'] = edgeColor;
 		edgeStyle['arrow-scale'] = 0.5;
 	}
 
@@ -75,18 +101,21 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 				'text-margin-y': 5,
 				'font-size': '10px',
 				'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-				'color': '#a8a8a8',
+				'color': labelColor,
 				'text-wrap': 'ellipsis',
 				'text-max-width': '80px',
 				// Stop measuring and drawing labels once they'd be unreadable
 				// anyway. This is what keeps the zoomed-out view responsive, and
 				// it's how Obsidian's own graph behaves.
 				'min-zoomed-font-size': 8,
-				'width': 12,
-				'height': 12,
+				// Slightly larger on a big graph, for the same reason the edges
+				// are bolder there
+				'width': isLargeGraph ? 14 : 12,
+				'height': isLargeGraph ? 14 : 12,
 				'border-width': 0,
 				'background-opacity': 0.9,
 				'background-color': 'data(color)',
+				'z-index': 1,
 			},
 		},
 		// Vault notes: squared off and slightly larger, so the note layer reads as
@@ -95,14 +124,25 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 			selector: 'node[entityType = "NOTE"]',
 			style: {
 				'shape': 'round-rectangle',
-				'width': 16,
-				'height': 16,
+				'width': isLargeGraph ? 18 : 16,
+				'height': isLargeGraph ? 18 : 16,
 			},
 		},
 		// Base edge style (unified for free-form relationships)
 		{
 			selector: 'edge',
 			style: edgeStyle,
+		},
+		// Zoomed out, a 1px edge covers a fraction of a pixel and only the
+		// aggregate registers, so the mesh is drawn bolder to make the first
+		// view read as structure rather than haze. updateEdgeWeight swaps this
+		// off as soon as the user zooms in to read.
+		{
+			selector: 'edge.overview',
+			style: {
+				'width': 1.4,
+				'opacity': 0.85,
+			},
 		},
 		// Highlighted state (selected node and neighbors)
 		{
@@ -115,9 +155,10 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 			selector: 'node.highlighted',
 			style: {
 				'border-width': 2,
-				'border-color': '#ffffff',
-				'width': 16,
-				'height': 16,
+				// White reads as a halo on a dark theme and vanishes on a light one
+				'border-color': highlight,
+				'width': isLargeGraph ? 20 : 16,
+				'height': isLargeGraph ? 20 : 16,
 			},
 		},
 		{
@@ -138,8 +179,8 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 		{
 			selector: 'node.hover',
 			style: {
-				'width': 16,
-				'height': 16,
+				'width': isLargeGraph ? 20 : 16,
+				'height': isLargeGraph ? 20 : 16,
 				'z-index': 999,
 			},
 		},
@@ -218,6 +259,8 @@ export class GraphView extends ItemView {
 	private tooltipEl: HTMLElement | null = null;
 	/** Guards against overlapping renders; see renderGraph. */
 	private renderToken = 0;
+	/** Whether edges currently carry the bold overview weight; see updateEdgeWeight. */
+	private edgesBold = false;
 
 	constructor(leaf: WorkspaceLeaf, plugin: SimpleGraphBuilderPlugin) {
 		super(leaf);
@@ -427,6 +470,10 @@ export class GraphView extends ItemView {
 			hideLabelsOnViewport: isLargeGraph,
 		});
 
+		// Fresh instance: no edge carries the overview class yet, whatever the
+		// previous render left this set to
+		this.edgesBold = false;
+
 		try {
 			const layout = this.cy.layout(layoutConfig);
 			const settled = layout.promiseOn('layoutstop');
@@ -491,6 +538,10 @@ export class GraphView extends ItemView {
 		this.cy.on('mouseout', 'edge', () => {
 			this.hideTooltip();
 		});
+
+		// Edge weight follows the zoom level; set it for the fitted view first
+		this.updateEdgeWeight();
+		this.cy.on('zoom', () => this.updateEdgeWeight());
 	}
 
 	private showNodeTooltip(node: cytoscape.NodeSingular, position: { x: number; y: number }): void {
@@ -626,13 +677,17 @@ export class GraphView extends ItemView {
 	private async refineLayoutPositions(token: number, force: boolean): Promise<boolean> {
 		if (!this.cy) return false;
 
+		// Spacing is the label budget on graphs small enough to show at a
+		// legible scale, and shrinks on ones that are not -- see
+		// spacingForNodeCount.
+		const entityRadius = spacingForNodeCount(this.cy.nodes().length) / 2;
 		const nodes: LayoutNode[] = this.cy.nodes().map(node => {
 			const p = node.position();
 			return {
 				id: node.id(),
 				x: p.x,
 				y: p.y,
-				radius: nodeData(node).entityType === 'NOTE' ? NOTE_COLLIDE_RADIUS : ENTITY_COLLIDE_RADIUS,
+				radius: nodeData(node).entityType === 'NOTE' ? entityRadius + NOTE_RADIUS_BONUS : entityRadius,
 			};
 		});
 		const edges: LayoutEdge[] = this.cy.edges().map(edge => {
@@ -655,6 +710,28 @@ export class GraphView extends ItemView {
 			});
 		});
 		return true;
+	}
+
+	/**
+	 * Swap edges between the bold overview weight and the light reading
+	 * weight, following the zoom level.
+	 *
+	 * A mesh of thousands of edges has to be bold to register at all when it
+	 * is fitted to the pane -- each edge covers a fraction of a pixel there.
+	 * That same weight buries nodes and labels once the user zooms in, so it
+	 * is dropped past EDGE_OVERVIEW_MAX_ZOOM. Only the transitions restyle, so
+	 * panning and ordinary zooming cost nothing.
+	 */
+	private updateEdgeWeight(): void {
+		if (!this.cy) return;
+		const bold = this.cy.zoom() < EDGE_OVERVIEW_MAX_ZOOM;
+		if (bold === this.edgesBold) return;
+		this.edgesBold = bold;
+		const edges = this.cy.edges();
+		this.cy.batch(() => {
+			if (bold) edges.addClass('overview');
+			else edges.removeClass('overview');
+		});
 	}
 
 	private highlightConnected(node: cytoscape.NodeSingular): void {
