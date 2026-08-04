@@ -4,6 +4,7 @@ import fcose from 'cytoscape-fcose';
 import SimpleGraphBuilderPlugin from '../main';
 import { openSearchModal } from '../commands/search';
 import { getEntityTypeColor, OntologyEdge } from '../types';
+import { refineLayout, LayoutNode, LayoutEdge } from '../graph/layout';
 
 // Register fCoSE layout extension
 cytoscape.use(fcose);
@@ -25,11 +26,19 @@ const MAX_RENDER_EDGES = 15000;
 // Above this node count fCoSE's force-directed refinement stops being
 // affordable -- its cost is roughly quadratic. Measured on a 2:1 edge/node
 // graph: 500 nodes 1.8s, 1000 nodes 5.7s, 2500 nodes 38s, 5177 nodes 164s.
+// Larger graphs run a two-stage pipeline instead: fCoSE 'draft' (spectral
+// placement, sub-second) seeds refineLayout's ForceAtlas2 run, which is
+// O(n log n) per iteration under Barnes-Hut -- seconds at 2263 nodes for a
+// comparable result.
 const DRAFT_LAYOUT_NODE_THRESHOLD = 1000;
 
-// Roughly the on-screen room one node needs before its neighbours start
-// overlapping it, labels included. Used to spread a draft layout.
-const NODE_SPACING = 60;
+// Collision radii for the layout's "prevent node overlap" phase. Twice
+// the radius is the guaranteed centre separation, sized to the label budget:
+// labels ellipsize at 80px (text-max-width below), so neighbouring labels
+// stop colliding at ~80px of horizontal separation. NOTE hubs are drawn
+// larger (16px vs 12px) and get a little more.
+const ENTITY_COLLIDE_RADIUS = 40;
+const NOTE_COLLIDE_RADIUS = 44;
 
 // ============================================
 // Graph Styles
@@ -176,23 +185,6 @@ interface GraphEdgeData {
 	target: string;
 	relationship: string;
 	detail?: string;
-}
-
-/**
- * Grid offsets in rings of increasing radius, nearest first. Used to find the
- * closest free cell to a stacked node.
- */
-function buildSpiral(maxRadius: number): Array<[number, number]> {
-	const offsets: Array<[number, number]> = [];
-	for (let r = 1; r <= maxRadius; r++) {
-		for (let d = -r; d <= r; d++) {
-			offsets.push([d, -r], [d, r]);
-		}
-		for (let d = -r + 1; d <= r - 1; d++) {
-			offsets.push([-r, d], [r, d]);
-		}
-	}
-	return offsets;
 }
 
 function nodeData(node: cytoscape.NodeSingular): GraphNodeData {
@@ -420,11 +412,13 @@ export class GraphView extends ItemView {
 			// Lay out explicitly after construction so the loading indicator can
 			// stay up until the graph is actually positioned
 			layout: { name: 'preset' },
-			// A spread-out large graph can need to zoom well past 0.1 to fit,
-			// especially in the right sidebar, which is only a few hundred pixels
-			// wide. Clamping there is what leaves the user staring at one corner
-			// of the graph with no way to zoom out.
-			minZoom: isLargeGraph ? 0.01 : 0.1,
+			// A spread-out graph can need to zoom well past 0.1 to fit, especially
+			// in the right sidebar, which is only a few hundred pixels wide.
+			// Clamping there is what leaves the user staring at one corner of the
+			// graph with no way to zoom out. This applies at every size now that
+			// the spacing pass scales layouts up to clear labels: an 871-node
+			// graph comes out ~6000px tall, which needs zoom ~0.07 in a sidebar.
+			minZoom: 0.01,
 			maxZoom: 3,
 			// Performance optimizations
 			...rendererOptions,
@@ -439,10 +433,10 @@ export class GraphView extends ItemView {
 			layout.run();
 			await settled;
 
-			// Draft placement is tightly packed; spread it, then re-fit since the
-			// layout's own fit ran against the pre-scaled coordinates.
-			if (usesDraftLayout) {
-				this.spreadDraftLayout();
+			// Every graph goes through the spacing pass; large ones get the force
+			// refinement first. Re-fit afterwards, since the layout's own fit ran
+			// against the pre-refinement coordinates.
+			if (await this.refineLayoutPositions(token, usesDraftLayout)) {
 				this.cy.fit(undefined, 30);
 			}
 		} finally {
@@ -556,18 +550,17 @@ export class GraphView extends ItemView {
 			tile: true,
 		};
 
-		// Large graph: skip the refinement pass and spread the result instead.
-		// 'default' runs spectral placement AND a full CoSE refinement; 'draft'
-		// stops after spectral. Past ~1000 nodes that refinement costs tens of
-		// seconds to minutes, so spreadDraftLayout() substitutes for it.
+		// Large graph: 'default' runs spectral placement AND a full CoSE
+		// refinement; 'draft' stops after spectral. Past ~1000 nodes that
+		// refinement costs tens of seconds to minutes, so refineDraftLayout()
+		// substitutes for it -- repulsion happens there, not here (CoSE-only
+		// options like nodeRepulsion are ignored under 'draft').
 		if (nodeCount > DRAFT_LAYOUT_NODE_THRESHOLD) {
 			return {
 				...baseConfig,
 				quality: 'draft',
 				nodeDimensionsIncludeLabels: false,
-				nodeRepulsion: () => 20000,
 				idealEdgeLength: () => 120,
-				gravity: 0.1,
 				tilingPaddingVertical: 30,
 				tilingPaddingHorizontal: 30,
 			} as cytoscape.LayoutOptions;
@@ -601,76 +594,67 @@ export class GraphView extends ItemView {
 	}
 
 	/**
-	 * Make a draft-quality layout readable.
+	 * Position pass that runs after fCoSE: force refinement for large graphs,
+	 * label-aware spacing for all of them.
 	 *
 	 * fCoSE 'draft' does spectral placement only. Spectral coordinates are
 	 * derived from a handful of eigenvectors, so nodes with the same structural
 	 * role -- every entity hanging off one note hub, say -- come out at
-	 * *identical* coordinates. On a real 2263-node vault only 8% of nodes were
-	 * far enough from a neighbour to be individually visible; the rest were
-	 * stacked. That is the "everything clumps together" symptom.
+	 * *identical* coordinates. On a real 2263-node vault only ~4% of positions
+	 * were distinct; that is the "everything clumps together" symptom. The
+	 * CoSE pass that would separate them costs ~164s at 5000 nodes.
 	 *
-	 * The refinement pass that normally separates them costs ~164s at 5000
-	 * nodes, so this substitutes for it in two cheap steps:
+	 * An earlier repair (0.5.1) snapped the stacks onto a 60px grid. That made
+	 * every node visible but applied no repulsion at all, so the graph rendered
+	 * as a uniform lattice with edges criss-crossing the whole frame -- nothing
+	 * like Obsidian's own force-directed view. refineLayout replaces it with a
+	 * seeded ForceAtlas2 run (Gephi's force model, Barnes-Hut so O(n log n)
+	 * per iteration, seconds at 2263 nodes).
 	 *
-	 *   1. Scale up so the layout has roughly one NODE_SPACING cell per node.
-	 *      Necessary but nowhere near sufficient -- scaling a stack of nodes
-	 *      sharing one coordinate just moves the stack, so visibility plateaued
-	 *      at 32% no matter how far it was scaled.
-	 *   2. Resolve what is still stacked by moving each colliding node to the
-	 *      nearest free cell, searching outward. Nodes that already had a cell
-	 *      to themselves keep their exact position, so the parts of the layout
-	 *      spectral placement got right are left alone.
+	 * Smaller graphs keep their full-quality fCoSE positions -- `force: false`
+	 * skips straight to the spacing pass, which only scales the layout out and
+	 * separates what still overlaps. They need it: fCoSE packs an 871-node
+	 * graph at a 42px median gap, leaving 5% of nodes with room for their
+	 * label, and `nodeDimensionsIncludeLabels` does not change that.
 	 *
-	 * Measured on that vault: 8% -> 100% visible in ~80ms.
+	 * Runs in slices on the browser's frame scheduler, so the loading
+	 * indicator stays live, and aborts via renderToken if a newer render
+	 * supersedes this one mid-flight.
+	 *
+	 * @returns true when new positions were applied.
 	 */
-	private spreadDraftLayout(): void {
-		if (!this.cy) return;
+	private async refineLayoutPositions(token: number, force: boolean): Promise<boolean> {
+		if (!this.cy) return false;
 
-		const nodes = this.cy.nodes();
-		const count = nodes.length;
-		if (count < 2) return;
-
-		const bb = nodes.boundingBox({ includeLabels: false, includeOverlays: false });
-		const extent = Math.max(bb.w, bb.h);
-		if (extent <= 0) return;
-
-		// Step 1: enough room for one cell per node
-		const scale = (Math.sqrt(count) * NODE_SPACING) / extent;
-		const positions = nodes.map(node => {
+		const nodes: LayoutNode[] = this.cy.nodes().map(node => {
 			const p = node.position();
-			return scale > 1 ? { x: p.x * scale, y: p.y * scale } : { x: p.x, y: p.y };
+			return {
+				id: node.id(),
+				x: p.x,
+				y: p.y,
+				radius: nodeData(node).entityType === 'NOTE' ? NOTE_COLLIDE_RADIUS : ENTITY_COLLIDE_RADIUS,
+			};
+		});
+		const edges: LayoutEdge[] = this.cy.edges().map(edge => {
+			const { source, target } = edgeData(edge);
+			return { source, target };
 		});
 
-		// Step 2: nearest-free-cell for anything still stacked. A stack of n
-		// nodes can need to reach out ~sqrt(n) cells, so size the search to the
-		// graph rather than guessing.
-		const spiral = buildSpiral(Math.ceil(Math.sqrt(count)) + 2);
-		const taken = new Set<string>();
+		const completed = await refineLayout(nodes, edges, {
+			...(force ? {} : { structureTicks: 0 }),
+			shouldStop: () => token !== this.renderToken || !this.cy,
+		});
+		if (!completed || token !== this.renderToken || !this.cy) return false;
 
-		for (const p of positions) {
-			const cx = Math.round(p.x / NODE_SPACING);
-			const cy = Math.round(p.y / NODE_SPACING);
-			if (!taken.has(`${cx},${cy}`)) {
-				taken.add(`${cx},${cy}`);
-				continue;
-			}
-			for (const [dx, dy] of spiral) {
-				const key = `${cx + dx},${cy + dy}`;
-				if (taken.has(key)) continue;
-				taken.add(key);
-				p.x = (cx + dx) * NODE_SPACING;
-				p.y = (cy + dy) * NODE_SPACING;
-				break;
-			}
-		}
-
+		const positions = new Map(nodes.map(n => [n.id, n]));
 		this.cy.batch(() => {
 			// Block body: cytoscape's forEach treats a returned `false` as "stop"
-			nodes.forEach((node, i) => {
-				node.position(positions[i]);
+			this.cy?.nodes().forEach(node => {
+				const p = positions.get(node.id());
+				if (p) node.position({ x: p.x, y: p.y });
 			});
 		});
+		return true;
 	}
 
 	private highlightConnected(node: cytoscape.NodeSingular): void {

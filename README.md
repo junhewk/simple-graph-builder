@@ -29,7 +29,7 @@ This design provides **structured entity classification with expressive relation
 - **Multiple LLM Support**: Works with Claude, OpenAI, Gemini, and local servers — Ollama plus anything OpenAI-compatible (llama.cpp, LM Studio, vLLM)
 - **Reasoning Effort Control**: Tune how hard the model thinks, separately for extraction and Smart Search
 - **Korean Language Support**: Bigram Jaccard similarity for robust Korean text matching (handles particles and spacing variations), with all names normalized to Unicode NFC so composed and decomposed Hangul resolve to the same entity
-- **Interactive Graph View**: Visualize your knowledge graph with fCoSE force-directed layout
+- **Interactive Graph View**: Visualize your knowledge graph with a ForceAtlas2 layout — the force model Gephi uses — so clusters read as clusters and every label has room
 - **Large Graph Support**: Optimized for thousands of nodes with fast rendering
 - **Note Neighborhood Panel**: See connections for the current note in a sidebar
 - **Manual Entity Merge**: Merge duplicate entities via graph view context menu
@@ -246,6 +246,15 @@ This release moves to each provider's current API. Two things happen automatical
 
 Node colors are determined by entity type (10 predefined colors). Edges use unified gray styling with relationship verbs shown on hover.
 
+#### Layout
+
+Graphs are laid out with fCoSE, then refined so the result is readable at vault scale:
+
+- Above 1000 nodes fCoSE runs in its fast spectral mode and **ForceAtlas2** — the force model Gephi uses — does the actual force work. Running fCoSE's own refinement at that size takes minutes; this takes about three seconds on a 2263-node vault.
+- Every graph then gets a spacing pass that scales the layout out and separates whatever still overlaps, so each node keeps room for its label. This matters below 1000 nodes too: fCoSE alone packs an 871-node graph tightly enough that only 5% of nodes have space for their label.
+
+The result is a graph of distinct clusters rather than one dense block. If yours still looks crowded, raise **Minimum connections** or turn off **Show note nodes** to thin it out.
+
 ### Search
 Two search modes are available:
 
@@ -323,6 +332,13 @@ npm run eval    # live end-to-end check against the real provider APIs
 `npm test` bundles each `tests/*.test.ts` with esbuild, stubbing Obsidian's `requestUrl` so outgoing requests can be captured, then asserts the exact JSON each provider adapter builds. No test framework is involved — esbuild is already a dev dependency, and the plugin ships its whole bundle.
 
 These are deliberately wire-level, because that is where the bugs are: a parameter a model rejects, a tool result dropped from a loop, embeddings written at the wrong vector width. Each suite exits non-zero on failure, and the release workflow runs them before publishing.
+
+`tests/layout.test.ts` is the exception: it scores the graph layout instead of asserting a payload. It generates a vault-shaped graph, lays it out headlessly, and measures how many nodes are individually visible, how many have room for their label, how long edges are relative to typical node spacing, and how well clusters separate — against thresholds and against the layout the previous release shipped. To see the numbers at real-vault scale, bundle it and run it directly:
+
+```bash
+npx esbuild tests/layout.test.ts --bundle --platform=node --outfile=/tmp/layout.cjs
+SGB_LAYOUT_BENCH=1 node /tmp/layout.cjs
+```
 
 `npm run eval` is the opposite end: it bundles `tests/*.eval.ts` against a stub whose `requestUrl` performs real HTTP, then runs the full extraction pipeline against every provider you have a key for in the environment. Providers without a key are skipped, so it is safe to run with just one.
 
