@@ -655,6 +655,12 @@
 	margin-top: 4px;
 }
 
+.graph-tooltip .tooltip-connections {
+	font-size: 11px;
+	color: var(--text-muted);
+	margin-top: 4px;
+}
+
 .graph-tooltip .tooltip-type {
 	font-weight: 500;
 }

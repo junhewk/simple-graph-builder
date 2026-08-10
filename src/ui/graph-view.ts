@@ -3,8 +3,9 @@ import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import SimpleGraphBuilderPlugin from '../main';
 import { openSearchModal } from '../commands/search';
-import { getEntityTypeColor, OntologyEdge } from '../types';
+import { getEntityTypeColor } from '../types';
 import { refineLayout, spacingForNodeCount, LayoutNode, LayoutEdge } from '../graph/layout';
+import { computeGraphVisualMetrics, countVisibleDegrees } from '../graph/visual-metrics';
 
 // Register fCoSE layout extension
 cytoscape.use(fcose);
@@ -31,10 +32,6 @@ const MAX_RENDER_EDGES = 15000;
 // O(n log n) per iteration under Barnes-Hut -- seconds at 2263 nodes for a
 // comparable result.
 const DRAFT_LAYOUT_NODE_THRESHOLD = 1000;
-
-// NOTE hubs are drawn larger than entities (16px vs 12px), so they claim a
-// little more room in the layout's overlap pass.
-const NOTE_RADIUS_BONUS = 4;
 
 // Zoom at which edges stop being drawn at overview weight. Labels appear at
 // 0.8 (min-zoomed-font-size 8 over a 10px font), so the mesh has already
@@ -70,6 +67,10 @@ function themeColors(): { edge: string; label: string; highlight: string } {
  */
 function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 	const { edge: edgeColor, label: labelColor, highlight } = themeColors();
+	const nodeSize = (node: cytoscape.NodeSingular): number => nodeData(node).size;
+	const emphasizedNodeSize = (node: cytoscape.NodeSingular): number => nodeData(node).emphasizedSize;
+	const edgeOpacity = (edge: cytoscape.EdgeSingular): number => edgeData(edge).opacity;
+	const overviewEdgeOpacity = (edge: cytoscape.EdgeSingular): number => edgeData(edge).overviewOpacity;
 
 	// This is the weight edges are drawn at once the user has zoomed in far
 	// enough to read the graph. A dense graph needs them lighter than a sparse
@@ -78,7 +79,7 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 		'width': 1,
 		'line-color': edgeColor,
 		'curve-style': isLargeGraph ? 'straight' : 'bezier',
-		'opacity': isLargeGraph ? 0.25 : 0.4,
+		'opacity': edgeOpacity,
 		'line-style': 'solid',
 		// Keep the mesh under the nodes and labels it connects
 		'z-index': 0,
@@ -108,24 +109,20 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 				// anyway. This is what keeps the zoomed-out view responsive, and
 				// it's how Obsidian's own graph behaves.
 				'min-zoomed-font-size': 8,
-				// Slightly larger on a big graph, for the same reason the edges
-				// are bolder there
-				'width': isLargeGraph ? 14 : 12,
-				'height': isLargeGraph ? 14 : 12,
+				'width': nodeSize,
+				'height': nodeSize,
 				'border-width': 0,
 				'background-opacity': 0.9,
 				'background-color': 'data(color)',
 				'z-index': 1,
 			},
 		},
-		// Vault notes: squared off and slightly larger, so the note layer reads as
-		// distinct from the entities it connects
+		// Vault notes keep a distinct shape. Their connectivity now determines
+		// their size using the same scale as every other node.
 		{
 			selector: 'node[entityType = "NOTE"]',
 			style: {
 				'shape': 'round-rectangle',
-				'width': isLargeGraph ? 18 : 16,
-				'height': isLargeGraph ? 18 : 16,
 			},
 		},
 		// Base edge style (unified for free-form relationships)
@@ -141,7 +138,7 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 			selector: 'edge.overview',
 			style: {
 				'width': 1.4,
-				'opacity': 0.85,
+				'opacity': overviewEdgeOpacity,
 			},
 		},
 		// Highlighted state (selected node and neighbors)
@@ -157,8 +154,8 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 				'border-width': 2,
 				// White reads as a halo on a dark theme and vanishes on a light one
 				'border-color': highlight,
-				'width': isLargeGraph ? 20 : 16,
-				'height': isLargeGraph ? 20 : 16,
+				'width': emphasizedNodeSize,
+				'height': emphasizedNodeSize,
 			},
 		},
 		{
@@ -170,17 +167,25 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 		},
 		// Faded state (non-selected elements)
 		{
-			selector: '.faded',
+			selector: 'node.faded',
 			style: {
 				'opacity': 0.15,
+			},
+		},
+		{
+			selector: 'edge.faded',
+			style: {
+				// Must stay below the lightest normal edge; a fixed 0.15 would
+				// accidentally brighten low-importance edges on large graphs.
+				'opacity': 0.04,
 			},
 		},
 		// Hover state
 		{
 			selector: 'node.hover',
 			style: {
-				'width': isLargeGraph ? 20 : 16,
-				'height': isLargeGraph ? 20 : 16,
+				'width': emphasizedNodeSize,
+				'height': emphasizedNodeSize,
 				'z-index': 999,
 			},
 		},
@@ -218,6 +223,9 @@ interface GraphNodeData {
 	label?: string;
 	color: string;
 	sourceNotes: string[];
+	degree: number;
+	size: number;
+	emphasizedSize: number;
 }
 
 interface GraphEdgeData {
@@ -226,6 +234,8 @@ interface GraphEdgeData {
 	target: string;
 	relationship: string;
 	detail?: string;
+	opacity: number;
+	overviewOpacity: number;
 }
 
 function nodeData(node: cytoscape.NodeSingular): GraphNodeData {
@@ -234,18 +244,6 @@ function nodeData(node: cytoscape.NodeSingular): GraphNodeData {
 
 function edgeData(edge: cytoscape.EdgeSingular): GraphEdgeData {
 	return edge.data() as GraphEdgeData;
-}
-
-/**
- * Count how many of the given edges touch each node.
- */
-function countDegrees(edges: OntologyEdge[]): Map<string, number> {
-	const degrees = new Map<string, number>();
-	for (const edge of edges) {
-		degrees.set(edge.source, (degrees.get(edge.source) || 0) + 1);
-		degrees.set(edge.target, (degrees.get(edge.target) || 0) + 1);
-	}
-	return degrees;
 }
 
 // ============================================
@@ -371,7 +369,7 @@ export class GraphView extends ItemView {
 
 		// Degree over the currently visible edge set, not the whole graph, so
 		// truncation and the min-degree filter rank what's actually on screen
-		let connectionCount = countDegrees(edgesToRender);
+		let connectionCount = countVisibleDegrees(nodesToRender.map(node => node.id), edgesToRender);
 
 		// Apply minimum degree filter from settings
 		const minDegree = this.plugin.settings.graphMinDegree;
@@ -381,7 +379,7 @@ export class GraphView extends ItemView {
 			);
 			const visible = new Set(nodesToRender.map(n => n.id));
 			edgesToRender = edgesToRender.filter(e => visible.has(e.source) && visible.has(e.target));
-			connectionCount = countDegrees(edgesToRender);
+			connectionCount = countVisibleDegrees(nodesToRender.map(node => node.id), edgesToRender);
 		}
 
 		// Budget nodes and edges separately, keeping the best-connected of each
@@ -411,10 +409,19 @@ export class GraphView extends ItemView {
 			new Notice(`Large graph: trimmed ${truncated.join(' and ')}`);
 		}
 
+		// Styling metrics belong to the final visible graph. Recalculate after
+		// every filter and budget so hidden edges cannot inflate a node's size.
+		const visualMetrics = computeGraphVisualMetrics(
+			nodesToRender.map(node => node.id),
+			edgesToRender,
+			isLargeGraph
+		);
+
 		const elements: cytoscape.ElementDefinition[] = [];
 
 		// Add nodes with entity type colors
 		for (const node of nodesToRender) {
+			const metric = visualMetrics.nodes.get(node.id)!;
 			elements.push({
 				data: {
 					id: node.id,
@@ -423,6 +430,9 @@ export class GraphView extends ItemView {
 					label: node.label || node.entityType, // fallback for legacy
 					color: getEntityTypeColor(node.entityType || node.label),
 					sourceNotes: node.sourceNotes,
+					degree: metric.degree,
+					size: metric.size,
+					emphasizedSize: metric.emphasizedSize,
 				},
 			});
 		}
@@ -431,6 +441,7 @@ export class GraphView extends ItemView {
 		const nodeIds = new Set(nodesToRender.map(n => n.id));
 		for (const edge of edgesToRender) {
 			if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+				const metric = visualMetrics.edges.get(edge.id)!;
 				elements.push({
 					data: {
 						id: edge.id,
@@ -438,6 +449,8 @@ export class GraphView extends ItemView {
 						target: edge.target,
 						relationship: edge.relationship || edge.type || 'relates to',
 						detail: edge.properties?.detail,
+						opacity: metric.opacity,
+						overviewOpacity: metric.overviewOpacity,
 					},
 				});
 			}
@@ -590,6 +603,10 @@ export class GraphView extends ItemView {
 		this.tooltipEl.empty();
 		this.tooltipEl.createDiv({ cls: 'tooltip-label', text: entityType });
 		this.tooltipEl.createDiv({ cls: 'tooltip-name', text: name });
+		this.tooltipEl.createDiv({
+			cls: 'tooltip-connections',
+			text: `${data.degree} connection${data.degree === 1 ? '' : 's'}`,
+		});
 		if (sourceNotes.length > 0) {
 			this.tooltipEl.createDiv({ cls: 'tooltip-sources', text: `Found in ${sourceNotes.length} note${sourceNotes.length > 1 ? 's' : ''}` });
 		}
@@ -715,14 +732,14 @@ export class GraphView extends ItemView {
 		// Spacing is the label budget on graphs small enough to show at a
 		// legible scale, and shrinks on ones that are not -- see
 		// spacingForNodeCount.
-		const entityRadius = spacingForNodeCount(this.cy.nodes().length) / 2;
+		const spacingRadius = spacingForNodeCount(this.cy.nodes().length) / 2;
 		const nodes: LayoutNode[] = this.cy.nodes().map(node => {
 			const p = node.position();
 			return {
 				id: node.id(),
 				x: p.x,
 				y: p.y,
-				radius: nodeData(node).entityType === 'NOTE' ? entityRadius + NOTE_RADIUS_BONUS : entityRadius,
+				radius: Math.max(spacingRadius, nodeData(node).size / 2),
 			};
 		});
 		const edges: LayoutEdge[] = this.cy.edges().map(edge => {

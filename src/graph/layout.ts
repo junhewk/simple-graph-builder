@@ -113,10 +113,13 @@ export function spacingForNodeCount(count: number): number {
 }
 
 function defaultSchedule(cb: () => void): void {
-	if (typeof requestAnimationFrame === 'function') {
-		requestAnimationFrame(() => cb());
+	if (typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function') {
+		window.requestAnimationFrame(() => cb());
+	} else if (typeof window !== 'undefined') {
+		window.setTimeout(cb, 0);
 	} else {
-		setTimeout(cb, 0);
+		// Headless layout tests run without a DOM window.
+		globalThis.setTimeout(cb, 0);
 	}
 }
 

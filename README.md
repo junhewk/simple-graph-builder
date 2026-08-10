@@ -29,7 +29,7 @@ This design provides **structured entity classification with expressive relation
 - **Multiple LLM Support**: Works with Claude, OpenAI, Gemini, and local servers — Ollama plus anything OpenAI-compatible (llama.cpp, LM Studio, vLLM)
 - **Reasoning Effort Control**: Tune how hard the model thinks, separately for extraction and Smart Search
 - **Korean Language Support**: Bigram Jaccard similarity for robust Korean text matching (handles particles and spacing variations), with all names normalized to Unicode NFC so composed and decomposed Hangul resolve to the same entity
-- **Interactive Graph View**: Visualize your knowledge graph with a ForceAtlas2 layout — the force model Gephi uses — so clusters read as clusters and every label has room
+- **Interactive Graph View**: Visualize your knowledge graph with a ForceAtlas2 layout, connectivity-scaled nodes, and importance-weighted edges so hubs and clusters are immediately visible
 - **Large Graph Support**: Optimized for thousands of nodes with fast rendering
 - **Note Neighborhood Panel**: See connections for the current note in a sidebar
 - **Manual Entity Merge**: Merge duplicate entities via graph view context menu
@@ -191,6 +191,13 @@ Note analysis requires a model that can return **structured output** (JSON schem
 
 Any other model can be typed into the **Custom…** field. Smart Search additionally needs tool calling; for local servers, start `llama-server` with `--jinja`, and prefer `qwen3:*` or `gpt-oss:*` on Ollama.
 
+## Upgrading to 0.5.4
+
+- **Connectivity is visible at a glance.** Node diameter now scales logarithmically with the number of visible connections, while edge opacity reflects the importance of both endpoints. Hover and selection preserve those relative sizes.
+- **Settings are searchable on Obsidian 1.13+.** The settings tab now publishes declarative setting definitions while retaining compatibility with older supported Obsidian versions.
+- **Popout windows are supported.** Layout scheduling uses window-scoped animation frames and timers.
+- **Vault enumeration is user-triggered.** Markdown file paths are enumerated only after confirming **Analyze entire vault**, rather than when the settings page opens.
+
 ## Upgrading to 0.5.0
 
 This release fixes a bug that made large graphs dense and slow to load, and repairs the damage automatically on first load. Nothing is re-analyzed and no API calls are made.
@@ -244,7 +251,7 @@ This release moves to each provider's current API. Two things happen automatical
 - **Scroll** to zoom in/out
 - **Drag** to pan around the graph
 
-Node colors are determined by entity type (10 predefined colors). Edges use unified gray styling with relationship verbs shown on hover.
+Node colors are determined by entity type (10 predefined colors). Node diameter scales logarithmically with visible connections, and edge opacity reflects the average importance of its endpoints. Relationship verbs remain available on hover.
 
 #### Layout
 
@@ -294,6 +301,8 @@ Consider using Ollama for cost-free operation, or batch analyze during off-peak 
 ## Privacy
 
 - Your notes are sent to the configured LLM provider for entity extraction
+- **Analyze entire vault** enumerates markdown file paths only after you explicitly confirm the action, then reads changed notes one at a time through Obsidian's vault API
+- Analyzing the current note and auto-analysis read only the individual note being processed
 - No data is stored externally; all graph data stays in your vault
 - Consider using Ollama for fully local, private processing
 - Embeddings are stored locally in binary format (`embeddings.bin`)
