@@ -30,8 +30,19 @@ export interface WriteBackResult {
 	cancelled: boolean;
 }
 
-/** Let Obsidian repaint between batches of writes. */
+/**
+ * Let Obsidian repaint between batches of writes.
+ *
+ * Only when there is something to repaint. A hidden or occluded window has its
+ * timers throttled to roughly one per second, and harder still after a few
+ * minutes, so a `setTimeout(0)` per twenty files turns a twenty-second job into
+ * a stalled progress bar -- which is exactly what happens when the run is
+ * started from the settings window and the user clicks back to their notes.
+ * A microtask is not throttled and costs nothing; the writes themselves are
+ * real async I/O, so the event loop still turns either way.
+ */
 function yieldToUi(): Promise<void> {
+	if (typeof document !== 'undefined' && document.hidden) return Promise.resolve();
 	return new Promise(resolve => window.setTimeout(resolve, 0));
 }
 

@@ -205,8 +205,10 @@ write-back adds a property to it. Only the second note tests the path a real
 upgrade takes, and testing only the first is how this was missed once already.
 
 - **Do:** open `research/note 001.md` (visited in T5) and run *Analyze current
-  note*. Then do the same with **`research/note 050.md`**, which no earlier step
-  has touched.
+  note*. Then do the same with **`meetings/note 050.md`**, which no earlier step
+  has touched. (The generator rotates notes through `research`, `meetings`,
+  `daily` and `한국어`, so note *n* lives in folder *(n-1) mod 4* — note 050 is
+  in `meetings`.)
 - **Expect:** **"Note has not changed since last analysis"** for *both*, with no
   API call and no prompt for a key.
 - **Fail if:** either one starts analyzing, or asks for an API key. Asking for a
