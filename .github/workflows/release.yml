@@ -37,7 +37,13 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${GITHUB_REF#refs/tags/}"
-          gh release create "$tag" \
+          # A hyphenated tag (0.6.0-beta.1) is published as a pre-release: BRAT
+          # installs those, and the Community Plugins updater ignores them. That
+          # is the only way to put a build in front of testers without offering
+          # it to everyone who already has the plugin installed.
+          prerelease=""
+          case "$tag" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$tag" $prerelease \
             --title="$tag" \
             --generate-notes \
             main.js manifest.json styles.css
