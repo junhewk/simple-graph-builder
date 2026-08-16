@@ -3,7 +3,9 @@ import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import SimpleGraphBuilderPlugin from '../main';
 import { openSearchModal } from '../commands/search';
-import { getEntityTypeColor, OntologyEdge } from '../types';
+import { getEntityTypeColor } from '../types';
+import { refineLayout, spacingForNodeCount, LayoutNode, LayoutEdge } from '../graph/layout';
+import { computeGraphVisualMetrics, countVisibleDegrees } from '../graph/visual-metrics';
 
 // Register fCoSE layout extension
 cytoscape.use(fcose);
@@ -25,15 +27,38 @@ const MAX_RENDER_EDGES = 15000;
 // Above this node count fCoSE's force-directed refinement stops being
 // affordable -- its cost is roughly quadratic. Measured on a 2:1 edge/node
 // graph: 500 nodes 1.8s, 1000 nodes 5.7s, 2500 nodes 38s, 5177 nodes 164s.
+// Larger graphs run a two-stage pipeline instead: fCoSE 'draft' (spectral
+// placement, sub-second) seeds refineLayout's ForceAtlas2 run, which is
+// O(n log n) per iteration under Barnes-Hut -- seconds at 2263 nodes for a
+// comparable result.
 const DRAFT_LAYOUT_NODE_THRESHOLD = 1000;
 
-// Roughly the on-screen room one node needs before its neighbours start
-// overlapping it, labels included. Used to spread a draft layout.
-const NODE_SPACING = 60;
+// Zoom at which edges stop being drawn at overview weight. Labels appear at
+// 0.8 (min-zoomed-font-size 8 over a 10px font), so the mesh has already
+// thinned out by the time there is text to read behind it.
+const EDGE_OVERVIEW_MAX_ZOOM = 0.5;
 
 // ============================================
 // Graph Styles
 // ============================================
+
+/**
+ * Colours for the two backgrounds Obsidian can put behind the graph.
+ *
+ * Edges were hardcoded to a light slate (#cbd5e1) picked against a dark
+ * background. On a light theme that is very nearly white on white, and a user
+ * reported a 5177-node graph looking like an empty pane. These pairs were
+ * chosen by rendering a 5000-node graph on both backgrounds and comparing.
+ *
+ * Deliberately fixed values rather than Obsidian's --text-faint and friends:
+ * a theme variable adapts to custom themes, but its actual value is unknown
+ * here, and picking an unverified colour is what caused the bug.
+ */
+function themeColors(): { edge: string; label: string; highlight: string } {
+	return document.body.hasClass('theme-dark')
+		? { edge: '#cbd5e1', label: '#a8a8a8', highlight: '#ffffff' }
+		: { edge: '#64748b', label: '#5c6370', highlight: '#1e1e1e' };
+}
 
 /**
  * Build the stylesheet. Edge rendering depends on graph size: bezier curves and
@@ -41,17 +66,28 @@ const NODE_SPACING = 60;
  * drop both.
  */
 function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
+	const { edge: edgeColor, label: labelColor, highlight } = themeColors();
+	const nodeSize = (node: cytoscape.NodeSingular): number => nodeData(node).size;
+	const emphasizedNodeSize = (node: cytoscape.NodeSingular): number => nodeData(node).emphasizedSize;
+	const edgeOpacity = (edge: cytoscape.EdgeSingular): number => edgeData(edge).opacity;
+	const overviewEdgeOpacity = (edge: cytoscape.EdgeSingular): number => edgeData(edge).overviewOpacity;
+
+	// This is the weight edges are drawn at once the user has zoomed in far
+	// enough to read the graph. A dense graph needs them lighter than a sparse
+	// one here, or the mesh buries the nodes and their labels.
 	const edgeStyle: cytoscape.Css.Edge = {
 		'width': 1,
-		'line-color': '#cbd5e1',
+		'line-color': edgeColor,
 		'curve-style': isLargeGraph ? 'straight' : 'bezier',
-		'opacity': 0.4,
+		'opacity': edgeOpacity,
 		'line-style': 'solid',
+		// Keep the mesh under the nodes and labels it connects
+		'z-index': 0,
 	};
 
 	if (!isLargeGraph) {
 		edgeStyle['target-arrow-shape'] = 'triangle';
-		edgeStyle['target-arrow-color'] = '#cbd5e1';
+		edgeStyle['target-arrow-color'] = edgeColor;
 		edgeStyle['arrow-scale'] = 0.5;
 	}
 
@@ -66,34 +102,44 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 				'text-margin-y': 5,
 				'font-size': '10px',
 				'font-family': '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-				'color': '#a8a8a8',
+				'color': labelColor,
 				'text-wrap': 'ellipsis',
 				'text-max-width': '80px',
 				// Stop measuring and drawing labels once they'd be unreadable
 				// anyway. This is what keeps the zoomed-out view responsive, and
 				// it's how Obsidian's own graph behaves.
 				'min-zoomed-font-size': 8,
-				'width': 12,
-				'height': 12,
+				'width': nodeSize,
+				'height': nodeSize,
 				'border-width': 0,
 				'background-opacity': 0.9,
 				'background-color': 'data(color)',
+				'z-index': 1,
 			},
 		},
-		// Vault notes: squared off and slightly larger, so the note layer reads as
-		// distinct from the entities it connects
+		// Vault notes keep a distinct shape. Their connectivity now determines
+		// their size using the same scale as every other node.
 		{
 			selector: 'node[entityType = "NOTE"]',
 			style: {
 				'shape': 'round-rectangle',
-				'width': 16,
-				'height': 16,
 			},
 		},
 		// Base edge style (unified for free-form relationships)
 		{
 			selector: 'edge',
 			style: edgeStyle,
+		},
+		// Zoomed out, a 1px edge covers a fraction of a pixel and only the
+		// aggregate registers, so the mesh is drawn bolder to make the first
+		// view read as structure rather than haze. updateEdgeWeight swaps this
+		// off as soon as the user zooms in to read.
+		{
+			selector: 'edge.overview',
+			style: {
+				'width': 1.4,
+				'opacity': overviewEdgeOpacity,
+			},
 		},
 		// Highlighted state (selected node and neighbors)
 		{
@@ -106,9 +152,10 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 			selector: 'node.highlighted',
 			style: {
 				'border-width': 2,
-				'border-color': '#ffffff',
-				'width': 16,
-				'height': 16,
+				// White reads as a halo on a dark theme and vanishes on a light one
+				'border-color': highlight,
+				'width': emphasizedNodeSize,
+				'height': emphasizedNodeSize,
 			},
 		},
 		{
@@ -120,17 +167,25 @@ function buildGraphStyles(isLargeGraph: boolean): cytoscape.StylesheetStyle[] {
 		},
 		// Faded state (non-selected elements)
 		{
-			selector: '.faded',
+			selector: 'node.faded',
 			style: {
 				'opacity': 0.15,
+			},
+		},
+		{
+			selector: 'edge.faded',
+			style: {
+				// Must stay below the lightest normal edge; a fixed 0.15 would
+				// accidentally brighten low-importance edges on large graphs.
+				'opacity': 0.04,
 			},
 		},
 		// Hover state
 		{
 			selector: 'node.hover',
 			style: {
-				'width': 16,
-				'height': 16,
+				'width': emphasizedNodeSize,
+				'height': emphasizedNodeSize,
 				'z-index': 999,
 			},
 		},
@@ -168,6 +223,9 @@ interface GraphNodeData {
 	label?: string;
 	color: string;
 	sourceNotes: string[];
+	degree: number;
+	size: number;
+	emphasizedSize: number;
 }
 
 interface GraphEdgeData {
@@ -176,23 +234,8 @@ interface GraphEdgeData {
 	target: string;
 	relationship: string;
 	detail?: string;
-}
-
-/**
- * Grid offsets in rings of increasing radius, nearest first. Used to find the
- * closest free cell to a stacked node.
- */
-function buildSpiral(maxRadius: number): Array<[number, number]> {
-	const offsets: Array<[number, number]> = [];
-	for (let r = 1; r <= maxRadius; r++) {
-		for (let d = -r; d <= r; d++) {
-			offsets.push([d, -r], [d, r]);
-		}
-		for (let d = -r + 1; d <= r - 1; d++) {
-			offsets.push([-r, d], [r, d]);
-		}
-	}
-	return offsets;
+	opacity: number;
+	overviewOpacity: number;
 }
 
 function nodeData(node: cytoscape.NodeSingular): GraphNodeData {
@@ -201,18 +244,6 @@ function nodeData(node: cytoscape.NodeSingular): GraphNodeData {
 
 function edgeData(edge: cytoscape.EdgeSingular): GraphEdgeData {
 	return edge.data() as GraphEdgeData;
-}
-
-/**
- * Count how many of the given edges touch each node.
- */
-function countDegrees(edges: OntologyEdge[]): Map<string, number> {
-	const degrees = new Map<string, number>();
-	for (const edge of edges) {
-		degrees.set(edge.source, (degrees.get(edge.source) || 0) + 1);
-		degrees.set(edge.target, (degrees.get(edge.target) || 0) + 1);
-	}
-	return degrees;
 }
 
 // ============================================
@@ -226,6 +257,10 @@ export class GraphView extends ItemView {
 	private tooltipEl: HTMLElement | null = null;
 	/** Guards against overlapping renders; see renderGraph. */
 	private renderToken = 0;
+	/** Whether edges currently carry the bold overview weight; see updateEdgeWeight. */
+	private edgesBold = false;
+	/** Node the current highlight is anchored to, if any; see highlightConnected. */
+	private selectedNodeId: string | null = null;
 
 	constructor(leaf: WorkspaceLeaf, plugin: SimpleGraphBuilderPlugin) {
 		super(leaf);
@@ -252,6 +287,18 @@ export class GraphView extends ItemView {
 
 		// Create graph container first (full height)
 		this.graphContainer = container.createDiv({ cls: 'cytoscape-container' });
+		// Focusable so the graph can take key events once clicked, which is what
+		// makes Escape a reliable way to release a highlight
+		this.graphContainer.tabIndex = 0;
+		this.registerDomEvent(this.graphContainer, 'keydown', (evt: KeyboardEvent) => {
+			if (evt.key === 'Escape' && this.selectedNodeId !== null) {
+				this.resetHighlights();
+				this.hideTooltip();
+				// Only swallow the key when it actually released something, so
+				// Escape still closes the pane otherwise
+				evt.preventDefault();
+			}
+		});
 
 		// Create tooltip element (positioned absolutely, won't affect layout)
 		// Styles defined in styles.css via .graph-tooltip class
@@ -322,7 +369,7 @@ export class GraphView extends ItemView {
 
 		// Degree over the currently visible edge set, not the whole graph, so
 		// truncation and the min-degree filter rank what's actually on screen
-		let connectionCount = countDegrees(edgesToRender);
+		let connectionCount = countVisibleDegrees(nodesToRender.map(node => node.id), edgesToRender);
 
 		// Apply minimum degree filter from settings
 		const minDegree = this.plugin.settings.graphMinDegree;
@@ -332,7 +379,7 @@ export class GraphView extends ItemView {
 			);
 			const visible = new Set(nodesToRender.map(n => n.id));
 			edgesToRender = edgesToRender.filter(e => visible.has(e.source) && visible.has(e.target));
-			connectionCount = countDegrees(edgesToRender);
+			connectionCount = countVisibleDegrees(nodesToRender.map(node => node.id), edgesToRender);
 		}
 
 		// Budget nodes and edges separately, keeping the best-connected of each
@@ -362,10 +409,19 @@ export class GraphView extends ItemView {
 			new Notice(`Large graph: trimmed ${truncated.join(' and ')}`);
 		}
 
+		// Styling metrics belong to the final visible graph. Recalculate after
+		// every filter and budget so hidden edges cannot inflate a node's size.
+		const visualMetrics = computeGraphVisualMetrics(
+			nodesToRender.map(node => node.id),
+			edgesToRender,
+			isLargeGraph
+		);
+
 		const elements: cytoscape.ElementDefinition[] = [];
 
 		// Add nodes with entity type colors
 		for (const node of nodesToRender) {
+			const metric = visualMetrics.nodes.get(node.id)!;
 			elements.push({
 				data: {
 					id: node.id,
@@ -374,6 +430,9 @@ export class GraphView extends ItemView {
 					label: node.label || node.entityType, // fallback for legacy
 					color: getEntityTypeColor(node.entityType || node.label),
 					sourceNotes: node.sourceNotes,
+					degree: metric.degree,
+					size: metric.size,
+					emphasizedSize: metric.emphasizedSize,
 				},
 			});
 		}
@@ -382,6 +441,7 @@ export class GraphView extends ItemView {
 		const nodeIds = new Set(nodesToRender.map(n => n.id));
 		for (const edge of edgesToRender) {
 			if (nodeIds.has(edge.source) && nodeIds.has(edge.target)) {
+				const metric = visualMetrics.edges.get(edge.id)!;
 				elements.push({
 					data: {
 						id: edge.id,
@@ -389,6 +449,8 @@ export class GraphView extends ItemView {
 						target: edge.target,
 						relationship: edge.relationship || edge.type || 'relates to',
 						detail: edge.properties?.detail,
+						opacity: metric.opacity,
+						overviewOpacity: metric.overviewOpacity,
 					},
 				});
 			}
@@ -420,11 +482,13 @@ export class GraphView extends ItemView {
 			// Lay out explicitly after construction so the loading indicator can
 			// stay up until the graph is actually positioned
 			layout: { name: 'preset' },
-			// A spread-out large graph can need to zoom well past 0.1 to fit,
-			// especially in the right sidebar, which is only a few hundred pixels
-			// wide. Clamping there is what leaves the user staring at one corner
-			// of the graph with no way to zoom out.
-			minZoom: isLargeGraph ? 0.01 : 0.1,
+			// A spread-out graph can need to zoom well past 0.1 to fit, especially
+			// in the right sidebar, which is only a few hundred pixels wide.
+			// Clamping there is what leaves the user staring at one corner of the
+			// graph with no way to zoom out. This applies at every size now that
+			// the spacing pass scales layouts up to clear labels: an 871-node
+			// graph comes out ~6000px tall, which needs zoom ~0.07 in a sidebar.
+			minZoom: 0.01,
 			maxZoom: 3,
 			// Performance optimizations
 			...rendererOptions,
@@ -433,16 +497,21 @@ export class GraphView extends ItemView {
 			hideLabelsOnViewport: isLargeGraph,
 		});
 
+		// Fresh instance: no edge carries the overview class yet and nothing is
+		// selected, whatever the previous render left these set to
+		this.edgesBold = false;
+		this.selectedNodeId = null;
+
 		try {
 			const layout = this.cy.layout(layoutConfig);
 			const settled = layout.promiseOn('layoutstop');
 			layout.run();
 			await settled;
 
-			// Draft placement is tightly packed; spread it, then re-fit since the
-			// layout's own fit ran against the pre-scaled coordinates.
-			if (usesDraftLayout) {
-				this.spreadDraftLayout();
+			// Every graph goes through the spacing pass; large ones get the force
+			// refinement first. Re-fit afterwards, since the layout's own fit ran
+			// against the pre-refinement coordinates.
+			if (await this.refineLayoutPositions(token, usesDraftLayout)) {
 				this.cy.fit(undefined, 30);
 			}
 		} finally {
@@ -456,9 +525,15 @@ export class GraphView extends ItemView {
 		// is enough. Binding handlers to the old instance would leak them.
 		if (token !== this.renderToken) return;
 
-		// Click handler: highlight connected nodes
+		// Click handler: highlight connected nodes, or release the highlight if
+		// this node already holds it
 		this.cy.on('tap', 'node', (evt: cytoscape.EventObject) => {
-			this.highlightConnected(evt.target as cytoscape.NodeSingular);
+			const node = evt.target as cytoscape.NodeSingular;
+			if (this.selectedNodeId === node.id()) {
+				this.resetHighlights();
+				return;
+			}
+			this.highlightConnected(node);
 		});
 
 		// Double-click on node to search
@@ -469,9 +544,23 @@ export class GraphView extends ItemView {
 			}
 		});
 
-		// Click on background to reset highlights
+		// Cytoscape calls preventDefault on mousedown, which stops a click from
+		// focusing the container the normal way -- and without focus the
+		// container never sees Escape. Focus it explicitly on interaction.
+		this.cy.on('tapstart', () => {
+			this.graphContainer?.focus({ preventScroll: true });
+		});
+
+		// Any tap that is not on a node releases the highlight. Testing for the
+		// background alone is not enough: a dense graph covers its own canvas
+		// with edges, so most clicks that look like empty space land on an edge
+		// and the user is left with no way back.
 		this.cy.on('tap', (evt: cytoscape.EventObject) => {
-			if (evt.target === this.cy) {
+			// evt.target is the core for a background tap and an element
+			// otherwise; cytoscape's types don't express that union
+			const target = evt.target as { isNode?: () => boolean };
+			const onNode = typeof target.isNode === 'function' && target.isNode();
+			if (!onNode) {
 				this.resetHighlights();
 				this.hideTooltip();
 			}
@@ -497,6 +586,10 @@ export class GraphView extends ItemView {
 		this.cy.on('mouseout', 'edge', () => {
 			this.hideTooltip();
 		});
+
+		// Edge weight follows the zoom level; set it for the fitted view first
+		this.updateEdgeWeight();
+		this.cy.on('zoom', () => this.updateEdgeWeight());
 	}
 
 	private showNodeTooltip(node: cytoscape.NodeSingular, position: { x: number; y: number }): void {
@@ -510,6 +603,10 @@ export class GraphView extends ItemView {
 		this.tooltipEl.empty();
 		this.tooltipEl.createDiv({ cls: 'tooltip-label', text: entityType });
 		this.tooltipEl.createDiv({ cls: 'tooltip-name', text: name });
+		this.tooltipEl.createDiv({
+			cls: 'tooltip-connections',
+			text: `${data.degree} connection${data.degree === 1 ? '' : 's'}`,
+		});
 		if (sourceNotes.length > 0) {
 			this.tooltipEl.createDiv({ cls: 'tooltip-sources', text: `Found in ${sourceNotes.length} note${sourceNotes.length > 1 ? 's' : ''}` });
 		}
@@ -556,18 +653,17 @@ export class GraphView extends ItemView {
 			tile: true,
 		};
 
-		// Large graph: skip the refinement pass and spread the result instead.
-		// 'default' runs spectral placement AND a full CoSE refinement; 'draft'
-		// stops after spectral. Past ~1000 nodes that refinement costs tens of
-		// seconds to minutes, so spreadDraftLayout() substitutes for it.
+		// Large graph: 'default' runs spectral placement AND a full CoSE
+		// refinement; 'draft' stops after spectral. Past ~1000 nodes that
+		// refinement costs tens of seconds to minutes, so refineDraftLayout()
+		// substitutes for it -- repulsion happens there, not here (CoSE-only
+		// options like nodeRepulsion are ignored under 'draft').
 		if (nodeCount > DRAFT_LAYOUT_NODE_THRESHOLD) {
 			return {
 				...baseConfig,
 				quality: 'draft',
 				nodeDimensionsIncludeLabels: false,
-				nodeRepulsion: () => 20000,
 				idealEdgeLength: () => 120,
-				gravity: 0.1,
 				tilingPaddingVertical: 30,
 				tilingPaddingHorizontal: 30,
 			} as cytoscape.LayoutOptions;
@@ -601,75 +697,92 @@ export class GraphView extends ItemView {
 	}
 
 	/**
-	 * Make a draft-quality layout readable.
+	 * Position pass that runs after fCoSE: force refinement for large graphs,
+	 * label-aware spacing for all of them.
 	 *
 	 * fCoSE 'draft' does spectral placement only. Spectral coordinates are
 	 * derived from a handful of eigenvectors, so nodes with the same structural
 	 * role -- every entity hanging off one note hub, say -- come out at
-	 * *identical* coordinates. On a real 2263-node vault only 8% of nodes were
-	 * far enough from a neighbour to be individually visible; the rest were
-	 * stacked. That is the "everything clumps together" symptom.
+	 * *identical* coordinates. On a real 2263-node vault only ~4% of positions
+	 * were distinct; that is the "everything clumps together" symptom. The
+	 * CoSE pass that would separate them costs ~164s at 5000 nodes.
 	 *
-	 * The refinement pass that normally separates them costs ~164s at 5000
-	 * nodes, so this substitutes for it in two cheap steps:
+	 * An earlier repair (0.5.1) snapped the stacks onto a 60px grid. That made
+	 * every node visible but applied no repulsion at all, so the graph rendered
+	 * as a uniform lattice with edges criss-crossing the whole frame -- nothing
+	 * like Obsidian's own force-directed view. refineLayout replaces it with a
+	 * seeded ForceAtlas2 run (Gephi's force model, Barnes-Hut so O(n log n)
+	 * per iteration, seconds at 2263 nodes).
 	 *
-	 *   1. Scale up so the layout has roughly one NODE_SPACING cell per node.
-	 *      Necessary but nowhere near sufficient -- scaling a stack of nodes
-	 *      sharing one coordinate just moves the stack, so visibility plateaued
-	 *      at 32% no matter how far it was scaled.
-	 *   2. Resolve what is still stacked by moving each colliding node to the
-	 *      nearest free cell, searching outward. Nodes that already had a cell
-	 *      to themselves keep their exact position, so the parts of the layout
-	 *      spectral placement got right are left alone.
+	 * Smaller graphs keep their full-quality fCoSE positions -- `force: false`
+	 * skips straight to the spacing pass, which only scales the layout out and
+	 * separates what still overlaps. They need it: fCoSE packs an 871-node
+	 * graph at a 42px median gap, leaving 5% of nodes with room for their
+	 * label, and `nodeDimensionsIncludeLabels` does not change that.
 	 *
-	 * Measured on that vault: 8% -> 100% visible in ~80ms.
+	 * Runs in slices on the browser's frame scheduler, so the loading
+	 * indicator stays live, and aborts via renderToken if a newer render
+	 * supersedes this one mid-flight.
+	 *
+	 * @returns true when new positions were applied.
 	 */
-	private spreadDraftLayout(): void {
-		if (!this.cy) return;
+	private async refineLayoutPositions(token: number, force: boolean): Promise<boolean> {
+		if (!this.cy) return false;
 
-		const nodes = this.cy.nodes();
-		const count = nodes.length;
-		if (count < 2) return;
-
-		const bb = nodes.boundingBox({ includeLabels: false, includeOverlays: false });
-		const extent = Math.max(bb.w, bb.h);
-		if (extent <= 0) return;
-
-		// Step 1: enough room for one cell per node
-		const scale = (Math.sqrt(count) * NODE_SPACING) / extent;
-		const positions = nodes.map(node => {
+		// Spacing is the label budget on graphs small enough to show at a
+		// legible scale, and shrinks on ones that are not -- see
+		// spacingForNodeCount.
+		const spacingRadius = spacingForNodeCount(this.cy.nodes().length) / 2;
+		const nodes: LayoutNode[] = this.cy.nodes().map(node => {
 			const p = node.position();
-			return scale > 1 ? { x: p.x * scale, y: p.y * scale } : { x: p.x, y: p.y };
+			return {
+				id: node.id(),
+				x: p.x,
+				y: p.y,
+				radius: Math.max(spacingRadius, nodeData(node).size / 2),
+			};
+		});
+		const edges: LayoutEdge[] = this.cy.edges().map(edge => {
+			const { source, target } = edgeData(edge);
+			return { source, target };
 		});
 
-		// Step 2: nearest-free-cell for anything still stacked. A stack of n
-		// nodes can need to reach out ~sqrt(n) cells, so size the search to the
-		// graph rather than guessing.
-		const spiral = buildSpiral(Math.ceil(Math.sqrt(count)) + 2);
-		const taken = new Set<string>();
+		const completed = await refineLayout(nodes, edges, {
+			...(force ? {} : { structureTicks: 0 }),
+			shouldStop: () => token !== this.renderToken || !this.cy,
+		});
+		if (!completed || token !== this.renderToken || !this.cy) return false;
 
-		for (const p of positions) {
-			const cx = Math.round(p.x / NODE_SPACING);
-			const cy = Math.round(p.y / NODE_SPACING);
-			if (!taken.has(`${cx},${cy}`)) {
-				taken.add(`${cx},${cy}`);
-				continue;
-			}
-			for (const [dx, dy] of spiral) {
-				const key = `${cx + dx},${cy + dy}`;
-				if (taken.has(key)) continue;
-				taken.add(key);
-				p.x = (cx + dx) * NODE_SPACING;
-				p.y = (cy + dy) * NODE_SPACING;
-				break;
-			}
-		}
-
+		const positions = new Map(nodes.map(n => [n.id, n]));
 		this.cy.batch(() => {
 			// Block body: cytoscape's forEach treats a returned `false` as "stop"
-			nodes.forEach((node, i) => {
-				node.position(positions[i]);
+			this.cy?.nodes().forEach(node => {
+				const p = positions.get(node.id());
+				if (p) node.position({ x: p.x, y: p.y });
 			});
+		});
+		return true;
+	}
+
+	/**
+	 * Swap edges between the bold overview weight and the light reading
+	 * weight, following the zoom level.
+	 *
+	 * A mesh of thousands of edges has to be bold to register at all when it
+	 * is fitted to the pane -- each edge covers a fraction of a pixel there.
+	 * That same weight buries nodes and labels once the user zooms in, so it
+	 * is dropped past EDGE_OVERVIEW_MAX_ZOOM. Only the transitions restyle, so
+	 * panning and ordinary zooming cost nothing.
+	 */
+	private updateEdgeWeight(): void {
+		if (!this.cy) return;
+		const bold = this.cy.zoom() < EDGE_OVERVIEW_MAX_ZOOM;
+		if (bold === this.edgesBold) return;
+		this.edgesBold = bold;
+		const edges = this.cy.edges();
+		this.cy.batch(() => {
+			if (bold) edges.addClass('overview');
+			else edges.removeClass('overview');
 		});
 	}
 
@@ -678,6 +791,7 @@ export class GraphView extends ItemView {
 
 		// Batched: without this, each of the three class operations triggers its
 		// own style recalculation and redraw across every element in the graph.
+		this.selectedNodeId = node.id();
 		this.cy.batch(() => {
 			if (!this.cy) return;
 			this.cy.elements().removeClass('highlighted faded');
@@ -692,6 +806,8 @@ export class GraphView extends ItemView {
 
 	private resetHighlights(): void {
 		if (!this.cy) return;
+
+		this.selectedNodeId = null;
 
 		// Scoped to what is actually marked. Every background tap used to sweep
 		// the whole graph, even with nothing highlighted.

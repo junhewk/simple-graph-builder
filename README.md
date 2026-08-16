@@ -30,7 +30,7 @@ This design provides **structured entity classification with expressive relation
 - **Multiple LLM Support**: Works with Claude, OpenAI, Gemini, and local servers — Ollama plus anything OpenAI-compatible (llama.cpp, LM Studio, vLLM)
 - **Reasoning Effort Control**: Tune how hard the model thinks, separately for extraction and Smart Search
 - **Korean Language Support**: Bigram Jaccard similarity for robust Korean text matching (handles particles and spacing variations), with all names normalized to Unicode NFC so composed and decomposed Hangul resolve to the same entity
-- **Interactive Graph View**: Visualize your knowledge graph with fCoSE force-directed layout
+- **Interactive Graph View**: Visualize your knowledge graph with a ForceAtlas2 layout, connectivity-scaled nodes, and importance-weighted edges so hubs and clusters are immediately visible
 - **Large Graph Support**: Optimized for thousands of nodes with fast rendering
 - **Note Neighborhood Panel**: See connections for the current note in a sidebar
 - **Manual Entity Merge**: Merge duplicate entities via graph view context menu
@@ -214,6 +214,13 @@ This release adds vault write-back and makes the data file smaller. Nothing is r
 - **The data file shrinks — around 40% on a vault of typical shape.** Note nodes and their `mentions` / `links to` edges are no longer stored: they are rebuilt from your notes and Obsidian's link index every time the plugin loads, so keeping a second copy on disk only cost space. `mentions` is one edge per note-entity pair, usually the largest single population in the file. Your graph looks and behaves exactly as before; the saving is larger the more entities per note you extract.
 - **Frontmatter is no longer analyzed or hashed.** Tags and properties were being sent to the model as if they were prose. Notes are now compared by their body, so editing frontmatter — including the property this plugin writes — no longer costs an analysis. Notes analyzed by earlier versions are still recognized and will not be re-analyzed.
 
+## Upgrading to 0.5.4
+
+- **Connectivity is visible at a glance.** Node diameter now scales logarithmically with the number of visible connections, while edge opacity reflects the importance of both endpoints. Hover and selection preserve those relative sizes.
+- **Settings are searchable on Obsidian 1.13+.** The settings tab now publishes declarative setting definitions while retaining compatibility with older supported Obsidian versions.
+- **Popout windows are supported.** Layout scheduling uses window-scoped animation frames and timers.
+- **Vault enumeration is user-triggered.** Markdown file paths are enumerated only after confirming **Analyze entire vault**, rather than when the settings page opens.
+
 ## Upgrading to 0.5.0
 
 This release fixes a bug that made large graphs dense and slow to load, and repairs the damage automatically on first load. Nothing is re-analyzed and no API calls are made.
@@ -267,7 +274,20 @@ This release moves to each provider's current API. Two things happen automatical
 - **Scroll** to zoom in/out
 - **Drag** to pan around the graph
 
-Node colors are determined by entity type (10 predefined colors). Edges use unified gray styling with relationship verbs shown on hover.
+Node colors are determined by entity type (10 predefined colors). Node diameter scales logarithmically with visible connections, and edge opacity reflects the average importance of its endpoints. Relationship verbs remain available on hover.
+
+#### Layout
+
+Graphs are laid out with fCoSE, then refined so the result is readable at vault scale:
+
+- Above 1000 nodes fCoSE runs in its fast spectral mode and **ForceAtlas2** — the force model Gephi uses — does the actual force work. Running fCoSE's own refinement at that size takes minutes; this takes about three seconds on a 2263-node vault.
+- Every graph then gets a spacing pass that scales the layout out and separates whatever still overlaps. This matters below 1000 nodes too: fCoSE alone packs an 871-node graph tightly enough that only 5% of nodes have space for their label.
+
+How much space that pass aims for depends on how big the graph is. Small graphs get the full width of a label, so nothing collides at the zoom they open at. Large ones get less: the whole layout is fitted to the pane, so spacing every node a label apart makes a 5000-node graph so wide that each node lands on a fraction of a pixel and the view looks empty. Those are read by zooming in, where the tighter spacing is still ample.
+
+Edges follow the same logic. Zoomed out they are drawn bold, because a 1px line covers a fraction of a pixel there and only the mass of them registers; zoom in and they thin out so they sit behind the nodes and labels rather than across them.
+
+The result is a graph of distinct clusters rather than one dense block. If yours still looks crowded, raise **Minimum connections** or turn off **Show note nodes** to thin it out.
 
 ### Search
 Two search modes are available:
@@ -304,6 +324,8 @@ Consider using Ollama for cost-free operation, or batch analyze during off-peak 
 ## Privacy
 
 - Your notes are sent to the configured LLM provider for entity extraction
+- **Analyze entire vault** enumerates markdown file paths only after you explicitly confirm the action, then reads changed notes one at a time through Obsidian's vault API
+- Analyzing the current note and auto-analysis read only the individual note being processed
 - No data is stored externally; all graph data stays in your vault
 - Consider using Ollama for fully local, private processing
 - Embeddings are stored locally in binary format (`embeddings.bin`)
@@ -346,6 +368,13 @@ npm run eval    # live end-to-end check against the real provider APIs
 `npm test` bundles each `tests/*.test.ts` with esbuild, stubbing Obsidian's `requestUrl` so outgoing requests can be captured, then asserts the exact JSON each provider adapter builds. No test framework is involved — esbuild is already a dev dependency, and the plugin ships its whole bundle.
 
 These are deliberately wire-level, because that is where the bugs are: a parameter a model rejects, a tool result dropped from a loop, embeddings written at the wrong vector width. Each suite exits non-zero on failure, and the release workflow runs them before publishing.
+
+`tests/layout.test.ts` is the exception: it scores the graph layout instead of asserting a payload. It generates a vault-shaped graph, lays it out headlessly, and measures how many nodes are individually visible, how many have room for their label, how long edges are relative to typical node spacing, and how well clusters separate — against thresholds and against the layout the previous release shipped. To see the numbers at real-vault scale, bundle it and run it directly:
+
+```bash
+npx esbuild tests/layout.test.ts --bundle --platform=node --outfile=/tmp/layout.cjs
+SGB_LAYOUT_BENCH=1 node /tmp/layout.cjs
+```
 
 `npm run eval` is the opposite end: it bundles `tests/*.eval.ts` against a stub whose `requestUrl` performs real HTTP, then runs the full extraction pipeline against every provider you have a key for in the environment. Providers without a key are skipped, so it is safe to run with just one.
 

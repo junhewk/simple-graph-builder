@@ -10,7 +10,7 @@ import { rebuildNoteLayer } from './graph/merge';
 import { analyzeCurrentNote, removeCurrentNoteFromGraph, clearAllGraphData, autoAnalyzeFile } from './commands/analyze';
 import { openSearchModal } from './commands/search';
 import { openSmartSearch } from './commands/smart-search';
-import { WriteGuard, isEntityNotePath } from './sync';
+import { WriteGuard, isPluginManagedNote } from './sync';
 import { ConfirmModal } from './ui/confirm-modal';
 import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from './sync/batch';
 
@@ -46,7 +46,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			this.app.vault.on('modify', (file) => {
 				if (!(file instanceof TFile) || file.extension !== 'md') return;
 				if (this.writeGuard.isOwnWrite(file.path)) return;
-				if (isEntityNotePath(this.settings, file.path)) return;
+				if (isPluginManagedNote(this, file)) return;
 				this.debouncedAutoAnalyze(file);
 			})
 		);

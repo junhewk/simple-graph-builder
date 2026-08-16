@@ -11,6 +11,44 @@ import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWrite
 import { normalizeFolder } from '../sync/filenames';
 import { ConfirmModal } from './confirm-modal';
 
+interface DeclarativeControl {
+	type: 'toggle' | 'dropdown' | 'text' | 'slider';
+	key: string;
+	defaultValue?: unknown;
+	options?: Record<string, string>;
+	placeholder?: string;
+	min?: number;
+	max?: number;
+	step?: number;
+	displayFormat?: (value: number) => string;
+}
+
+interface DeclarativeSettingDefinition {
+	name: string;
+	desc?: string;
+	aliases?: string[];
+	visible?: () => boolean;
+	control?: DeclarativeControl;
+	render?: (setting: Setting) => void;
+}
+
+interface DeclarativeSettingGroup {
+	type: 'group';
+	heading: string;
+	items: DeclarativeSettingDefinition[];
+	visible?: () => boolean;
+}
+
+type DeclarativeSettingItem = DeclarativeSettingDefinition | DeclarativeSettingGroup;
+
+interface ModelSettingOptions {
+	name: string;
+	desc: string;
+	provider: ApiProvider;
+	get: () => string;
+	set: (value: string) => Promise<void>;
+}
+
 export class SettingsTab extends PluginSettingTab {
 	plugin: SimpleGraphBuilderPlugin;
 	private providerSettingsEls: Partial<Record<ApiProvider, HTMLElement>> = {};
@@ -31,18 +69,15 @@ export class SettingsTab extends PluginSettingTab {
 	 */
 	private addModelSetting(
 		container: HTMLElement,
-		opts: {
-			name: string;
-			desc: string;
-			provider: ApiProvider;
-			get: () => string;
-			set: (value: string) => Promise<void>;
-		}
+		opts: ModelSettingOptions
 	): void {
+		const setting = new Setting(container).setName(opts.name).setDesc(opts.desc);
+		this.configureModelSetting(setting, opts);
+	}
+
+	private configureModelSetting(setting: Setting, opts: ModelSettingOptions): void {
 		const CUSTOM = '__custom__';
 		const options = MODEL_OPTIONS[opts.provider];
-
-		const setting = new Setting(container).setName(opts.name).setDesc(opts.desc);
 		const warningEl = setting.descEl.createDiv({ cls: 'sgb-model-warning' });
 
 		const refreshWarning = () => {
@@ -117,6 +152,106 @@ export class SettingsTab extends PluginSettingTab {
 		refreshWarning();
 	}
 
+	private configureApiKeySetting(setting: Setting, provider: ApiProvider): void {
+		setting.addText(text => {
+			text
+				.setPlaceholder('Enter API key')
+				.setValue(this.plugin.settings.apiKeys?.[provider] ?? '')
+				.onChange(async (value) => {
+					this.plugin.settings.apiKeys = { ...this.plugin.settings.apiKeys, [provider]: value };
+					await this.plugin.saveSettings();
+				});
+			text.inputEl.type = 'password';
+		});
+	}
+
+	private configureEmbeddingModelSetting(setting: Setting): void {
+		const embeddingModels = EMBEDDING_MODEL_OPTIONS[this.plugin.settings.embeddingProvider] || [];
+		const custom = '__custom__';
+		const knownIds = embeddingModels.map(model => model.id);
+		let customInput: TextComponent | undefined;
+
+		setting
+			.addDropdown(dropdown => {
+				for (const model of embeddingModels) dropdown.addOption(model.id, model.name);
+				dropdown.addOption(custom, 'Custom…');
+				const current = this.plugin.settings.embeddingModel;
+				dropdown.setValue(knownIds.includes(current) ? current : custom);
+				dropdown.onChange(async (value) => {
+					if (value === custom) {
+						if (customInput) {
+							customInput.inputEl.disabled = false;
+							customInput.inputEl.focus();
+						}
+						return;
+					}
+					customInput?.setValue('');
+					if (customInput) customInput.inputEl.disabled = true;
+					this.plugin.settings.embeddingModel = value;
+					await this.plugin.saveSettings();
+				});
+			})
+			.addText(text => {
+				customInput = text;
+				const current = this.plugin.settings.embeddingModel;
+				const isCustom = !knownIds.includes(current);
+				text
+					.setPlaceholder('Custom model ID')
+					.setValue(isCustom ? current : '')
+					.onChange(async (value) => {
+						const trimmed = value.trim();
+						if (!trimmed) return;
+						this.plugin.settings.embeddingModel = trimmed;
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.disabled = !isCustom;
+				text.inputEl.addClass('sgb-setting-input-wide');
+			});
+	}
+
+	private refreshSettings(): void {
+		const update = (this as unknown as { update?: () => void }).update;
+		if (typeof update === 'function') update.call(this);
+		else this.display();
+	}
+
+	/** Obsidian 1.13+ reads controls from the plugin's nested settings object. */
+	getControlValue(key: string): unknown {
+		return (this.plugin.settings as unknown as Record<string, unknown>)[key];
+	}
+
+	/** Persist declarative controls without overwriting graph data in data.json. */
+	async setControlValue(key: string, value: unknown): Promise<void> {
+		const settings = this.plugin.settings as unknown as Record<string, unknown>;
+		if (key === 'ollamaHost') value = String(value || 'http://localhost:11434');
+		if (key === 'embeddingHost') value = String(value).trim();
+		settings[key] = value;
+
+		if (key === 'embeddingProvider') {
+			const models = EMBEDDING_MODEL_OPTIONS[value as keyof typeof EMBEDDING_MODEL_OPTIONS];
+			if (models?.length) this.plugin.settings.embeddingModel = models[0].id;
+		} else if (key === 'resolutionThresholdHigh') {
+			const high = Number(value);
+			if (this.plugin.settings.resolutionThresholdLow >= high) {
+				this.plugin.settings.resolutionThresholdLow = high - 0.05;
+			}
+		} else if (key === 'resolutionThresholdLow') {
+			const low = Number(value);
+			if (this.plugin.settings.resolutionThresholdHigh <= low) {
+				this.plugin.settings.resolutionThresholdHigh = low + 0.05;
+			}
+		}
+
+		await this.plugin.saveSettings();
+		if ([
+			'apiProvider', 'localApiStyle', 'useSeparateSmartSearchModel',
+			'smartSearchProvider', 'enableEmbeddings', 'embeddingProvider',
+			'embeddingLocalApiStyle', 'resolutionThresholdHigh', 'resolutionThresholdLow',
+		].includes(key)) {
+			this.refreshSettings();
+		}
+	}
+
 	/** Reasoning-effort picker, shared by extraction and Smart Search. */
 	private addEffortSetting(
 		container: HTMLElement,
@@ -133,6 +268,504 @@ export class SettingsTab extends PluginSettingTab {
 					await opts.set(value as EffortLevel);
 				});
 			});
+	}
+
+	/**
+	 * Searchable settings for Obsidian 1.13+. The imperative display() below is
+	 * retained for older supported Obsidian versions.
+	 */
+	getSettingDefinitions(): DeclarativeSettingItem[] {
+		const providerLabels: Record<ApiProvider, string> = {
+			claude: 'Claude',
+			openai: 'OpenAI',
+			gemini: 'Gemini',
+			ollama: 'Ollama',
+		};
+		const extractionModelKeys = {
+			claude: 'claudeModel',
+			openai: 'openaiModel',
+			gemini: 'geminiModel',
+			ollama: 'ollamaModel',
+		} as const;
+		const smartSearchModelKeys = {
+			claude: 'smartSearchClaudeModel',
+			openai: 'smartSearchOpenaiModel',
+			gemini: 'smartSearchGeminiModel',
+			ollama: 'smartSearchOllamaModel',
+		} as const;
+		const providerOptions = {
+			claude: 'Claude',
+			openai: 'OpenAI',
+			gemini: 'Gemini',
+			ollama: 'Ollama (local)',
+		};
+		const effortOptions = Object.fromEntries(
+			EFFORT_LEVELS.map(level => [level, EFFORT_LABELS[level]])
+		);
+
+		const extractionModels = (Object.keys(providerLabels) as ApiProvider[]).map(provider => {
+			const key = extractionModelKeys[provider];
+			return {
+				name: `${providerLabels[provider]} model`,
+				desc: `${providerLabels[provider]} model to use for entity extraction.`,
+				aliases: ['Model', 'Extraction model'],
+				visible: () => this.plugin.settings.apiProvider === provider,
+				render: (setting: Setting) => this.configureModelSetting(setting, {
+					name: `${providerLabels[provider]} model`,
+					desc: 'Model to use for entity extraction.',
+					provider,
+					get: () => this.plugin.settings[key],
+					set: async model => {
+						this.plugin.settings[key] = model;
+						await this.plugin.saveSettings();
+					},
+				}),
+			};
+		});
+
+		const smartSearchModels = (Object.keys(providerLabels) as ApiProvider[]).map(provider => {
+			const key = smartSearchModelKeys[provider];
+			return {
+				name: `${providerLabels[provider]} model for smart search`,
+				desc: 'Model used to answer smart search queries.',
+				aliases: ['Smart search model'],
+				visible: () => this.plugin.settings.useSeparateSmartSearchModel &&
+					this.plugin.settings.smartSearchProvider === provider,
+				render: (setting: Setting) => this.configureModelSetting(setting, {
+					name: `${providerLabels[provider]} model for smart search`,
+					desc: 'Model used to answer smart search queries.',
+					provider,
+					get: () => this.plugin.settings[key],
+					set: async model => {
+						this.plugin.settings[key] = model;
+						await this.plugin.saveSettings();
+					},
+				}),
+			};
+		});
+
+		return [
+			{
+				type: 'group',
+				heading: 'Provider',
+				items: [
+					{
+						name: 'API provider',
+						desc: 'Select the provider for entity extraction.',
+						control: { type: 'dropdown', key: 'apiProvider', options: providerOptions },
+					},
+					...(['claude', 'openai', 'gemini'] as ApiProvider[]).map(provider => ({
+						name: `${providerLabels[provider]} API key`,
+						desc: `API key used for ${providerLabels[provider]} requests.`,
+						aliases: ['API key'],
+						visible: () => this.plugin.settings.apiProvider === provider,
+						render: (setting: Setting) => this.configureApiKeySetting(setting, provider),
+					})),
+					{
+						name: 'Server API',
+						desc: 'Which API the local server speaks.',
+						visible: () => this.plugin.settings.apiProvider === 'ollama',
+						control: {
+							type: 'dropdown', key: 'localApiStyle',
+							options: {
+								ollama: 'Ollama (/api/chat)',
+								openai: 'OpenAI-compatible (/v1/chat/completions)',
+							},
+						},
+					},
+					{
+						name: 'Host',
+						desc: 'Base address of the local model server.',
+						visible: () => this.plugin.settings.apiProvider === 'ollama',
+						control: { type: 'text', key: 'ollamaHost', placeholder: 'http://localhost:11434' },
+					},
+					...extractionModels,
+					{
+						name: 'Local smart search compatibility',
+						desc: 'Smart search requires tool calling. Qwen3 and gpt-oss are recommended; Gemma3 and deepseek-r1 have limited support.',
+						visible: () => this.plugin.settings.apiProvider === 'ollama',
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Analysis',
+				items: [
+					{
+						name: 'Extraction mode',
+						desc: 'Controls how thorough entity extraction is.',
+						control: {
+							type: 'dropdown', key: 'extractionMode',
+							options: {
+								standard: 'Standard (max 15 entities per chunk)',
+								thorough: 'Thorough (no limits per chunk)',
+							},
+						},
+					},
+					{
+						name: 'Reasoning effort',
+						desc: 'How much the model reasons before extracting.',
+						control: { type: 'dropdown', key: 'extractionEffort', options: effortOptions },
+					},
+					{
+						name: 'Auto-analyze on save',
+						desc: 'Automatically analyze notes when you save them.',
+						control: { type: 'toggle', key: 'autoAnalyzeOnSave' },
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Smart search model',
+				items: [
+					{
+						name: 'Use separate model for smart search',
+						desc: 'Configure a different provider and model for smart search queries.',
+						control: { type: 'toggle', key: 'useSeparateSmartSearchModel' },
+					},
+					{
+						name: 'Smart search provider',
+						desc: 'Select the provider for smart search queries.',
+						visible: () => this.plugin.settings.useSeparateSmartSearchModel,
+						control: { type: 'dropdown', key: 'smartSearchProvider', options: providerOptions },
+					},
+					...(['claude', 'openai', 'gemini'] as ApiProvider[]).map(provider => ({
+						name: `${providerLabels[provider]} API key for smart search`,
+						desc: 'Smart search uses a different provider, so it needs that provider’s key.',
+						aliases: ['Smart search API key'],
+						visible: () => this.plugin.settings.useSeparateSmartSearchModel &&
+							this.plugin.settings.smartSearchProvider === provider &&
+							this.plugin.settings.apiProvider !== provider,
+						render: (setting: Setting) => {
+							this.configureApiKeySetting(setting, provider);
+							if (!this.plugin.settings.apiKeys?.[provider]) {
+								setting.descEl.createDiv({ cls: 'sgb-model-warning sgb-model-warning-error' })
+									.appendText(`No ${providerLabels[provider]} key is configured.`);
+							}
+						},
+					})),
+					...smartSearchModels,
+					{
+						name: 'Smart search reasoning effort',
+						desc: 'How much the model reasons while exploring the graph.',
+						visible: () => this.plugin.settings.useSeparateSmartSearchModel,
+						control: { type: 'dropdown', key: 'smartSearchEffort', options: effortOptions },
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'View',
+				items: [
+					{
+						name: 'Open graph in main window',
+						desc: 'Open the graph in a main tab instead of the right sidebar.',
+						control: { type: 'toggle', key: 'openGraphInMain' },
+					},
+					{
+						name: 'Show note nodes',
+						desc: 'Include notes in the graph alongside the entities they mention.',
+						control: { type: 'toggle', key: 'graphShowNotes' },
+					},
+					{
+						name: 'Minimum connections',
+						desc: 'Hide nodes with fewer than this many visible connections.',
+						control: {
+							type: 'slider', key: 'graphMinDegree', min: 0, max: 10, step: 1,
+							displayFormat: value => String(value),
+						},
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Vault write-back',
+				items: [
+					{
+						name: 'Create entity notes',
+						desc: 'Write one note per entity, with its aliases, type and relationships, so the graph ' +
+							'also appears in Obsidian’s own graph view, backlinks and properties. The plugin edits ' +
+							'only those notes and the link property below; your prose is never touched.',
+						aliases: ['Write-back', 'Entity notes', 'Obsidian links'],
+						control: { type: 'toggle', key: 'enableEntityNotes' },
+					},
+					{
+						name: 'Entity folder',
+						desc: 'Where entity notes live. Notes in this folder are never analyzed.',
+						visible: () => this.plugin.settings.enableEntityNotes,
+						render: setting => setting.addText(text => text
+							.setPlaceholder('Entities')
+							.setValue(this.plugin.settings.entityFolder)
+							.onChange(async value => {
+								// normalizeFolder, not trim: "/" survives a trim but names
+								// the vault root, which would scatter entity notes among the
+								// user's own notes and leave them analyzable.
+								this.plugin.settings.entityFolder = normalizeFolder(value) || 'Entities';
+								await this.plugin.saveSettings();
+							})),
+					},
+					{
+						name: 'List relationships in entity notes',
+						desc: 'Link each entity to the ones it connects to, so entity-to-entity edges appear in the built-in graph.',
+						visible: () => this.plugin.settings.enableEntityNotes,
+						control: { type: 'toggle', key: 'writeRelationshipsSection' },
+					},
+					{
+						name: 'Link notes to their entities',
+						desc: 'Add a frontmatter property to each analyzed note listing the entities found in it.',
+						visible: () => this.plugin.settings.enableEntityNotes,
+						control: { type: 'toggle', key: 'enableRelatedWriteback' },
+					},
+					{
+						name: 'Property name',
+						desc: 'The frontmatter property the plugin owns. It is replaced on every analysis.',
+						visible: () => this.plugin.settings.enableEntityNotes && this.plugin.settings.enableRelatedWriteback,
+						render: setting => setting.addText(text => text
+							.setPlaceholder('related')
+							.setValue(this.plugin.settings.relatedPropertyName)
+							.onChange(async value => {
+								this.plugin.settings.relatedPropertyName = value.trim().replace(/:/g, '') || 'related';
+								await this.plugin.saveSettings();
+							})),
+					},
+					{
+						name: 'Write links for the whole vault',
+						desc: 'Apply the current graph to every analyzed note at once. Makes no API calls.',
+						aliases: ['Write links', 'Vault write-back'],
+						visible: () => this.plugin.settings.enableEntityNotes,
+						render: setting => setting.addButton(button => {
+							const updateButton = () => {
+								if (isWritebackRunning()) button.setButtonText('Cancel').setWarning();
+								else button.setButtonText('Write links').removeCta().setClass('mod-cta');
+							};
+							updateButton();
+							button.onClick(() => {
+								if (isWritebackRunning()) {
+									cancelWriteback();
+									new Notice('Cancelling...');
+									return;
+								}
+								const entities = this.plugin.graphCache.getAllNodes()
+									.filter(node => node.entityType !== 'NOTE').length;
+								const message = `Write links for ${entities} entities into your vault?\n\n` +
+									`This creates or updates notes in "${this.plugin.settings.entityFolder}"` +
+									(this.plugin.settings.enableRelatedWriteback
+										? `, and adds a "${this.plugin.settings.relatedPropertyName}" property to each analyzed note.`
+										: '.');
+								void new ConfirmModal(this.app, message, async () => {
+									this.refreshSettings();
+									await writeLinksForVault(this.plugin);
+									this.refreshSettings();
+								}).open();
+							});
+						}),
+					},
+					{
+						name: 'Remove written links',
+						desc: 'Take the plugin’s entity links back out of every note. Links you wrote yourself are kept, and entity notes are left in place.',
+						visible: () => this.plugin.settings.enableEntityNotes,
+						render: setting => setting.addButton(button => button
+							.setButtonText('Remove links')
+							.setWarning()
+							.onClick(() => {
+								const message = `Remove the plugin’s entity links from the ` +
+									`"${this.plugin.settings.relatedPropertyName}" property of every note?\n\n` +
+									'Links you wrote yourself are kept, and your prose is not touched.';
+								void new ConfirmModal(this.app, message, async () => {
+									await removeWrittenLinks(this.plugin);
+								}).open();
+							})),
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Entity resolution (advanced)',
+				items: [
+					{
+						name: 'Enable embedding-based resolution',
+						desc: 'Use embeddings to find and merge similar entities.',
+						control: { type: 'toggle', key: 'enableEmbeddings' },
+					},
+					{
+						name: 'Embedding provider',
+						desc: 'Select the provider for embeddings.',
+						visible: () => this.plugin.settings.enableEmbeddings,
+						control: {
+							type: 'dropdown', key: 'embeddingProvider',
+							options: { openai: 'OpenAI', gemini: 'Gemini', ollama: 'Ollama (local)' },
+						},
+					},
+					{
+						name: 'Embedding API key',
+						desc: 'Leave blank to use the selected provider’s main API key.',
+						visible: () => this.plugin.settings.enableEmbeddings &&
+							this.plugin.settings.embeddingProvider !== 'ollama',
+						render: (setting: Setting) => {
+							setting.addText(text => {
+								text.setPlaceholder('Leave blank to use main key')
+									.setValue(this.plugin.settings.embeddingApiKey)
+									.onChange(async value => {
+										this.plugin.settings.embeddingApiKey = value;
+										await this.plugin.saveSettings();
+									});
+								text.inputEl.type = 'password';
+							});
+						},
+					},
+					{
+						name: 'Embedding server API',
+						desc: 'Which API the embedding server speaks.',
+						visible: () => this.plugin.settings.enableEmbeddings &&
+							this.plugin.settings.embeddingProvider === 'ollama',
+						control: {
+							type: 'dropdown', key: 'embeddingLocalApiStyle',
+							options: {
+								ollama: 'Ollama (/api/embed)',
+								openai: 'OpenAI-compatible (/v1/embeddings)',
+							},
+						},
+					},
+					{
+						name: 'Embedding server host',
+						desc: 'Leave blank to reuse the chat provider’s host.',
+						visible: () => this.plugin.settings.enableEmbeddings &&
+							this.plugin.settings.embeddingProvider === 'ollama',
+						control: { type: 'text', key: 'embeddingHost', placeholder: 'http://localhost:11434' },
+					},
+					{
+						name: 'Embedding model',
+						desc: 'Changing model requires recomputing stored embeddings.',
+						visible: () => this.plugin.settings.enableEmbeddings,
+						render: setting => this.configureEmbeddingModelSetting(setting),
+					},
+					{
+						name: 'Auto-merge threshold',
+						desc: 'Similarity above this threshold automatically merges entities.',
+						visible: () => this.plugin.settings.enableEmbeddings,
+						control: {
+							type: 'slider', key: 'resolutionThresholdHigh', min: 0.85, max: 0.99, step: 0.01,
+							displayFormat: value => value.toFixed(2),
+						},
+					},
+					{
+						name: 'Verification threshold',
+						desc: 'Similarity above this but below auto-merge uses model verification.',
+						visible: () => this.plugin.settings.enableEmbeddings,
+						control: {
+							type: 'slider', key: 'resolutionThresholdLow', min: 0.70, max: 0.90, step: 0.01,
+							displayFormat: value => value.toFixed(2),
+						},
+					},
+					{
+						name: 'Enable verification',
+						desc: 'Use the model to verify ambiguous entity matches.',
+						visible: () => this.plugin.settings.enableEmbeddings,
+						control: { type: 'toggle', key: 'enableLLMVerification' },
+					},
+					{
+						name: 'Compute embeddings for existing nodes',
+						desc: 'Generate missing embeddings, or recompute all when none are missing.',
+						visible: () => this.plugin.settings.enableEmbeddings,
+						render: setting => {
+							const embeddings = this.plugin.graphCache.getEmbeddingsCount();
+							const nodes = this.plugin.graphCache.getStats().nodes;
+							const missing = nodes - embeddings;
+							setting.setDesc(`${embeddings}/${nodes} nodes have embeddings.${missing > 0 ? ` ${missing} missing.` : ''}`)
+								.addButton(button => button
+									.setButtonText(missing > 0 ? 'Compute missing' : 'Recompute all')
+									.onClick(() => this.computeEmbeddings(missing > 0)));
+						},
+					},
+					{
+						name: 'Clear resolution cache',
+						desc: 'Clear cached entity-resolution decisions.',
+						visible: () => this.plugin.settings.enableEmbeddings,
+						render: setting => setting
+							.setDesc(`${this.plugin.graphCache.getResolutionCacheSize()} cached resolutions.`)
+							.addButton(button => button.setButtonText('Clear cache').setWarning().onClick(async () => {
+								this.plugin.graphCache.clearResolutionCache();
+								await this.plugin.graphCache.flush();
+								new Notice('Resolution cache cleared');
+								this.refreshSettings();
+							})),
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Vault analysis',
+				items: [
+					{
+						name: 'Analyze entire vault',
+						desc: 'After confirmation, enumerate and analyze every markdown note. Existing unchanged notes are skipped.',
+						aliases: ['Batch analysis', 'Vault enumeration'],
+						render: setting => setting.addButton(button => {
+							const updateButton = () => {
+								if (isAnalyzingVault()) button.setButtonText('Cancel').setWarning();
+								else button.setButtonText('Start analysis').removeCta().setClass('mod-cta');
+							};
+							updateButton();
+							button.onClick(() => {
+								if (isAnalyzingVault()) {
+									cancelVaultAnalysis();
+									new Notice('Cancelling vault analysis...');
+									return;
+								}
+								const message = 'Analyze every markdown note in your vault?\n\n' +
+									'The plugin will enumerate markdown file paths after confirmation and make up to one API call per changed note.\n\n' +
+									'You can cancel at any time.';
+								void new ConfirmModal(this.app, message, async () => {
+									this.refreshSettings();
+									await analyzeEntireVault(this.plugin);
+									this.refreshSettings();
+								}).open();
+							});
+						}),
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Data management',
+				items: [
+					{
+						name: 'Graph statistics',
+						desc: 'Current node and connection totals.',
+						render: setting => this.renderGraphStats(setting.descEl),
+					},
+					{
+						name: 'Clear graph data',
+						desc: 'Remove all nodes, edges, and analysis history. This cannot be undone.',
+						render: setting => setting.addButton(button => button
+							.setButtonText('Clear all data')
+							.setWarning()
+							.onClick(() => {
+								const message = 'Clear all graph data and analysis history? This cannot be undone.';
+								void new ConfirmModal(this.app, message, async () => {
+									this.plugin.graphCache.clear();
+									await this.plugin.graphCache.flush();
+									await clearHashes(this.plugin);
+									new Notice('Graph data cleared');
+									this.refreshSettings();
+								}).open();
+							})),
+					},
+				],
+			},
+			{
+				type: 'group',
+				heading: 'Support',
+				items: [{
+					name: 'Buy me a coffee',
+					desc: 'Support development of Simple Graph Builder.',
+					render: setting => setting.addButton(button => button
+						.setButtonText('Buy me a coffee')
+						.setCta()
+						.onClick(() => window.open('https://buymeacoffee.com/junhewkkim', '_blank'))),
+				}],
+			},
+		];
 	}
 
 	display(): void {
@@ -252,7 +885,7 @@ export class SettingsTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.localApiStyle = value as LocalApiStyle;
 						await this.plugin.saveSettings();
-						this.display();
+						this.refreshSettings();
 					});
 			});
 
@@ -354,7 +987,7 @@ export class SettingsTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.useSeparateSmartSearchModel = value;
 						await this.plugin.saveSettings();
-						this.display(); // Refresh to show/hide model settings
+						this.refreshSettings(); // Refresh to show/hide model settings
 					});
 			});
 
@@ -374,7 +1007,7 @@ export class SettingsTab extends PluginSettingTab {
 						.onChange(async (value) => {
 							this.plugin.settings.smartSearchProvider = value as ApiProvider;
 							await this.plugin.saveSettings();
-							this.display(); // Refresh to update model options
+							this.refreshSettings(); // Refresh to update model options
 						});
 				});
 
@@ -409,7 +1042,7 @@ export class SettingsTab extends PluginSettingTab {
 									[smartSearchProvider]: value,
 								};
 								await this.plugin.saveSettings();
-								this.display();
+								this.refreshSettings();
 							});
 						text.inputEl.type = 'password';
 					});
@@ -520,7 +1153,7 @@ export class SettingsTab extends PluginSettingTab {
 					.onChange(async (value) => {
 						this.plugin.settings.enableEmbeddings = value;
 						await this.plugin.saveSettings();
-						this.display(); // Refresh to show/hide related settings
+						this.refreshSettings(); // Refresh to show/hide related settings
 					});
 			});
 
@@ -544,7 +1177,7 @@ export class SettingsTab extends PluginSettingTab {
 								this.plugin.settings.embeddingModel = models[0].id;
 							}
 							await this.plugin.saveSettings();
-							this.display(); // Refresh to update model options
+							this.refreshSettings(); // Refresh to update model options
 						});
 				});
 
@@ -561,7 +1194,7 @@ export class SettingsTab extends PluginSettingTab {
 							.onChange(async (value) => {
 								this.plugin.settings.embeddingApiKey = value;
 								await this.plugin.saveSettings();
-								this.display();
+								this.refreshSettings();
 							});
 						text.inputEl.type = 'password';
 					});
@@ -593,7 +1226,7 @@ export class SettingsTab extends PluginSettingTab {
 							.onChange(async (value) => {
 								this.plugin.settings.embeddingLocalApiStyle = value as LocalApiStyle;
 								await this.plugin.saveSettings();
-								this.display();
+								this.refreshSettings();
 							});
 					});
 
@@ -746,7 +1379,7 @@ export class SettingsTab extends PluginSettingTab {
 							this.plugin.graphCache.clearResolutionCache();
 							await this.plugin.graphCache.flush();
 							new Notice('Resolution cache cleared');
-							this.display();
+							this.refreshSettings();
 						});
 				});
 		}
@@ -767,7 +1400,7 @@ export class SettingsTab extends PluginSettingTab {
 
 		new Setting(vaultButtonContainer)
 			.setName('Analyze entire vault')
-			.setDesc(`${this.plugin.app.vault.getMarkdownFiles().length} markdown files in vault`)
+			.setDesc('Enumerates markdown file paths only after you confirm the analysis.')
 			.addButton(button => {
 				const updateButtonState = () => {
 					if (isAnalyzingVault()) {
@@ -786,10 +1419,8 @@ export class SettingsTab extends PluginSettingTab {
 						// Button will update after analysis stops
 						window.setTimeout(updateButtonState, 1000);
 					} else {
-						const fileCount = this.plugin.app.vault.getMarkdownFiles().length;
-						const message = `Analyze ${fileCount} notes in your vault?\n\n` +
-							`Estimated time: ${Math.ceil(fileCount * 10 / 60)} - ${Math.ceil(fileCount * 15 / 60)} minutes\n` +
-							`Estimated API calls: up to ${fileCount}\n\n` +
+						const message = 'Analyze every markdown note in your vault?\n\n' +
+							'The plugin will enumerate markdown file paths after confirmation and make up to one API call per changed note.\n\n' +
 							`You can cancel at any time.`;
 
 						void new ConfirmModal(this.app, message, async () => {
@@ -1080,7 +1711,7 @@ export class SettingsTab extends PluginSettingTab {
 
 			progressNotice.hide();
 			new Notice(`Computed embeddings for ${processed} nodes`);
-			this.display(); // Refresh to update counts
+			this.refreshSettings(); // Refresh to update counts
 
 		} catch (error) {
 			progressNotice.hide();
