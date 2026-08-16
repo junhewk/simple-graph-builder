@@ -9,10 +9,22 @@
  */
 import './graph-harness';
 import { fakeSyncPlugin } from './vault-stub';
+
+// The graph harness stubs window.setTimeout to a no-op so GraphCache's debounced
+// save never fires. Batch write-back yields through the same call to let Obsidian
+// repaint, and a yield that never resumes stops this suite mid-run -- silently,
+// because node exits 0 when the event loop drains. Restore real timers here.
+{
+	const w = (globalThis as unknown as { window: Record<string, unknown> }).window;
+	w.setTimeout = (fn: () => void, ms?: number) => setTimeout(fn, ms ?? 0);
+	w.clearTimeout = (id: NodeJS.Timeout) => clearTimeout(id);
+}
 import { upsertEntityNotes, deleteEntityNote, isEntityNotePath, isManagedEntityNote, ID_KEY } from '../src/sync/entity-notes';
 import { syncNoteWriteback } from '../src/sync';
 import { writeRelatedProperty, clearRelatedProperty, computeRelatedLinks } from '../src/sync/related';
 import { WriteGuard } from '../src/sync/write-guard';
+import { writeLinksForVault } from '../src/sync/batch';
+import { loadHashes, computeHash, computeNoteHashes, hasNoteChangedByHashes } from '../src/graph/hashes';
 import { MANAGED_START, MANAGED_END } from '../src/sync/render';
 import { OntologyNode, OntologyEdge } from '../src/types';
 import { DEFAULT_SETTINGS } from '../src/settings';
@@ -282,6 +294,45 @@ async function main() {
 		check('the path rule goes quiet when the feature is off',
 			!isEntityNotePath(plugin.settings, entityNote.path));
 		check('but the marker still identifies it', isManagedEntityNote(plugin, entityNote));
+	}
+
+	// --- writing links must not invalidate a pre-0.6 vault -----------------
+	{
+		// The upgrade path a real user takes: install 0.6.0 on a vault whose notes
+		// were analyzed by an older version, turn write-back on, press "Write
+		// links". Every note gets a `related:` property -- and every stored hash
+		// still covers the whole file, so unless they are converted first, the
+		// plugin's own write makes the entire vault look edited. The next vault
+		// analysis then re-extracts all of it, at full API cost.
+		const NOTE = 'notes/ai.md';
+		// Frontmatter is what makes the two hash forms differ. Every note the test
+		// vault generates has `tags:`, and so does most of a real vault.
+		const original = '---\ntags: [ai, research]\n---\n\n# AI\n\nHinton works on machine learning.\n';
+		const ctx = fakeSyncPlugin({}, {
+			settings: {},
+			graph: { nodes: [], edges: [], version: 3 },
+			hashes: { hashes: [{ path: NOTE, hash: computeHash(original), analyzedAt: 1 }] },
+		});
+		await ctx.graphCache.ensureLoaded();
+		ctx.graphCache.addNode(ml());
+		ctx.graphCache.addNode(hinton());
+		ctx.vault.seed(NOTE, original);
+
+		const before = await loadHashes(ctx.plugin);
+		check('the note starts out recognized by its legacy hash',
+			!hasNoteChangedByHashes(before, NOTE, computeNoteHashes(original)));
+
+		await writeLinksForVault(ctx.plugin);
+
+		const written = ctx.vault.bodies.get(NOTE) ?? '';
+		check('the property really was written', written.includes('related:'), written.slice(0, 60));
+
+		const after = await loadHashes(ctx.plugin);
+		check('the note is still recognized after write-back',
+			!hasNoteChangedByHashes(after, NOTE, computeNoteHashes(written)),
+			`stored ${after.hashes[0]?.hash}, body ${computeNoteHashes(written).body}`);
+		check('and its stored hash was converted to the body form',
+			after.hashes[0]?.hash === computeNoteHashes(written).body);
 	}
 
 	// --- Korean identity ---------------------------------------------------

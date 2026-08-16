@@ -199,11 +199,19 @@ This is the point of the whole feature.
 
 ### T14. Hashes stayed valid through the writes
 
-- **Do:** open `research/note 001.md` (it now has a `related:` property) and run
-  *Analyze current note*.
-- **Expect:** **"Note has not changed since last analysis"** again.
-- **Fail if:** it analyzes. The plugin's own write is being read as a user edit —
-  the exact loop this release is built to avoid.
+Check **two** notes. T5 analyzed `note 001`, which converts its hash on the spot;
+every other note in the vault still carries the pre-0.6 whole-file hash when
+write-back adds a property to it. Only the second note tests the path a real
+upgrade takes, and testing only the first is how this was missed once already.
+
+- **Do:** open `research/note 001.md` (visited in T5) and run *Analyze current
+  note*. Then do the same with **`research/note 050.md`**, which no earlier step
+  has touched.
+- **Expect:** **"Note has not changed since last analysis"** for *both*, with no
+  API call and no prompt for a key.
+- **Fail if:** either one starts analyzing, or asks for an API key. Asking for a
+  key means it got past the unchanged check and was about to spend money — on a
+  real vault that is one paid call per note, for notes whose prose never changed.
 
 ### T15. User text in an entity note survives regeneration
 
@@ -299,7 +307,7 @@ real note counts, a real `data.json`. Record the before/after size.
 | T11 | Pre-existing file untouched | ☐ | |
 | T12 | Hand-written `related:` survives | ☐ | |
 | T13 | Second run changes nothing | ☐ | |
-| T14 | Hashes valid after writes | ☐ | |
+| T14 | Hashes valid after writes (both notes) | ☐ | 001 ___ / 050 ___ |
 | T15 | User text in entity note survives | ☐ | |
 | T15b | Damaged marker does not eat text | ☐ | |
 | T16 | Removal takes only our links | ☐ | |

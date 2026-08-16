@@ -12,6 +12,7 @@
 import { Notice, TFile } from 'obsidian';
 import type SimpleGraphBuilderPlugin from '../main';
 import { isNoteNode } from '../types';
+import { loadHashes, saveHashes, computeNoteHashes, upgradeLegacyHash } from '../graph/hashes';
 import { upsertEntityNotes, isEntityNotePath } from './entity-notes';
 import { clearRelatedProperty, writeRelatedProperty } from './related';
 
@@ -104,11 +105,23 @@ export async function writeLinksForVault(
 		entityNotesUpdated = result.updated;
 
 		if (plugin.settings.enableRelatedWriteback) {
+			// Notes analyzed before 0.6 are recorded by a hash of the whole file.
+			// Adding a property invalidates that hash, and once it is invalid there
+			// is nothing left to recognize the note by -- the next vault analysis
+			// would re-extract everything, at full API cost. Converting each record
+			// to the body form has to happen here, before the write, because
+			// afterwards the stored hash no longer matches anything on disk.
+			const hashes = await loadHashes(plugin);
+			let hashesChanged = false;
+
 			for (let i = 0; i < files.length; i++) {
 				if (state.isCancelled) break;
 
 				progress.setMessage(`Writing links: ${i + 1}/${files.length}\n${files[i].basename}`);
 				try {
+					const content = await plugin.app.vault.cachedRead(files[i]);
+					if (upgradeLegacyHash(hashes, files[i].path, computeNoteHashes(content))) hashesChanged = true;
+
 					if (await writeRelatedProperty(plugin, files[i])) notesUpdated++;
 				} catch (error) {
 					console.error(`Simple Graph Builder: could not write links into ${files[i].path}`, error);
@@ -116,6 +129,8 @@ export async function writeLinksForVault(
 
 				if (i % YIELD_EVERY === 0) await yieldToUi();
 			}
+
+			if (hashesChanged) await saveHashes(plugin, hashes);
 		}
 
 		await plugin.graphCache.flush();

@@ -147,15 +147,19 @@ export class FakeVault {
 }
 
 /** A plugin surface with just what the sync layer touches. */
-export function fakeSyncPlugin(settings: Partial<Settings> = {}) {
+export function fakeSyncPlugin(settings: Partial<Settings> = {}, initialData?: Record<string, unknown>) {
 	const vault = new FakeVault();
 	const saved: unknown[] = [];
+	// Round-tripped through JSON so callers see the same copying the real
+	// loadData/saveData pair does -- suites that assert on stored hashes depend
+	// on not sharing a reference with the plugin.
+	let stored = initialData ? JSON.parse(JSON.stringify(initialData)) : null;
 
 	const plugin = {
 		settings: { ...DEFAULT_SETTINGS, enableEntityNotes: true, enableRelatedWriteback: true, ...settings },
 		writeGuard: new WriteGuard(),
-		loadData: async () => null,
-		saveData: async (data: unknown) => { saved.push(data); },
+		loadData: async () => (stored ? JSON.parse(JSON.stringify(stored)) : null),
+		saveData: async (data: unknown) => { stored = JSON.parse(JSON.stringify(data)); saved.push(data); },
 		app: {
 			vault,
 			fileManager: {
@@ -185,5 +189,5 @@ export function fakeSyncPlugin(settings: Partial<Settings> = {}) {
 	const graphCache = new GraphCache(plugin as never);
 	(plugin as unknown as { graphCache: GraphCache }).graphCache = graphCache;
 
-	return { plugin: plugin as unknown as SimpleGraphBuilderPlugin, vault, graphCache, saved };
+	return { plugin: plugin as unknown as SimpleGraphBuilderPlugin, vault, graphCache, saved, latest: () => stored };
 }

@@ -35,4 +35,7 @@ export class WorkspaceLeaf {}
 export const notices: string[] = [];
 export class Notice {
   constructor(message: string) { notices.push(message); }
+  /** Batch jobs hold a notice open and rewrite it as they go. */
+  setMessage(message: string) { notices.push(message); return this; }
+  hide() { /* nothing to tear down here */ }
 }
