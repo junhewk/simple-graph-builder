@@ -224,6 +224,10 @@ export interface UpsertOptions {
  *
  * Writes are skipped whenever the file already says the right thing, which is
  * what keeps re-analysis from touching the vault at all.
+ *
+ * The returned counts are disjoint: `created` is files that did not exist,
+ * `updated` is existing files whose contents actually changed. Their sum is the
+ * number of files touched.
  */
 export async function upsertEntityNotes(
 	plugin: SimpleGraphBuilderPlugin,
@@ -256,12 +260,14 @@ export async function upsertEntityNotes(
 		if (!path) continue;
 
 		let file = fileAt(plugin, path);
+		let isNew = false;
 		if (!file) {
 			try {
 				file = await plugin.writeGuard.guard(path, () =>
 					plugin.app.vault.create(path, `${MANAGED_START}\n${MANAGED_END}\n`)
 				);
 				created++;
+				isNew = true;
 			} catch (error) {
 				console.error(`Simple Graph Builder: could not create ${path}`, error);
 				continue;
@@ -269,7 +275,10 @@ export async function upsertEntityNotes(
 		}
 
 		const touched = await writeEntityNote(plugin, file, node);
-		if (touched) updated++;
+		// The two counts partition the files this touched. A note that was just
+		// created is always written straight after, so counting it in both would
+		// report twice the work actually done.
+		if (touched && !isNew) updated++;
 	}
 
 	return { created, updated };

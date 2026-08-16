@@ -107,6 +107,33 @@ async function main() {
 			`${vault.stats.bodyWrites - before.bodyWrites} body, ${vault.stats.frontmatterWrites - before.frontmatterWrites} frontmatter`);
 	}
 
+	// --- the counts have to match the files ---------------------------------
+	{
+		// A new note is created and then written, and counting it under both
+		// headings reported twice the work actually done -- 1,042 entity notes for
+		// a 521-entity vault, which reads as duplication that never happened.
+		const { plugin, vault, graphCache } = await seeded();
+		const entities = graphCache.getAllNodes();
+
+		const first = await upsertEntityNotes(plugin, entities);
+		check('created counts the new files', first.created === entities.length, JSON.stringify(first));
+		check('updated does not also count them', first.updated === 0, JSON.stringify(first));
+		check('the total equals the files on disk',
+			first.created + first.updated === vault.stats.creates, `${first.created + first.updated} vs ${vault.stats.creates}`);
+
+		const second = await upsertEntityNotes(plugin, entities);
+		check('an unchanged second run reports nothing',
+			second.created === 0 && second.updated === 0, JSON.stringify(second));
+
+		// A real change is what `updated` is for.
+		const node = graphCache.getNodeById('concept:machine learning')!;
+		node.properties.aliases = ['ML', '머신러닝', '기계학습'];
+		graphCache.updateNode(node);
+		const third = await upsertEntityNotes(plugin, entities);
+		check('a changed entity counts as updated, not created',
+			third.created === 0 && third.updated === 1, JSON.stringify(third));
+	}
+
 	// --- never take over a file the plugin does not own --------------------
 	{
 		const { plugin, vault, graphCache } = await seeded();

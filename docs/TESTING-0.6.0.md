@@ -20,6 +20,10 @@ and writing links makes no model calls. Only Part 3 spends money.
 2. **If a step fails, stop.** Do not continue writing to the vault. Record what
    happened (see *Reporting* at the end) — later steps write more files and make
    the failure harder to read.
+   *"Fails" means the observed result differs from **Expect**.* The *Fail if*
+   line lists the ways it is known to go wrong; it is not a narrower definition
+   of failure. If Expect and Fail if seem to disagree, Expect wins — stop, and
+   say which one you went by.
 3. **Do not push a git tag until this document is finished.** Every tag triggers
    the release workflow, and the release is what Community Plugins offers to all
    existing users. Pushing a branch is safe; pushing a tag ships.
@@ -128,11 +132,19 @@ make every note look changed.
 ### T7. Write links for the whole vault
 
 - **Do:** press **Write links**, confirm.
-- **Expect:** a progress notice that moves, then a summary like
-  `Entity notes: 521, notes updated: 120`. On iOS this takes a while — it is
-  writing ~520 files. The UI must stay responsive and **Cancel** must work if you
-  press it (if you cancel, press *Write links* again to finish before continuing).
-- **Fail if:** Obsidian freezes with no repaint, or Cancel does nothing.
+- **Expect:** a progress notice that moves, then exactly:
+  ```
+  Links written.
+  Entity notes: 521 created, 0 updated
+  Notes updated: 120
+  ```
+  On iOS this takes a while — it is writing 521 files. The UI must stay
+  responsive and **Cancel** must work if you press it (if you cancel, press
+  *Write links* again to finish before continuing).
+- **Fail if:** the counts differ from those three numbers; or Obsidian freezes
+  with no repaint; or Cancel does nothing. The two count lines are disjoint —
+  a file is either created or updated, never both — so `created + updated`
+  should equal the number of files in `Entities/`.
 
 ### T8. Entity notes look right
 
@@ -178,8 +190,9 @@ This is the point of the whole feature.
 ### T13. Running again changes nothing
 
 - **Do:** press **Write links** again.
-- **Expect:** it finishes quickly and reports **`Entity notes: 0, notes updated: 0`**
-  — every writer compares against the current state and skips.
+- **Expect:** it finishes quickly and reports **`Entity notes: 0 created, 0 updated`**
+  and **`Notes updated: 0`** — every writer compares against the current state
+  and skips.
 - **Fail if:** the counts match the first run. That means files are rewritten
   every time, which on a synced vault is endless traffic and, with *Analyze on
   save*, a re-analysis loop waiting to happen.

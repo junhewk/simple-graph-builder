@@ -19,6 +19,16 @@ const YIELD_EVERY = 20;
 
 const state = { isRunning: false, isCancelled: false };
 
+export interface WriteBackResult {
+	/** Entity notes that did not exist before. */
+	entityNotesCreated: number;
+	/** Entity notes that existed and whose contents changed. Disjoint from above. */
+	entityNotesUpdated: number;
+	/** Notes whose link property changed. */
+	notesUpdated: number;
+	cancelled: boolean;
+}
+
 /** Let Obsidian repaint between batches of writes. */
 function yieldToUi(): Promise<void> {
 	return new Promise(resolve => window.setTimeout(resolve, 0));
@@ -57,14 +67,14 @@ function analyzedFiles(plugin: SimpleGraphBuilderPlugin): TFile[] {
  */
 export async function writeLinksForVault(
 	plugin: SimpleGraphBuilderPlugin
-): Promise<{ entityNotes: number; notesUpdated: number; cancelled: boolean }> {
+): Promise<WriteBackResult> {
 	if (state.isRunning) {
 		new Notice('Link write-back is already running');
-		return { entityNotes: 0, notesUpdated: 0, cancelled: false };
+		return { entityNotesCreated: 0, entityNotesUpdated: 0, notesUpdated: 0, cancelled: false };
 	}
 	if (!plugin.settings.enableEntityNotes) {
 		new Notice('Turn on "Create entity notes" first.');
-		return { entityNotes: 0, notesUpdated: 0, cancelled: false };
+		return { entityNotesCreated: 0, entityNotesUpdated: 0, notesUpdated: 0, cancelled: false };
 	}
 
 	state.isRunning = true;
@@ -74,7 +84,8 @@ export async function writeLinksForVault(
 	const files = analyzedFiles(plugin);
 	const progress = new Notice(`Writing entity notes for ${entities.length} entities...`, 0);
 
-	let entityNotes = 0;
+	let entityNotesCreated = 0;
+	let entityNotesUpdated = 0;
 	let notesUpdated = 0;
 	let cancelled = false;
 
@@ -89,7 +100,8 @@ export async function writeLinksForVault(
 				return true;
 			},
 		});
-		entityNotes = result.created + result.updated;
+		entityNotesCreated = result.created;
+		entityNotesUpdated = result.updated;
 
 		if (plugin.settings.enableRelatedWriteback) {
 			for (let i = 0; i < files.length; i++) {
@@ -110,11 +122,10 @@ export async function writeLinksForVault(
 		cancelled = state.isCancelled;
 		progress.hide();
 
-		new Notice(
-			cancelled
-				? `Link write-back cancelled.\nEntity notes: ${entityNotes}, notes updated: ${notesUpdated}`
-				: `Links written.\nEntity notes: ${entityNotes}, notes updated: ${notesUpdated}`
-		);
+		const summary =
+			`Entity notes: ${entityNotesCreated} created, ${entityNotesUpdated} updated\n` +
+			`Notes updated: ${notesUpdated}`;
+		new Notice(cancelled ? `Link write-back cancelled.\n${summary}` : `Links written.\n${summary}`);
 	} catch (error) {
 		progress.hide();
 		console.error('Simple Graph Builder: vault write-back failed', error);
@@ -124,7 +135,7 @@ export async function writeLinksForVault(
 		state.isCancelled = false;
 	}
 
-	return { entityNotes, notesUpdated, cancelled };
+	return { entityNotesCreated, entityNotesUpdated, notesUpdated, cancelled };
 }
 
 /**
