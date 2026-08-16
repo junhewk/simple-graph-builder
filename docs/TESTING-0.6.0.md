@@ -346,16 +346,55 @@ cannot stand in for it: real Korean text, real note counts, a `data.json` two
 orders of magnitude larger, and a history of every version this plugin has
 shipped.
 
-- **Do:** copy the vault, install this build into the copy, open it, and work
-  through T1–T5.
-- **Expect:** the graph totals after load match what the old version reported;
-  `data.json` shrinks (somewhere around a third to two thirds smaller); and
-  several notes chosen at random report **"Note has not changed since last
-  analysis"** rather than starting an analysis.
-- **Record:** `data.json` before and after, node and edge counts before and
-  after, and how long the first load took.
-- **Fail if:** the totals do not match, or notes are offered for re-analysis. On
-  a vault this size the second one is a bill, not an inconvenience.
+**Nothing here writes to a note.** Write-back stays off — leave *Create entity
+notes* alone for the whole of Part 4. The only file that changes is `data.json`
+inside the copy's plugin folder, and no API call is made, so this costs nothing
+but disk and a few minutes.
+
+### 1. Take the copy
+
+Quit Obsidian first, so nothing is mid-write. If the vault lives in iCloud,
+make sure its files are actually on disk rather than evicted placeholders — a
+copy of a partly-evicted vault is not a copy of the vault.
+
+```bash
+cp -R "/path/to/your/vault" /tmp/sgb-part4
+```
+
+The copy carries your plugin settings, including API keys, in
+`.obsidian/plugins/simple-graph-builder/data.json`. Keep it local and delete it
+when you are done.
+
+### 2. Record the baseline, on the version you are upgrading *from*
+
+Open the copy with the plugin build it already has, and write down:
+
+- `data.json` size in bytes;
+- the node and edge counts from the status bar;
+- whether any entity carries a legacy `note:` id — the case that used to lose
+  relationships. In the developer console:
+  ```js
+  app.plugins.plugins['simple-graph-builder'].graphCache.getAllNodes()
+    .filter(n => n.id.startsWith('note:') && n.entityType !== 'NOTE')
+    .map(n => ({ name: n.properties.name, type: n.entityType }))
+  ```
+  If that returns anything, note the names — those are what T4 checks on real
+  data. An empty result just means the case does not arise in your vault.
+
+### 3. Upgrade the copy and compare
+
+Copy this build's `main.js`, `manifest.json` and `styles.css` over the copy's
+plugin folder, reopen it, and work through T1–T5.
+
+- **Expect:** node and edge totals identical to the baseline; `data.json`
+  smaller (roughly a third to two thirds); any legacy `note:` entity still
+  present with its relationships; and notes chosen at random reporting **"Note
+  has not changed since last analysis"** rather than starting an analysis.
+- **Record:** both `data.json` sizes, both node/edge counts, and how long the
+  first load took before the status bar settled.
+- **Fail if:** the totals moved, an entity lost relationships, or a note is
+  offered for re-analysis. On a vault this size the last one is a bill, not an
+  inconvenience.
 
 ---
 
