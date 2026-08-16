@@ -27,6 +27,25 @@ and writing links makes no model calls. Only Part 3 spends money.
 3. **Do not push a git tag until this document is finished.** Every tag triggers
    the release workflow, and the release is what Community Plugins offers to all
    existing users. Pushing a branch is safe; pushing a tag ships.
+4. **A step only counts on the build you are reporting.** If the plugin changed,
+   regenerate the vault and re-run whatever the change could reach.
+
+### Running only part of it
+
+Steps build on each other, so a partial run still needs its prerequisites.
+Start from a freshly generated vault and include:
+
+| To run | You must first run |
+|--------|--------------------|
+| any step | T1 (the plugin has to load) |
+| T7 | T6 (the toggles are how it is turned on) |
+| T8–T12, T15, T15b | T7 (there are no entity notes until it runs) |
+| T14 | T5 for `note 001`; nothing extra for `note 050` |
+| T16 | T7 (nothing to remove otherwise) |
+| T17 | T6 |
+
+T13 and T17 are independent of each other. Part 3 needs an API key and a note
+you created yourself.
 
 ---
 
@@ -122,12 +141,35 @@ make every note look changed.
 
 ## Part 2 — write-back (no API key)
 
-### T6. Turn it on
+### T6. Turn it on — through the settings UI
 
-- **Do:** *Settings → Simple Graph Builder → Vault write-back*. Enable
-  **Create entity notes**, then **Link notes to their entities**. Leave the
-  folder as `Entities` and the property as `related`.
-- **Expect:** the extra settings and the two buttons appear as each toggle goes on.
+**Set these by clicking, not from the console.** Assigning
+`plugin.settings.enableEntityNotes` directly is the one way to make this feature
+work while its settings are invisible, and that is a real failure mode: on
+Obsidian 1.13+ the settings tab renders from declarative definitions, and a
+control missing from that list simply does not appear, however well the feature
+underneath it works. Two earlier runs enabled write-back in code and so proved
+nothing about the UI.
+
+- **Do:** open *Settings → Simple Graph Builder* and scroll to **Vault
+  write-back**. Click **Create entity notes** on. Then click **Link notes to
+  their entities** on. Leave the folder as `Entities` and the property as
+  `related`. Close settings, reopen it, and look at the section again.
+- **Expect:**
+  - the **Vault write-back** heading exists, with **Create entity notes** under it;
+  - with that toggle off, no other write-back row is visible;
+  - turning it on reveals **Entity folder**, **List relationships in entity
+    notes**, **Link notes to their entities**, and the **Write links** and
+    **Remove links** buttons;
+  - turning on **Link notes to their entities** reveals **Property name**;
+  - after closing and reopening settings, both toggles are still on.
+- **Also, on Obsidian 1.13 or newer:** type `entity notes` into the settings
+  search box at the top of the settings window. It must find **Create entity
+  notes**. This is the only check that exercises the declarative definitions
+  directly.
+- **Fail if:** the section is absent; a toggle does not reveal its dependants;
+  a setting does not survive reopening; or the search finds nothing on 1.13+.
+  An absent section means the feature shipped unreachable.
 
 ### T7. Write links for the whole vault
 
