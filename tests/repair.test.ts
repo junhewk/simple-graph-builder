@@ -41,17 +41,21 @@ for (let i = 0; i < ENTITIES; i += 2) {
 const semantic: OntologyEdge[] = [
 	{ id: 's1', source: 'concept:e0', target: 'concept:e1', relationship: 'develops', properties: { detail: 'real' }, sourceNote: 'a.md' },
 	{ id: 's2', source: 'concept:e2', target: 'concept:e3', relationship: 'cites', properties: {}, sourceNote: 'a.md' },
-	// A 'links to' edge WITHOUT the wikilink marker is note-layer output and
-	// must not be swept up by the repair.
-	{ id: 's3', source: 'note:a.md', target: 'note:b.md', relationship: 'links to', properties: {}, sourceNote: 'a.md' },
 ];
+
+// A 'links to' edge WITHOUT the wikilink marker is note-layer output. It is no
+// longer persisted at all -- it gets dropped on load and rebuilt from Obsidian's
+// link index (see persist.test.ts) -- but it must not be counted as legacy junk.
+const noteLayer: OntologyEdge = {
+	id: 's3', source: 'note:a.md', target: 'note:b.md', relationship: 'links to', properties: {}, sourceNote: 'a.md',
+};
 
 async function main() {
 	check('fixture reproduces a cross product', legacy.length === (ENTITIES / 2) * (ENTITIES / 2), String(legacy.length));
 
 	const damaged = new GraphCache(fakePlugin({
 		nodes,
-		edges: [...legacy, ...semantic],
+		edges: [...legacy, ...semantic, noteLayer],
 		version: 1, // real v3 graphs in the wild still claim version 1
 	}).plugin);
 	await damaged.ensureLoaded();
@@ -61,7 +65,9 @@ async function main() {
 		after.every(e => e.properties?.detail !== 'wikilink'), String(after.length));
 	check('all semantic edges survive',
 		semantic.every(s => after.some(e => e.id === s.id)), String(after.length));
-	check('note-layer links-to edges are not swept up', !!after.find(e => e.id === 's3'));
+	check('the derived note-layer edge is dropped from storage', !after.find(e => e.id === 's3'));
+	check('but it was not blamed on the legacy pass',
+		damaged.getPrunedLegacyEdgeCount() === legacy.length, String(damaged.getPrunedLegacyEdgeCount()));
 	check('only the semantic edges remain', after.length === semantic.length, String(after.length));
 	check('pruned count is reported', damaged.getPrunedLegacyEdgeCount() === legacy.length,
 		String(damaged.getPrunedLegacyEdgeCount()));
@@ -89,7 +95,8 @@ async function main() {
 		version: GRAPH_SCHEMA_VERSION,
 	}).plugin);
 	await healthy.ensureLoaded();
-	check('a clean graph loses nothing', healthy.getAllEdges().length === semantic.length);
+	check('a clean graph loses nothing', healthy.getAllEdges().length === semantic.length,
+		String(healthy.getAllEdges().length));
 	check('a clean graph reports no pruning', healthy.getPrunedLegacyEdgeCount() === 0);
 
 	console.log(fail === 0 ? 'repair: all checks passed' : `${fail} FAILURES`);

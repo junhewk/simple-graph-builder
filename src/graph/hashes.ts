@@ -1,4 +1,5 @@
 import { HashData, NoteHash, PluginData } from '../types';
+import { stripFrontmatter } from '../sync/note-content';
 import SimpleGraphBuilderPlugin from '../main';
 
 export async function loadHashes(plugin: SimpleGraphBuilderPlugin): Promise<HashData> {
@@ -46,6 +47,55 @@ export function computeHash(content: string, seed = 0): string {
 export function hasNoteChanged(hashes: HashData, path: string, currentHash: string): boolean {
 	const existing = hashes.hashes.find(h => h.path === path);
 	return !existing || existing.hash !== currentHash;
+}
+
+/**
+ * The two hashes a note can be recognized by.
+ *
+ * `body` is what gets stored. It ignores frontmatter, because the plugin itself
+ * writes a `related:` property there -- hashing the whole file would mark every
+ * note the plugin touched as changed and re-analyze it, at cost, on the next
+ * save. It also means a user editing tags no longer pays for a re-analysis.
+ *
+ * `legacy` is the whole-file hash this plugin stored before that change. Notes
+ * analyzed by an earlier version carry it, and accepting it as a match is what
+ * keeps an upgrade from re-analyzing an entire vault. Stored hashes convert to
+ * the body form one note at a time, as notes are actually re-analyzed.
+ */
+export interface NoteHashes {
+	body: string;
+	legacy: string;
+}
+
+export function computeNoteHashes(content: string): NoteHashes {
+	return { body: computeHash(stripFrontmatter(content).body), legacy: computeHash(content) };
+}
+
+/** True when neither the stored body hash nor a pre-upgrade full hash matches. */
+export function hasNoteChangedByHashes(hashes: HashData, path: string, current: NoteHashes): boolean {
+	const existing = hashes.hashes.find(h => h.path === path);
+	if (!existing) return true;
+	return existing.hash !== current.body && existing.hash !== current.legacy;
+}
+
+/**
+ * Convert a note's stored whole-file hash to a body hash, in place.
+ *
+ * Without this the legacy form survives until the note is next analyzed, and
+ * the first thing that edits its frontmatter -- write-back, or the user adding
+ * a tag -- invalidates it. Turning on write-back would then re-analyze, and
+ * re-bill, every note in the vault that had not changed since the upgrade.
+ * Recognizing a note by its legacy hash is exactly the moment we know the body
+ * hash is equivalent, so it costs nothing to record it.
+ *
+ * Returns true when a record was rewritten and the caller should save.
+ */
+export function upgradeLegacyHash(hashes: HashData, path: string, current: NoteHashes): boolean {
+	const existing = hashes.hashes.find(h => h.path === path);
+	if (!existing || existing.hash !== current.legacy || existing.hash === current.body) return false;
+
+	existing.hash = current.body;
+	return true;
 }
 
 /**

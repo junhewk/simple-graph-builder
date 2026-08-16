@@ -7,8 +7,9 @@ import { DEFAULT_EFFORT } from './extraction/providers/effort';
  * 1 = pre-versioning (extractionMode rename only)
  * 2 = July 2026 model IDs + effort levels
  * 3 = per-provider API keys
+ * 4 = vault write-back settings (additive: defaults fill themselves in)
  */
-export const CURRENT_SETTINGS_VERSION = 3;
+export const CURRENT_SETTINGS_VERSION = 4;
 
 // The model catalog and the provider/model/key resolver now live with the
 // provider adapters. Re-exported here so existing importers keep working.
@@ -61,6 +62,12 @@ export const DEFAULT_SETTINGS: Settings = {
 	resolutionThresholdHigh: 0.90,
 	resolutionThresholdLow: 0.80,
 	enableLLMVerification: true,
+	// Vault write-back (opt-in)
+	enableEntityNotes: false,
+	entityFolder: 'Entities',
+	writeRelationshipsSection: true,
+	enableRelatedWriteback: false,
+	relatedPropertyName: 'related',
 	settingsVersion: CURRENT_SETTINGS_VERSION,
 };
 

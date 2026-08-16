@@ -1,4 +1,4 @@
-import { OntologyNode, OntologyEdge, OntologyExtractionResult, RawExtractionRelationship, ResolutionStats, Settings, normalizeKey, normalizeUnicode } from '../types';
+import { OntologyNode, OntologyEdge, OntologyExtractionResult, RawExtractionRelationship, ResolutionStats, Settings, NOTE_ID_PREFIX, normalizeKey, normalizeUnicode } from '../types';
 import type { GraphCache } from './cache';
 import type { App, TFile } from 'obsidian';
 import { getResolvedLinks, getResolvedLinksFromCache } from './links';
@@ -287,7 +287,7 @@ export function removeNoteFromCache(cache: GraphCache, notePath: string): { node
  * share a basename, and collapsing them would silently merge their link graphs.
  */
 export function generateNoteNodeId(notePath: string): string {
-	return `note:${normalizeKey(notePath)}`;
+	return `${NOTE_ID_PREFIX}${normalizeKey(notePath)}`;
 }
 
 /**

@@ -26,3 +26,21 @@ export function fakePlugin(graph?: Partial<GraphData>) {
 	};
 	return { plugin: plugin as never, saved };
 }
+
+/**
+ * Same, but backed by a whole data.json. Needed by suites that assert what
+ * survives a load/save round trip -- resolution cache, embedding index, hashes
+ * -- rather than just the graph.
+ */
+export function fakePluginWithData(data?: Record<string, unknown>) {
+	const saved: Record<string, unknown>[] = [];
+	let current = data ? JSON.parse(JSON.stringify(data)) : null;
+	const plugin = {
+		loadData: async () => (current ? JSON.parse(JSON.stringify(current)) : null),
+		saveData: async (next: Record<string, unknown>) => {
+			current = JSON.parse(JSON.stringify(next));
+			saved.push(next);
+		},
+	};
+	return { plugin: plugin as never, saved, latest: () => current };
+}

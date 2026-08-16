@@ -26,6 +26,7 @@ This design provides **structured entity classification with expressive relation
 - **Entity Extraction**: Automatically extract entities from your notes using AI (configurable extraction depth)
 - **Schema-enforced Extraction**: Every extraction request carries a JSON schema, and replies are validated against it — malformed entities are reported and dropped rather than silently polluting the graph
 - **Internal Link Support**: Automatically processes `[[wikilinks]]` to build note-to-note connections
+- **Vault Write-Back (opt-in)**: Mirror the graph into your vault as real Obsidian links, so it also appears in the built-in graph view, backlinks and properties — entity notes carry the resolution aliases, which is what makes Obsidian treat "ML" and "머신러닝" as one note
 - **Multiple LLM Support**: Works with Claude, OpenAI, Gemini, and local servers — Ollama plus anything OpenAI-compatible (llama.cpp, LM Studio, vLLM)
 - **Reasoning Effort Control**: Tune how hard the model thinks, separately for extraction and Smart Search
 - **Korean Language Support**: Bigram Jaccard similarity for robust Korean text matching (handles particles and spacing variations), with all names normalized to Unicode NFC so composed and decomposed Hangul resolve to the same entity
@@ -65,6 +66,8 @@ This approach resolves most entities via fast hash lookups, reserving expensive 
 | `Open note neighborhood panel` | Show current note's connections in sidebar |
 | `Remove current note from graph` | Remove active note from the graph |
 | `Rebuild note layer` | Recreate note nodes and their links from existing data (no API calls) |
+| `Write graph links into notes` | Apply the graph to your vault as Obsidian links (no API calls) |
+| `Remove graph links from notes` | Take the link property back out of every note |
 | `Clear all graph data` | Reset the entire graph |
 
 ## Data Model
@@ -174,6 +177,18 @@ Enable embedding-based entity resolution for intelligent deduplication:
 - **Show note nodes**: Include your notes in the graph alongside the entities they mention. Turn off for an entity-only view
 - **Minimum connections**: Hide nodes with fewer than this many connections
 
+### Vault Write-Back (Opt-in)
+Off by default. This is the only part of the plugin that writes into your notes.
+
+- **Create entity notes**: master toggle. Writes one note per entity, carrying its aliases, type and relationships
+- **Entity folder**: where those notes live (default `Entities`). Notes in this folder are never analyzed
+- **List relationships in entity notes**: adds a Relationships section linking each entity to the ones it connects to, so entity-to-entity edges show up in Obsidian's own graph
+- **Link notes to their entities**: adds a property to each analyzed note listing the entities found in it
+- **Property name**: which frontmatter property that is (default `related`)
+- **Write links for the whole vault** / **Remove written links**: apply or undo across the vault; no API calls either way
+
+**What the plugin edits, exactly:** in your own notes, only that one property — your prose is never touched. In entity notes, the `aliases`, `entity-type` and `sgb-id` properties and the text between the `%% sgb:managed:start %%` and `%% sgb:managed:end %%` markers. Anything you write outside those markers is kept through every regeneration, and a file that does not carry the plugin's `sgb-id` is never overwritten or deleted.
+
 ### Data Management
 - View graph statistics (nodes by entity type, total relationships)
 - Clear all graph data
@@ -190,6 +205,14 @@ Note analysis requires a model that can return **structured output** (JSON schem
 | Local | any model your server exposes — Ollama, or an OpenAI-compatible server such as llama.cpp's `llama-server`, LM Studio or vLLM |
 
 Any other model can be typed into the **Custom…** field. Smart Search additionally needs tool calling; for local servers, start `llama-server` with `--jinja`, and prefer `qwen3:*` or `gpt-oss:*` on Ollama.
+
+## Upgrading to 0.6.0
+
+This release adds vault write-back and makes the data file smaller. Nothing is re-analyzed, no API calls are made, and no existing data is lost.
+
+- **Your graph can now become Obsidian links.** Turn on **Create entity notes** under *Vault write-back* to get one note per entity — with the aliases entity resolution found, so Obsidian itself resolves "ML", "머신러닝" and "기계학습" to a single note — plus an optional `related:` property on each analyzed note. Both are off until you turn them on, and **Remove written links** undoes the property across the vault.
+- **The data file shrinks — around 40% on a vault of typical shape.** Note nodes and their `mentions` / `links to` edges are no longer stored: they are rebuilt from your notes and Obsidian's link index every time the plugin loads, so keeping a second copy on disk only cost space. `mentions` is one edge per note-entity pair, usually the largest single population in the file. Your graph looks and behaves exactly as before; the saving is larger the more entities per note you extract.
+- **Frontmatter is no longer analyzed or hashed.** Tags and properties were being sent to the model as if they were prose. Notes are now compared by their body, so editing frontmatter — including the property this plugin writes — no longer costs an analysis. Notes analyzed by earlier versions are still recognized and will not be re-analyzed.
 
 ## Upgrading to 0.5.0
 

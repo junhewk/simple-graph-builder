@@ -1,5 +1,5 @@
 import { Notice } from 'obsidian';
-import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, isLegacyWikilinkEdge, ResolutionCache, EmbeddingIndex, labelToEntityType, normalizeKey, normalizeUnicode } from '../types';
+import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, isLegacyWikilinkEdge, isNoteLayerEdge, isNoteNode, noteNodeIds, ResolutionCache, EmbeddingIndex, labelToEntityType, normalizeKey, normalizeUnicode } from '../types';
 import { DEFAULT_SETTINGS, DEFAULT_EMBEDDING_DIMENSIONS, getEmbeddingDimensions } from '../settings';
 import { loadEmbeddingsBinary, saveEmbeddingsBinary, cosineSimilarity } from '../extraction/llm-client';
 import type SimpleGraphBuilderPlugin from '../main';
@@ -136,6 +136,10 @@ export class GraphCache {
 		// Repair graphs damaged by the old entity-level wikilink pass
 		this.pruneLegacyWikilinkEdges();
 
+		// Drop the note layer written by earlier versions; it is rebuilt in memory
+		// once Obsidian's link index is ready.
+		this.pruneDerivedNoteLayer();
+
 		// Load resolution cache
 		if (data?.resolutionCache) {
 			for (const [token, nodeId] of Object.entries(data.resolutionCache)) {
@@ -250,6 +254,36 @@ export class GraphCache {
 	 */
 	getPrunedLegacyEdgeCount(): number {
 		return this.prunedLegacyEdgeCount;
+	}
+
+	/**
+	 * Drop the NOTE nodes and note-layer edges a previous version persisted.
+	 *
+	 * Nothing is lost: `repairNoteLayer` reconstructs the layer from
+	 * `node.sourceNotes` and Obsidian's `resolvedLinks` on every load anyway, so
+	 * what was on disk was a second copy of data the plugin already had. Files
+	 * written by this version arrive without a note layer and this is a no-op,
+	 * which is why it only marks the graph dirty when it actually removed
+	 * something -- an already-slim data.json is never rewritten.
+	 *
+	 * Bulk filters for the same reason as pruneLegacyWikilinkEdges: removing tens
+	 * of thousands of edges through removeEdge() is quadratic and hangs startup.
+	 */
+	private pruneDerivedNoteLayer(): void {
+		const edgesBefore = this.edges.length;
+		const nodesBefore = this.nodes.length;
+
+		// Decided by entity type, not by the `note:` id prefix: a v2 graph can
+		// hold a real entity whose id starts with `note:` (see isNoteLayerEdge).
+		const noteIds = noteNodeIds(this.nodes);
+		this.edges = this.edges.filter(e => !isNoteLayerEdge(e, noteIds));
+		this.nodes = this.nodes.filter(n => !isNoteNode(n));
+
+		const removed = (edgesBefore - this.edges.length) + (nodesBefore - this.nodes.length);
+		if (removed > 0) {
+			console.debug(`Dropped ${removed} derived note-layer elements from storage`);
+			this.dirty = true;
+		}
 	}
 
 	/**
@@ -664,7 +698,9 @@ export class GraphCache {
 
 		this.nodes.push(node);
 		this.indexNode(node);
-		this.markDirty();
+		// NOTE nodes are derived and never serialized, so adding one is not a
+		// reason to rewrite data.json.
+		if (!isNoteNode(node)) this.markDirty();
 	}
 
 	/**
@@ -741,7 +777,16 @@ export class GraphCache {
 
 		this.edges.push(edge);
 		this.indexEdge(edge);
-		this.markDirty();
+		// Same for the note layer: rebuilding it on load must not schedule a save.
+		if (!this.isDerivedEdge(edge)) this.markDirty();
+	}
+
+	/** True when this edge belongs to the note layer, judged by its source node. */
+	private isDerivedEdge(edge: OntologyEdge): boolean {
+		const source = this.nodeById.get(edge.source);
+		if (source) return isNoteNode(source);
+		// Endpoint not in the graph: fall back to the shape of the edge itself.
+		return isNoteLayerEdge(edge);
 	}
 
 	removeEdge(id: string): boolean {
@@ -1095,9 +1140,12 @@ export class GraphCache {
 		};
 
 		if (this.dirty) {
+			// The note layer stays in memory but never reaches disk: it is derived
+			// from sourceNotes and Obsidian's link index, and rebuilt on load.
+			const noteIds = noteNodeIds(this.nodes);
 			data.graph = {
-				nodes: this.nodes,
-				edges: this.edges,
+				nodes: this.nodes.filter(n => !isNoteNode(n)),
+				edges: this.edges.filter(e => !isNoteLayerEdge(e, noteIds)),
 				version: this.version,
 			};
 		}

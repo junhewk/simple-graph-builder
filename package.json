@@ -1,6 +1,6 @@
 {
 	"name": "simple-graph-builder",
-	"version": "0.5.1",
+	"version": "0.6.0",
 	"description": "Build a knowledge graph from your notes using LLM-powered entity extraction. Supports Claude, OpenAI, Gemini, and Ollama.",
 	"main": "main.js",
 	"scripts": {

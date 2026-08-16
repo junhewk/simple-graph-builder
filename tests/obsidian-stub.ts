@@ -14,6 +14,18 @@ export async function requestUrl(opts: any) {
   return { status: s.status, headers: s.headers || {}, text, arrayBuffer: new ArrayBuffer(0), get json() { return JSON.parse(text); } };
 }
 export class Vault {}
+/** Write-back suites need real classes: the code branches on `instanceof`. */
+export class TAbstractFile {
+  path = '';
+  name = '';
+}
+export class TFile extends TAbstractFile {
+  basename = '';
+  extension = 'md';
+}
+export class TFolder extends TAbstractFile {
+  children: TAbstractFile[] = [];
+}
 /** Enough of the view/modal surface for suites that import UI modules. */
 export class ItemView { constructor(_leaf?: unknown) { /* stub */ } }
 export class Modal { constructor(_app?: unknown) { /* stub */ } }

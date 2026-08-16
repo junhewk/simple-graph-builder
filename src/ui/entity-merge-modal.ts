@@ -1,6 +1,7 @@
 import { App, Modal, Setting, Notice } from 'obsidian';
 import { OntologyNode, normalizeKey } from '../types';
 import { EntityResolver } from '../graph/resolver';
+import { deleteEntityNote, upsertEntityNotes } from '../sync';
 import type SimpleGraphBuilderPlugin from '../main';
 
 /**
@@ -192,6 +193,18 @@ export class EntityMergeModal extends Modal {
 			const success = resolver.mergeEntities(this.sourceNode.id, this.targetNode.id);
 
 			if (success) {
+				// The merged-away entity's note goes to the trash, and the survivor
+				// is rewritten with the aliases and relationships it inherited.
+				if (this.plugin.settings.enableEntityNotes) {
+					try {
+						await deleteEntityNote(this.plugin, this.sourceNode);
+						const merged = this.plugin.graphCache.getNodeById(this.targetNode.id);
+						if (merged) await upsertEntityNotes(this.plugin, [merged]);
+					} catch (error) {
+						console.error('Simple Graph Builder: could not update entity notes after merge', error);
+					}
+				}
+
 				await this.plugin.graphCache.flush();
 				new Notice(`Merged "${this.sourceNode.properties.name}" into "${this.targetNode.properties.name}"`);
 				this.plugin.updateStatusBar();

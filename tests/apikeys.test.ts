@@ -32,7 +32,8 @@ check('falls back to the legacy shared key', resolveModelConfig(legacy, 'extract
 const m = migrateSettings(S({ apiKey: 'OLD-KEY', apiProvider: 'openai', apiKeys: {} }), 2);
 check('migration attributes the old key to its provider', m.settings.apiKeys.openai === 'OLD-KEY', JSON.stringify(m.settings.apiKeys));
 check('migration does not guess other providers', m.settings.apiKeys.claude === undefined);
-check('version bumped to 3', m.settings.settingsVersion === CURRENT_SETTINGS_VERSION && CURRENT_SETTINGS_VERSION === 3);
+check('version bumped to the current one', m.settings.settingsVersion === CURRENT_SETTINGS_VERSION,
+  String(m.settings.settingsVersion));
 const m2 = migrateSettings(m.settings, m.settings.settingsVersion);
 check('migration is idempotent', m2.notes.length === 0);
 const keep = migrateSettings(S({ apiKey: 'SHARED', apiProvider: 'claude', apiKeys: { claude: 'ALREADY' } }), 2);

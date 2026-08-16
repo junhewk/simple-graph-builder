@@ -7,6 +7,8 @@ import { EFFORT_LABELS, EFFORT_LEVELS, EffortLevel } from '../extraction/provide
 import { clearHashes } from '../graph/hashes';
 import { analyzeEntireVault, isAnalyzingVault, cancelVaultAnalysis } from '../commands/analyze';
 import { getEmbeddings, settingsToEmbeddingOptions } from '../extraction/llm-client';
+import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from '../sync/batch';
+import { normalizeFolder } from '../sync/filenames';
 import { ConfirmModal } from './confirm-modal';
 
 export class SettingsTab extends PluginSettingTab {
@@ -500,6 +502,8 @@ export class SettingsTab extends PluginSettingTab {
 					});
 			});
 
+		this.renderWritebackSection(containerEl);
+
 		// Entity Resolution section
 		new Setting(containerEl).setName('Entity resolution (advanced)').setHeading();
 
@@ -842,6 +846,152 @@ export class SettingsTab extends PluginSettingTab {
 					.setCta()
 					.onClick(() => {
 						window.open('https://buymeacoffee.com/junhewkkim', '_blank');
+					});
+			});
+	}
+
+	/**
+	 * Vault write-back: the settings that let the plugin edit notes.
+	 *
+	 * Gated behind one master toggle and spelled out in detail, because this is
+	 * the only part of the plugin that writes into a user's own files. The
+	 * ownership contract is stated here so nobody has to discover it by finding
+	 * their text replaced.
+	 */
+	private renderWritebackSection(containerEl: HTMLElement): void {
+		new Setting(containerEl).setName('Vault write-back').setHeading();
+
+		const intro = containerEl.createDiv({ cls: 'setting-item-description' });
+		intro.appendText(
+			'Mirror the knowledge graph into your vault as real Obsidian links, so it also shows up in the ' +
+			'built-in graph view, in backlinks, and in the properties panel. Entity notes carry the aliases ' +
+			'found by entity resolution, which is what lets Obsidian treat "ML" and "머신러닝" as one thing.'
+		);
+
+		new Setting(containerEl)
+			.setName('Create entity notes')
+			.setDesc('Write one note per entity, with its aliases, type and relationships.')
+			.addToggle(toggle => {
+				toggle
+					.setValue(this.plugin.settings.enableEntityNotes)
+					.onChange(async (value) => {
+						this.plugin.settings.enableEntityNotes = value;
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+
+		if (!this.plugin.settings.enableEntityNotes) return;
+
+		const ownership = containerEl.createDiv({ cls: 'setting-item-description' });
+		ownership.createEl('strong', { text: 'What the plugin will edit:' });
+		const ownershipList = ownership.createEl('ul');
+		ownershipList.createEl('li', { text: 'In entity notes: the aliases, entity-type and sgb-id properties, and the text between the sgb managed markers. Anything you write outside those is kept.' });
+		ownershipList.createEl('li', { text: 'In your own notes: nothing but the link property below. Your prose is never touched.' });
+
+		new Setting(containerEl)
+			.setName('Entity folder')
+			.setDesc('Where entity notes live. Notes in this folder are never analyzed.')
+			.addText(text => {
+				text
+					.setPlaceholder('Entities')
+					.setValue(this.plugin.settings.entityFolder)
+					.onChange(async (value) => {
+						// Must go through normalizeFolder: "/" trims to a non-empty
+						// string but names the vault root, which would scatter entity
+						// notes among the user's own and leave them analyzable.
+						this.plugin.settings.entityFolder = normalizeFolder(value) || 'Entities';
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('List relationships in entity notes')
+			.setDesc('Add a Relationships section linking each entity to the ones it connects to, so entity-to-entity edges appear in the built-in graph.')
+			.addToggle(toggle => {
+				toggle
+					.setValue(this.plugin.settings.writeRelationshipsSection)
+					.onChange(async (value) => {
+						this.plugin.settings.writeRelationshipsSection = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
+		new Setting(containerEl)
+			.setName('Link notes to their entities')
+			.setDesc('Add a property to each analyzed note listing the entities found in it.')
+			.addToggle(toggle => {
+				toggle
+					.setValue(this.plugin.settings.enableRelatedWriteback)
+					.onChange(async (value) => {
+						this.plugin.settings.enableRelatedWriteback = value;
+						await this.plugin.saveSettings();
+						this.display();
+					});
+			});
+
+		if (this.plugin.settings.enableRelatedWriteback) {
+			new Setting(containerEl)
+				.setName('Property name')
+				.setDesc('The frontmatter property the plugin owns. It is replaced on every analysis.')
+				.addText(text => {
+					text
+						.setPlaceholder('related')
+						.setValue(this.plugin.settings.relatedPropertyName)
+						.onChange(async (value) => {
+							const clean = value.trim().replace(/:/g, '');
+							this.plugin.settings.relatedPropertyName = clean || 'related';
+							await this.plugin.saveSettings();
+						});
+				});
+		}
+
+		new Setting(containerEl)
+			.setName('Write links for the whole vault')
+			.setDesc('Apply the current graph to every analyzed note at once. No API calls.')
+			.addButton(button => {
+				const update = () => {
+					if (isWritebackRunning()) button.setButtonText('Cancel').setWarning();
+					else button.setButtonText('Write links').removeCta().setClass('mod-cta');
+				};
+				update();
+
+				button.onClick(() => {
+					if (isWritebackRunning()) {
+						cancelWriteback();
+						new Notice('Cancelling...');
+						window.setTimeout(update, 1000);
+						return;
+					}
+
+					const entities = this.plugin.graphCache.getAllNodes().filter(n => n.entityType !== 'NOTE').length;
+					const message = `Write links for ${entities} entities into your vault?\n\n` +
+						`This creates or updates notes in "${this.plugin.settings.entityFolder}"` +
+						(this.plugin.settings.enableRelatedWriteback
+							? `, and adds a "${this.plugin.settings.relatedPropertyName}" property to each analyzed note.`
+							: '.');
+
+					void new ConfirmModal(this.app, message, async () => {
+						update();
+						await writeLinksForVault(this.plugin);
+						update();
+					}).open();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName('Remove written links')
+			.setDesc('Take the link property back out of every note. Entity notes are left in place for you to delete.')
+			.addButton(button => {
+				button
+					.setButtonText('Remove links')
+					.setWarning()
+					.onClick(() => {
+						const message = `Remove the "${this.plugin.settings.relatedPropertyName}" property from every note in the vault?\n\n` +
+							'Your prose is not touched, and the entity notes stay where they are.';
+						void new ConfirmModal(this.app, message, async () => {
+							await removeWrittenLinks(this.plugin);
+						}).open();
 					});
 			});
 	}

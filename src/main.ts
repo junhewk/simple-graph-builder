@@ -10,10 +10,15 @@ import { rebuildNoteLayer } from './graph/merge';
 import { analyzeCurrentNote, removeCurrentNoteFromGraph, clearAllGraphData, autoAnalyzeFile } from './commands/analyze';
 import { openSearchModal } from './commands/search';
 import { openSmartSearch } from './commands/smart-search';
+import { WriteGuard, isEntityNotePath } from './sync';
+import { ConfirmModal } from './ui/confirm-modal';
+import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from './sync/batch';
 
 export default class SimpleGraphBuilderPlugin extends Plugin {
 	settings: Settings;
 	graphCache: GraphCache;
+	/** Marks vault writes the plugin made, so they don't look like user edits. */
+	writeGuard = new WriteGuard();
 	private statusBarItem: HTMLElement | null = null;
 
 	// Debounced auto-analyze to avoid multiple calls on rapid saves
@@ -34,12 +39,15 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		// Register neighborhood view
 		this.registerView(NEIGHBORHOOD_VIEW_TYPE, (leaf) => new NeighborhoodView(leaf, this));
 
-		// Register auto-analysis on file modify
+		// Register auto-analysis on file modify. The plugin's own write-back edits
+		// notes, so its writes are filtered out here -- otherwise every `related:`
+		// property it wrote would schedule an analysis of the note it just wrote.
 		this.registerEvent(
 			this.app.vault.on('modify', (file) => {
-				if (file instanceof TFile && file.extension === 'md') {
-					this.debouncedAutoAnalyze(file);
-				}
+				if (!(file instanceof TFile) || file.extension !== 'md') return;
+				if (this.writeGuard.isOwnWrite(file.path)) return;
+				if (isEntityNotePath(this.settings, file.path)) return;
+				this.debouncedAutoAnalyze(file);
 			})
 		);
 
@@ -90,6 +98,34 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			id: 'rebuild-note-layer',
 			name: 'Rebuild note layer',
 			callback: () => this.repairNoteLayer(true),
+		});
+
+		this.addCommand({
+			id: 'write-vault-links',
+			name: 'Write graph links into notes',
+			callback: () => {
+				if (isWritebackRunning()) {
+					cancelWriteback();
+					return;
+				}
+				void writeLinksForVault(this);
+			},
+		});
+
+		this.addCommand({
+			id: 'remove-written-links',
+			name: 'Remove graph links from notes',
+			callback: () => {
+				// Vault-wide and not obviously reversible, so it asks first here too
+				// — the settings button is not the only way in.
+				const key = this.settings.relatedPropertyName || 'related';
+				void new ConfirmModal(
+					this.app,
+					`Remove the plugin's entity links from the "${key}" property of every note?\n\n` +
+					'Links you wrote yourself are kept, your prose is untouched, and the entity notes stay where they are.',
+					async () => { await removeWrittenLinks(this); }
+				).open();
+			},
 		});
 
 		// Add settings tab

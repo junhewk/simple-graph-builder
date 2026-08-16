@@ -113,6 +113,11 @@ export function migrateSettings(settings: Settings, storedVersion: number): Migr
 		next.apiKeys = keys;
 	}
 
+	// v4 added the vault write-back settings. No step here on purpose: they are
+	// purely additive, so loadSettings' merge over DEFAULT_SETTINGS fills them in
+	// with the off-by-default values. The version still moves, which is what
+	// records that an older install was seen.
+
 	next.settingsVersion = CURRENT_SETTINGS_VERSION;
 
 	const changed = notes.length > 0 || storedVersion !== CURRENT_SETTINGS_VERSION;

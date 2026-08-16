@@ -264,6 +264,51 @@ export function isLegacyWikilinkEdge(edge: OntologyEdge): boolean {
 	return edge.relationship === 'links to' && edge.properties?.detail === 'wikilink';
 }
 
+/**
+ * Prefix for the id of a NOTE node. Every note-layer edge starts at one, which
+ * is what makes the layer identifiable without consulting the node table.
+ */
+export const NOTE_ID_PREFIX = 'note:';
+
+/** True for a node the plugin generated to represent a vault note. */
+export function isNoteNode(node: OntologyNode): boolean {
+	return node.entityType === 'NOTE';
+}
+
+/** The only two verbs the note layer ever produces. */
+const NOTE_LAYER_VERBS = new Set(['mentions', 'links to']);
+
+/**
+ * True for an edge of the note layer: `mentions` (note -> entity) and
+ * `links to` (note -> note).
+ *
+ * The whole layer is derived data. `mentions` restates `node.sourceNotes`, and
+ * `links to` restates Obsidian's own `metadataCache.resolvedLinks`, so
+ * rebuildNoteLayer can reproduce all of it on load from information that is
+ * already there. Since mentions are one edge per (note, entity) pair they are
+ * also the largest population in the graph -- persisting them cost about 40% of
+ * data.json for nothing.
+ *
+ * The verb has to be checked, not just the id prefix. v2 built node ids from
+ * the LLM's free-form label, and models do label things "Note" -- see `'note'`
+ * in labelToEntityType's DOCUMENT list. A legacy paper called
+ * `note:attention is all you need` therefore has a `note:` id while being an
+ * ordinary entity, and matching on the prefix alone would delete every real
+ * relationship it has. Callers with the node table at hand should prefer
+ * `noteNodeIds`, which decides by entity type instead of by string.
+ */
+export function isNoteLayerEdge(edge: OntologyEdge, noteIds?: Set<string>): boolean {
+	if (noteIds?.has(edge.source)) return true;
+	return edge.source.startsWith(NOTE_ID_PREFIX) && NOTE_LAYER_VERBS.has(edge.relationship);
+}
+
+/** Ids of every NOTE node in a collection, for the check above. */
+export function noteNodeIds(nodes: OntologyNode[]): Set<string> {
+	const ids = new Set<string>();
+	for (const node of nodes) if (isNoteNode(node)) ids.add(node.id);
+	return ids;
+}
+
 export interface GraphData {
 	nodes: OntologyNode[];
 	edges: OntologyEdge[];
@@ -422,6 +467,14 @@ export interface Settings {
 	resolutionThresholdHigh: number;      // default: 0.90 - auto-merge above this
 	resolutionThresholdLow: number;       // default: 0.80 - LLM verification between low and high
 	enableLLMVerification: boolean;       // default: true - use LLM for ambiguous matches
+	// Vault write-back (opt-in). Turns the extracted graph into real Obsidian
+	// links so it also appears in the native graph view, backlinks and
+	// properties. Everything here is off by default: it writes to user notes.
+	enableEntityNotes: boolean;      // master toggle - create one note per entity
+	entityFolder: string;            // default: 'Entities'
+	writeRelationshipsSection: boolean; // list relationships as links in entity notes
+	enableRelatedWriteback: boolean; // add a `related:` property to analyzed notes
+	relatedPropertyName: string;     // default: 'related'
 	// Migration bookkeeping. Bump when a migration step is added; see
 	// src/settings-migration.ts.
 	settingsVersion: number;

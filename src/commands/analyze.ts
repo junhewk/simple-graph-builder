@@ -1,7 +1,9 @@
 import { Notice, MarkdownView, TFile } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
-import { loadHashes, saveHashes, computeHash, hasNoteChanged, updateNoteHash, removeNoteHash, clearHashes } from '../graph/hashes';
+import { loadHashes, saveHashes, computeNoteHashes, hasNoteChangedByHashes, upgradeLegacyHash, updateNoteHash, removeNoteHash, clearHashes } from '../graph/hashes';
 import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeNoteLayerIntoCache, removeNoteFromCache } from '../graph/merge';
+import { stripFrontmatter } from '../sync/note-content';
+import { syncNoteWriteback, isPluginManagedNote, deleteEntityNote, clearRelatedProperty } from '../sync';
 import { truncateContent } from '../extraction/prompts';
 import { extractOntologyChunked, settingsToExtractionOptions, ExtractionError } from '../extraction/llm-client';
 import { getExtractionConfigError } from '../extraction/providers/models';
@@ -20,19 +22,33 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 	}
 
 	const file = activeView.file;
+
+	// Entity notes are the plugin's own output; extracting from them would feed
+	// the graph its own summaries.
+	if (isPluginManagedNote(plugin, file)) {
+		new Notice('This is a plugin-managed entity note');
+		return;
+	}
+
 	const content = await plugin.app.vault.read(file);
+	// Frontmatter is neither analyzed nor hashed: it holds tags and the plugin's
+	// own `related:` property, not prose the model should read.
+	const body = stripFrontmatter(content).body;
 
 	// Check if content is too short
-	if (content.trim().length < 50) {
+	if (body.trim().length < 50) {
 		new Notice('Note is too short to analyze');
 		return;
 	}
 
 	// Check if note has changed
 	const hashes = await loadHashes(plugin);
-	const currentHash = computeHash(content);
+	const noteHashes = computeNoteHashes(content);
 
-	if (!hasNoteChanged(hashes, file.path, currentHash)) {
+	if (!hasNoteChangedByHashes(hashes, file.path, noteHashes)) {
+		// Recognized by its pre-0.6 whole-file hash: record the body hash now, or
+		// the next frontmatter edit would make this note look changed.
+		if (upgradeLegacyHash(hashes, file.path, noteHashes)) await saveHashes(plugin, hashes);
 		new Notice('Note has not changed since last analysis');
 		return;
 	}
@@ -52,7 +68,7 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		const existingNodeNames = plugin.graphCache.getExistingNodeNames();
 
 		// Use chunked extraction for better handling of long notes
-		const truncatedContent = truncateContent(content);
+		const truncatedContent = truncateContent(body);
 		const options = settingsToExtractionOptions(plugin.settings);
 		const mode = plugin.settings.extractionMode || 'standard';
 		const { result, chunkCount } = await extractOntologyChunked(options, truncatedContent, existingNodeNames, mode);
@@ -104,8 +120,13 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		// edges for its [[wikilinks]]
 		const linksAdded = mergeNoteLayerIntoCache(plugin.graphCache, plugin.app, file, content);
 
+		// Mirror the result into the vault as real links, when enabled. Ordering
+		// against the hash update does not matter: hashes cover the body only, so
+		// the frontmatter this writes is invisible to change detection.
+		await syncNoteWriteback(plugin, file);
+
 		// Update hash
-		const updatedHashes = updateNoteHash(hashes, file.path, currentHash);
+		const updatedHashes = updateNoteHash(hashes, file.path, noteHashes.body);
 		await saveHashes(plugin, updatedHashes);
 
 		// Build success message
@@ -170,9 +191,23 @@ export async function removeCurrentNoteFromGraph(plugin: SimpleGraphBuilderPlugi
 	}
 
 	const file = activeView.file;
+
+	// Entities this note was the last source for lose their entity note too, so
+	// removing a note from the graph also removes what it put in the vault.
+	const orphaned = plugin.graphCache
+		.getNodesBySourceNote(file.path)
+		.filter(node => node.sourceNotes.length === 1);
+
 	const { nodesRemoved, edgesRemoved } = removeNoteFromCache(plugin.graphCache, file.path);
 
 	if (nodesRemoved > 0 || edgesRemoved > 0) {
+		try {
+			await clearRelatedProperty(plugin, file);
+			for (const node of orphaned) await deleteEntityNote(plugin, node);
+		} catch (error) {
+			console.error('Simple Graph Builder: could not clean up written links', error);
+		}
+
 		// Also remove the hash so it can be re-analyzed
 		const hashes = await loadHashes(plugin);
 		const updatedHashes = removeNoteHash(hashes, file.path);
@@ -210,15 +245,18 @@ export async function analyzeFile(
 
 	try {
 		const content = await plugin.app.vault.read(file);
+		const body = stripFrontmatter(content).body;
 
 		// Check if content is too short
-		if (content.trim().length < 50) {
+		if (body.trim().length < 50) {
 			return { success: false, skipped: true, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 		}
 
 		// Check if note has changed
-		const currentHash = computeHash(content);
-		if (skipUnchanged && !hasNoteChanged(hashes, file.path, currentHash)) {
+		const noteHashes = computeNoteHashes(content);
+		if (skipUnchanged && !hasNoteChangedByHashes(hashes, file.path, noteHashes)) {
+			// Caller persists `hashes`, so the upgraded record travels with it.
+			upgradeLegacyHash(hashes, file.path, noteHashes);
 			return { success: false, skipped: true, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 		}
 
@@ -226,7 +264,7 @@ export async function analyzeFile(
 		const existingNodeNames = plugin.graphCache.getExistingNodeNames();
 
 		// Use chunked extraction
-		const truncatedContent = truncateContent(content);
+		const truncatedContent = truncateContent(body);
 		const extractionOptions = settingsToExtractionOptions(plugin.settings);
 		const mode = plugin.settings.extractionMode || 'standard';
 		const { result } = await extractOntologyChunked(extractionOptions, truncatedContent, existingNodeNames, mode);
@@ -259,9 +297,11 @@ export async function analyzeFile(
 		// Process internal links ([[wikilinks]])
 		mergeNoteLayerIntoCache(plugin.graphCache, plugin.app, file, content);
 
+		await syncNoteWriteback(plugin, file);
+
 		// Update hash in the passed hashes object
 		const existingIndex = hashes.hashes.findIndex(h => h.path === file.path);
-		const hashRecord = { path: file.path, hash: currentHash, analyzedAt: Date.now() };
+		const hashRecord = { path: file.path, hash: noteHashes.body, analyzedAt: Date.now() };
 		if (existingIndex >= 0) {
 			hashes.hashes[existingIndex] = hashRecord;
 		} else {
@@ -312,8 +352,9 @@ export async function analyzeEntireVault(
 	vaultAnalysisState.isRunning = true;
 	vaultAnalysisState.isCancelled = false;
 
-	// Get all markdown files
-	const files = plugin.app.vault.getMarkdownFiles();
+	// Get all markdown files, minus the plugin's own entity notes
+	const files = plugin.app.vault.getMarkdownFiles()
+		.filter(file => !isPluginManagedNote(plugin, file));
 	const total = files.length;
 	let analyzed = 0;
 	let skipped = 0;
@@ -402,6 +443,11 @@ export async function autoAnalyzeFile(plugin: SimpleGraphBuilderPlugin, file: TF
 
 	// Don't auto-analyze during vault analysis
 	if (vaultAnalysisState.isRunning) {
+		return;
+	}
+
+	// Never analyze the plugin's own entity notes
+	if (isPluginManagedNote(plugin, file)) {
 		return;
 	}
 
