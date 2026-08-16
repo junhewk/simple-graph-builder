@@ -279,6 +279,13 @@ accident while editing around it is ordinary.
 - **Expect:** your `## Mine` section survives, and the note ends up with exactly
   one start marker and one end marker.
 - **Fail if:** everything below the surviving marker disappeared. **Stop.**
+- **Expected oddity, not a bug:** the note now shows the old description and
+  relationship list *twice* — once as plain text where the orphaned block used to
+  be, once inside the fresh markers. With one marker gone there is no way to tell
+  where the plugin's text ended and yours began, so recovery keeps everything and
+  starts a new block. Duplicating a description the plugin wrote is recoverable;
+  deleting a paragraph you wrote is not. It does not compound: the next run finds
+  a matched pair of markers and replaces in place.
 
 ### T16. Removing links removes only ours
 
@@ -329,8 +336,26 @@ Run these on the test vault with a cheap model.
 ## Part 4 — rehearsal on real data
 
 Before tagging, run **Part 1 only** against a *duplicate* of your real vault.
-That is the one test the generated vault cannot stand in for: real Korean text,
-real note counts, a real `data.json`. Record the before/after size.
+Copy the vault; do not point the plugin at the original.
+
+This is the part that matters most, because it is the only thing every existing
+user gets. Write-back is opt-in and off by default, so most people will never
+see it — but **everyone** gets the migration and the new hashing on first load,
+unattended, against data this project has never run on. The generated vault
+cannot stand in for it: real Korean text, real note counts, a `data.json` two
+orders of magnitude larger, and a history of every version this plugin has
+shipped.
+
+- **Do:** copy the vault, install this build into the copy, open it, and work
+  through T1–T5.
+- **Expect:** the graph totals after load match what the old version reported;
+  `data.json` shrinks (somewhere around a third to two thirds smaller); and
+  several notes chosen at random report **"Note has not changed since last
+  analysis"** rather than starting an analysis.
+- **Record:** `data.json` before and after, node and edge counts before and
+  after, and how long the first load took.
+- **Fail if:** the totals do not match, or notes are offered for re-analysis. On
+  a vault this size the second one is a bill, not an inconvenience.
 
 ---
 
