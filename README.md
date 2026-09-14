@@ -8,15 +8,20 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
-## What's new in 0.6.0
+## What's new in 0.6.1
 
-This release adds vault write-back and makes the data file smaller. Nothing is re-analyzed, no API calls are made, and no existing data is lost.
+Keep configuration files and other unwanted notes out of analysis with the new
+**Excluded files and folders** setting under **Analysis**. For example, add
+`skills/**` to skip that folder and everything beneath it.
 
-- **Your graph can now become Obsidian links.** Turn on **Create entity notes** under *Vault write-back* to get one note per entity — with the aliases entity resolution found, so Obsidian itself resolves "ML", "머신러닝" and "기계학습" to a single note — plus an optional `related:` property on each analyzed note. Both are off until you turn them on, and **Remove written links** undoes the property across the vault.
-- **The data file shrinks — 44% on the 5,177-node vault this was tested against, 6.8 MB down to 3.8 MB.** Note nodes and their `mentions` / `links to` edges are no longer stored: they are rebuilt from your notes and Obsidian's link index every time the plugin loads, so keeping a second copy on disk only cost space. `mentions` is one edge per note-entity pair, usually the largest single population in the file. Your graph loads with exactly the same nodes and edges as before; the saving is larger the more entities per note you extract.
-- **Frontmatter is no longer analyzed or hashed.** Tags and properties were being sent to the model as if they were prose. Notes are now compared by their body, so editing frontmatter — including the property this plugin writes — no longer costs an analysis. Notes analyzed by earlier versions are still recognized and will not be re-analyzed.
+- **Exclusions apply everywhere:** manual current-note analysis, vault analysis, and auto-analysis skip matching notes before reading their content or calling a provider.
+- **Optional Obsidian integration:** turn on **Respect Obsidian excluded files** to also honor **Files and links → Excluded files**. This toggle is off by default.
+- **Clear feedback:** vault analysis reports excluded notes separately, and manual analysis explains why a note was skipped.
+- **Existing graph data is kept:** adding an exclusion affects future analysis without removing prior entities, relationships, or written links. Upgrading does not trigger re-analysis.
 
-Upgrading from an older version? The notes for previous releases are further down, under [Upgrading to 0.5.4](#upgrading-to-054).
+See [Analysis Exclusions](#analysis-exclusions) for supported patterns and
+[Upgrading to 0.6.0](#upgrading-to-060) for the previous release’s write-back and
+storage improvements. Addresses [issue #1](https://github.com/junhewk/simple-graph-builder/issues/1).
 
 ## Why Lightweight Ontology?
 
@@ -33,6 +38,7 @@ This design provides **structured entity classification with expressive relation
 - **Lightweight Ontology Model**: Simple but expressive - 10 fixed entity types + free-form relationship verbs with detail annotations
 - **Hybrid Entity Resolution**: Multi-stage deduplication pipeline combining fast lookups with embedding similarity and LLM verification (inspired by KGGen [3])
 - **Smart Search**: AI-powered natural language queries over your knowledge graph with multi-path exploration
+- **Configurable Analysis Exclusions**: Skip files and folders using paths or globs, with optional support for Obsidian’s own exclusion list
 - **Entity Extraction**: Automatically extract entities from your notes using AI (configurable extraction depth)
 - **Schema-enforced Extraction**: Every extraction request carries a JSON schema, and replies are validated against it — malformed entities are reported and dropped rather than silently polluting the graph
 - **Internal Link Support**: Automatically processes `[[wikilinks]]` to build note-to-note connections
@@ -249,6 +255,14 @@ Note analysis requires a model that can return **structured output** (JSON schem
 | Local | any model your server exposes — Ollama, or an OpenAI-compatible server such as llama.cpp's `llama-server`, LM Studio or vLLM |
 
 Any other model can be typed into the **Custom…** field. Smart Search additionally needs tool calling; for local servers, start `llama-server` with `--jinja`, and prefer `qwen3:*` or `gpt-oss:*` on Ollama.
+
+## Upgrading to 0.6.0
+
+This release adds vault write-back and makes the data file smaller. Nothing is re-analyzed, no API calls are made, and no existing data is lost.
+
+- **Your graph can now become Obsidian links.** Turn on **Create entity notes** under *Vault write-back* to get one note per entity — with the aliases entity resolution found, so Obsidian itself resolves "ML", "머신러닝" and "기계학습" to a single note — plus an optional `related:` property on each analyzed note. Both are off until you turn them on, and **Remove written links** undoes the property across the vault.
+- **The data file shrinks — 44% on the 5,177-node vault this was tested against, 6.8 MB down to 3.8 MB.** Note nodes and their `mentions` / `links to` edges are no longer stored: they are rebuilt from your notes and Obsidian's link index every time the plugin loads, so keeping a second copy on disk only cost space. `mentions` is one edge per note-entity pair, usually the largest single population in the file. Your graph loads with exactly the same nodes and edges as before; the saving is larger the more entities per note you extract.
+- **Frontmatter is no longer analyzed or hashed.** Tags and properties were being sent to the model as if they were prose. Notes are now compared by their body, so editing frontmatter — including the property this plugin writes — no longer costs an analysis. Notes analyzed by earlier versions are still recognized and will not be re-analyzed.
 
 ## Upgrading to 0.5.4
 
