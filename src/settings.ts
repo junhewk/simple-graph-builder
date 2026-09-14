@@ -8,8 +8,9 @@ import { DEFAULT_EFFORT } from './extraction/providers/effort';
  * 2 = July 2026 model IDs + effort levels
  * 3 = per-provider API keys
  * 4 = vault write-back settings (additive: defaults fill themselves in)
+ * 5 = analysis exclusions (additive)
  */
-export const CURRENT_SETTINGS_VERSION = 4;
+export const CURRENT_SETTINGS_VERSION = 5;
 
 // The model catalog and the provider/model/key resolver now live with the
 // provider adapters. Re-exported here so existing importers keep working.
@@ -40,6 +41,8 @@ export const DEFAULT_SETTINGS: Settings = {
 	extractionMode: 'standard',
 	extractionEffort: DEFAULT_EFFORT,
 	autoAnalyzeOnSave: false,
+	excludedPatterns: [],
+	respectObsidianExcludedFiles: false,
 	// Smart Search model settings
 	useSeparateSmartSearchModel: false,
 	smartSearchProvider: 'claude',

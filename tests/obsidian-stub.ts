@@ -31,6 +31,33 @@ export class ItemView { constructor(_leaf?: unknown) { /* stub */ } }
 export class Modal { constructor(_app?: unknown) { /* stub */ } }
 export class Setting { constructor(_el?: unknown) { /* stub */ } }
 export class WorkspaceLeaf {}
+export class MarkdownView {}
+export class PluginSettingTab {
+  app: any;
+  containerEl: any;
+  constructor(app: any, _plugin: unknown) { this.app = app; }
+}
+/** Lifecycle surface for tests of the real plugin's modify/debounce wiring. */
+export class Plugin {
+  app: any;
+  constructor(app: any) { this.app = app; }
+  registerView() {}
+  registerEvent() {}
+  addCommand() {}
+  addSettingTab() {}
+  addRibbonIcon() {}
+  addStatusBarItem() { return { setText() {}, setAttr() {} }; }
+}
+export class Menu {}
+export const pendingDebounces = new Map<unknown, () => unknown>();
+export function debounce(fn: (...args: any[]) => unknown) {
+  return (...args: any[]) => { pendingDebounces.set(fn, () => fn(...args)); };
+}
+export async function flushDebounces() {
+  const pending = [...pendingDebounces.values()];
+  pendingDebounces.clear();
+  for (const fn of pending) await fn();
+}
 /** Graph suites pull in cache.ts, which surfaces load-time repairs via Notice. */
 export const notices: string[] = [];
 export class Notice {

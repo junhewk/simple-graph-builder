@@ -155,6 +155,40 @@ Right-click a node to:
 - **Auto-analyze on save**: Automatically analyze notes when you save them (2-second debounce)
 - **Analyze entire vault**: Batch analyze all notes with progress tracking and cancellation support
 
+### Analysis Exclusions
+
+Under **Analysis**, add one vault-relative path or pattern per line to **Excluded
+files and folders**. Exclusions apply to **Analyze current note**, **Analyze entire
+vault**, and **Auto-analyze on save**, before note content is read or sent to a
+provider. Vault analysis reports excluded notes separately from unchanged or
+short notes.
+
+| Pattern | Excludes |
+|---------|----------|
+| `skills` or `skills/` | The root `skills` folder and all its descendants |
+| `skills/**` | Everything beneath the root `skills` folder |
+| `templates/*.md` | Markdown files immediately inside `templates` |
+| `**/SKILL.md` | Files named `SKILL.md` anywhere, including the vault root |
+| `notes/draft.md` | That exact file |
+
+Patterns are anchored at the vault root. `*` matches characters within a path
+segment, `?` matches one character, and a whole `**` segment crosses any number of
+folders. Other characters are literal; regex, negation, and comment syntax are
+not supported. Blank lines and surrounding whitespace are ignored. Matching is
+case-insensitive and Unicode-normalized; both `/` and `\` separators work.
+
+**Respect Obsidian excluded files** additionally honors **Files and links →
+Excluded files**, using Obsidian’s matching rules rather than interpreting its
+entries as plugin globs. This toggle is off by default. If the native matcher is
+unavailable, the plugin stops opted-in analysis and asks you to turn the toggle
+off; your custom patterns continue to work with it off.
+
+Changing exclusions affects queued and future analysis; a note already being
+analyzed finishes. Existing graph data, search results, and written links are
+kept. Use **Remove current note from graph** to remove prior contributions.
+Standalone write-back commands remain independent of analysis exclusions.
+Plugin-managed entity notes are always excluded from analysis.
+
 ### Smart Search Model
 You can configure a separate model for Smart Search queries, allowing you to use faster/cheaper models for extraction while using more capable models for search:
 - **Use separate model for smart search**: Enable to configure a different model

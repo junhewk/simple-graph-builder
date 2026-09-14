@@ -10,7 +10,8 @@ import { rebuildNoteLayer } from './graph/merge';
 import { analyzeCurrentNote, removeCurrentNoteFromGraph, clearAllGraphData, autoAnalyzeFile } from './commands/analyze';
 import { openSearchModal } from './commands/search';
 import { openSmartSearch } from './commands/smart-search';
-import { WriteGuard, isPluginManagedNote } from './sync';
+import { WriteGuard } from './sync';
+import { getAnalysisEligibility, reportAnalysisUnavailable } from './analysis/exclusions';
 import { ConfirmModal } from './ui/confirm-modal';
 import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from './sync/batch';
 
@@ -46,7 +47,10 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			this.app.vault.on('modify', (file) => {
 				if (!(file instanceof TFile) || file.extension !== 'md') return;
 				if (this.writeGuard.isOwnWrite(file.path)) return;
-				if (isPluginManagedNote(this, file)) return;
+				if (!this.settings.autoAnalyzeOnSave) return;
+				const eligibility = getAnalysisEligibility(this, file);
+				if (eligibility.status === 'unavailable') reportAnalysisUnavailable(this, eligibility.reason);
+				if (eligibility.status !== 'allowed') return;
 				this.debouncedAutoAnalyze(file);
 			})
 		);

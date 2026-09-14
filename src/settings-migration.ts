@@ -117,6 +117,8 @@ export function migrateSettings(settings: Settings, storedVersion: number): Migr
 	// purely additive, so loadSettings' merge over DEFAULT_SETTINGS fills them in
 	// with the off-by-default values. The version still moves, which is what
 	// records that an older install was seen.
+	// v5 likewise adds analysis exclusions through DEFAULT_SETTINGS, preserving
+	// the existing graph and hashes without re-analysis or cleanup.
 
 	next.settingsVersion = CURRENT_SETTINGS_VERSION;
 

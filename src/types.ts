@@ -445,6 +445,8 @@ export interface Settings {
 	extractionEffort: EffortLevel;   // default: 'minimal' - reasoning depth for extraction
 	// Auto-analysis
 	autoAnalyzeOnSave: boolean;  // Analyze notes automatically when saved
+	excludedPatterns: string[]; // Vault-relative paths and simple globs, one per UI line
+	respectObsidianExcludedFiles: boolean; // Opt in to Obsidian's native exclusion list
 	// Smart Search model settings (separate from extraction)
 	useSeparateSmartSearchModel: boolean;  // default: false - use same model as extraction
 	smartSearchProvider: ApiProvider;      // default: same as apiProvider

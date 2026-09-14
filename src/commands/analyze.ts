@@ -3,7 +3,8 @@ import SimpleGraphBuilderPlugin from '../main';
 import { loadHashes, saveHashes, computeNoteHashes, hasNoteChangedByHashes, upgradeLegacyHash, updateNoteHash, removeNoteHash, clearHashes } from '../graph/hashes';
 import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeNoteLayerIntoCache, removeNoteFromCache } from '../graph/merge';
 import { stripFrontmatter } from '../sync/note-content';
-import { syncNoteWriteback, isPluginManagedNote, deleteEntityNote, clearRelatedProperty } from '../sync';
+import { syncNoteWriteback, deleteEntityNote, clearRelatedProperty } from '../sync';
+import { getAnalysisEligibility, reportAnalysisUnavailable } from '../analysis/exclusions';
 import { truncateContent } from '../extraction/prompts';
 import { extractOntologyChunked, settingsToExtractionOptions, ExtractionError } from '../extraction/llm-client';
 import { getExtractionConfigError } from '../extraction/providers/models';
@@ -23,10 +24,9 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 
 	const file = activeView.file;
 
-	// Entity notes are the plugin's own output; extracting from them would feed
-	// the graph its own summaries.
-	if (isPluginManagedNote(plugin, file)) {
-		new Notice('This is a plugin-managed entity note');
+	const eligibility = getAnalysisEligibility(plugin, file);
+	if (eligibility.status !== 'allowed') {
+		new Notice(eligibility.reason);
 		return;
 	}
 
@@ -240,10 +240,20 @@ export async function analyzeFile(
 	file: TFile,
 	hashes: { hashes: Array<{ path: string; hash: string; analyzedAt: number }> },
 	options?: { skipUnchanged?: boolean }
-): Promise<{ success: boolean; skipped: boolean; nodesAdded: number; nodesMerged: number; relationshipsAdded: number; error?: string }> {
+): Promise<{ success: boolean; skipped: boolean; excluded?: boolean; unavailable?: boolean; nodesAdded: number; nodesMerged: number; relationshipsAdded: number; error?: string }> {
 	const { skipUnchanged = true } = options ?? {};
 
 	try {
+		const eligibility = getAnalysisEligibility(plugin, file);
+		if (eligibility.status !== 'allowed') {
+			return {
+				success: false, skipped: false,
+				excluded: eligibility.status === 'excluded',
+				unavailable: eligibility.status === 'unavailable',
+				nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0,
+				error: eligibility.status === 'unavailable' ? eligibility.reason : undefined,
+			};
+		}
 		const content = await plugin.app.vault.read(file);
 		const body = stripFrontmatter(content).body;
 
@@ -336,95 +346,88 @@ export function cancelVaultAnalysis(): void {
 export async function analyzeEntireVault(
 	plugin: SimpleGraphBuilderPlugin,
 	onProgress?: (current: number, total: number, currentFile: string) => void
-): Promise<{ analyzed: number; skipped: number; errors: number; nodesAdded: number; nodesMerged: number; relationshipsAdded: number }> {
+): Promise<{ analyzed: number; skipped: number; excluded: number; errors: number; nodesAdded: number; nodesMerged: number; relationshipsAdded: number }> {
+	const totals = { analyzed: 0, skipped: 0, excluded: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	if (vaultAnalysisState.isRunning) {
 		new Notice('Vault analysis is already running');
-		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
-	}
-
-	// Check API configuration
-	const configError = getExtractionConfigError(plugin.settings);
-	if (configError) {
-		new Notice(configError);
-		return { analyzed: 0, skipped: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
+		return totals;
 	}
 
 	vaultAnalysisState.isRunning = true;
 	vaultAnalysisState.isCancelled = false;
-
-	// Get all markdown files, minus the plugin's own entity notes
-	const files = plugin.app.vault.getMarkdownFiles()
-		.filter(file => !isPluginManagedNote(plugin, file));
-	const total = files.length;
-	let analyzed = 0;
-	let skipped = 0;
-	let errors = 0;
-	let totalNodesAdded = 0;
-	let totalNodesMerged = 0;
-	let totalRelationshipsAdded = 0;
-
-	// Load hashes once
-	const hashes = await loadHashes(plugin);
-
-	const progressNotice = new Notice(`Analyzing vault: 0/${total}...`, 0);
-
+	let progressNotice: Notice | undefined;
 	try {
-		for (let i = 0; i < files.length; i++) {
-			if (vaultAnalysisState.isCancelled) {
-				progressNotice.hide();
-				new Notice(`Vault analysis cancelled.\nAnalyzed: ${analyzed}, Nodes: ${totalNodesAdded}, Merged: ${totalNodesMerged}, Relationships: ${totalRelationshipsAdded}`);
-				break;
+		// Enumeration remains user-triggered, after the settings confirmation.
+		// Preflight every candidate before reading any note content.
+		const files: TFile[] = [];
+		for (const file of plugin.app.vault.getMarkdownFiles()) {
+			const eligibility = getAnalysisEligibility(plugin, file);
+			if (eligibility.status === 'unavailable') {
+				new Notice(eligibility.reason);
+				totals.errors++;
+				return totals;
 			}
+			if (eligibility.status === 'excluded') totals.excluded++;
+			else files.push(file);
+		}
+		const total = files.length;
+		if (!total) {
+			new Notice(`No eligible notes to analyze. Excluded: ${totals.excluded}`);
+			return totals;
+		}
 
+		const configError = getExtractionConfigError(plugin.settings);
+		if (configError) {
+			new Notice(configError);
+			return totals;
+		}
+
+		const hashes = await loadHashes(plugin);
+		progressNotice = new Notice(`Analyzing vault: 0/${total}...`, 0);
+		let unavailable = false;
+		for (let i = 0; i < files.length; i++) {
+			if (vaultAnalysisState.isCancelled) break;
 			const file = files[i];
-
-			// Update progress
 			progressNotice.setMessage(`Analyzing vault: ${i + 1}/${total}\n${file.basename}`);
 			onProgress?.(i + 1, total, file.basename);
 
+			// Rechecks exclusions: settings or paths may have changed while queued.
 			const result = await analyzeFile(plugin, file, hashes);
-
-			if (result.success) {
-				analyzed++;
-				totalNodesAdded += result.nodesAdded;
-				totalNodesMerged += result.nodesMerged;
-				totalRelationshipsAdded += result.relationshipsAdded;
-			} else if (result.skipped) {
-				skipped++;
-			} else {
-				errors++;
+			if (result.unavailable) {
+				new Notice(result.error ?? 'Analysis exclusions could not be checked');
+				totals.errors++;
+				unavailable = true;
+				break;
+			}
+			if (result.excluded) totals.excluded++;
+			else if (result.success) {
+				totals.analyzed++;
+				totals.nodesAdded += result.nodesAdded;
+				totals.nodesMerged += result.nodesMerged;
+				totals.relationshipsAdded += result.relationshipsAdded;
+			} else if (result.skipped) totals.skipped++;
+			else {
+				totals.errors++;
 				console.error(`Failed to analyze ${file.path}:`, result.error);
 			}
-
-			// Small delay to avoid rate limiting (adjust as needed)
-			if (result.success && i < files.length - 1) {
-				await sleep(500); // 500ms between API calls
-			}
+			if (result.success && i < files.length - 1) await sleep(500);
 		}
 
-		// Save hashes after all analysis
 		await saveHashes(plugin, hashes);
 		await plugin.graphCache.flush();
-
-		progressNotice.hide();
-
-		if (!vaultAnalysisState.isCancelled) {
-			const mergedInfo = totalNodesMerged > 0 ? `, Merged: ${totalNodesMerged}` : '';
-			new Notice(
-				`Vault analysis complete!\n` +
-				`Analyzed: ${analyzed}, Skipped: ${skipped}, Errors: ${errors}\n` +
-				`Added: ${totalNodesAdded} nodes${mergedInfo}, ${totalRelationshipsAdded} relationships`
-			);
-		}
-
-		// Update status bar
+		const outcome = unavailable ? 'stopped' : vaultAnalysisState.isCancelled ? 'cancelled' : 'complete';
+		new Notice(
+			`Vault analysis ${outcome}.\n` +
+			`Analyzed: ${totals.analyzed}, Skipped: ${totals.skipped}, Excluded: ${totals.excluded}, Errors: ${totals.errors}\n` +
+			`Added: ${totals.nodesAdded} nodes, Merged: ${totals.nodesMerged}, Relationships: ${totals.relationshipsAdded}`
+		);
 		plugin.updateStatusBar();
+		return totals;
 	} finally {
+		progressNotice?.hide();
 		vaultAnalysisState.isRunning = false;
 		vaultAnalysisState.isCancelled = false;
 	}
-
-	return { analyzed, skipped, errors, nodesAdded: totalNodesAdded, nodesMerged: totalNodesMerged, relationshipsAdded: totalRelationshipsAdded };
 }
 
 /**
@@ -446,8 +449,9 @@ export async function autoAnalyzeFile(plugin: SimpleGraphBuilderPlugin, file: TF
 		return;
 	}
 
-	// Never analyze the plugin's own entity notes
-	if (isPluginManagedNote(plugin, file)) {
+	const eligibility = getAnalysisEligibility(plugin, file);
+	if (eligibility.status === 'unavailable') reportAnalysisUnavailable(plugin, eligibility.reason);
+	if (eligibility.status !== 'allowed') {
 		return;
 	}
 
@@ -458,6 +462,7 @@ export async function autoAnalyzeFile(plugin: SimpleGraphBuilderPlugin, file: TF
 		const result = await analyzeFile(plugin, file, hashes);
 
 		loadingNotice.hide();
+		if (result.unavailable && result.error) reportAnalysisUnavailable(plugin, result.error);
 
 		if (result.success) {
 			await saveHashes(plugin, hashes);

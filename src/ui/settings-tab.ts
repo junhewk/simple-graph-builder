@@ -10,6 +10,7 @@ import { getEmbeddings, settingsToEmbeddingOptions } from '../extraction/llm-cli
 import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from '../sync/batch';
 import { normalizeFolder } from '../sync/filenames';
 import { ConfirmModal } from './confirm-modal';
+import { parseExcludedPatterns, supportsNativeExclusions } from '../analysis/exclusions';
 
 interface DeclarativeControl {
 	type: 'toggle' | 'dropdown' | 'text' | 'slider';
@@ -222,6 +223,7 @@ export class SettingsTab extends PluginSettingTab {
 
 	/** Persist declarative controls without overwriting graph data in data.json. */
 	async setControlValue(key: string, value: unknown): Promise<void> {
+		if (key === 'respectObsidianExcludedFiles' && value && !supportsNativeExclusions(this.app)) return;
 		const settings = this.plugin.settings as unknown as Record<string, unknown>;
 		if (key === 'ollamaHost') value = String(value || 'http://localhost:11434');
 		if (key === 'embeddingHost') value = String(value).trim();
@@ -250,6 +252,38 @@ export class SettingsTab extends PluginSettingTab {
 		].includes(key)) {
 			this.refreshSettings();
 		}
+	}
+
+	/** Shared by the searchable settings renderer and the legacy settings page. */
+	private getExclusionSettings(): DeclarativeSettingDefinition[] {
+		return [
+			{
+				name: 'Excluded files and folders',
+				desc: 'One vault-relative path or glob per line: skills/**, templates/*.md, **/SKILL.md. Applies to all analysis, including the current note. Existing graph data is kept.',
+				aliases: ['Exclusions', 'Ignore patterns'],
+				render: setting => setting.addTextArea(text => {
+					text.setPlaceholder('skills/**\ntemplates/*.md\n**/SKILL.md')
+						.setValue(this.plugin.settings.excludedPatterns.join('\n'))
+						.onChange(value => this.setControlValue('excludedPatterns', parseExcludedPatterns(value)));
+					text.inputEl.rows = 4;
+					text.inputEl.addClass('sgb-setting-input-wide');
+				}),
+			},
+			{
+				name: 'Respect Obsidian excluded files',
+				desc: 'Also honor Files and links → Excluded files, using Obsidian’s own matching rules. Off by default.' +
+					(supportsNativeExclusions(this.app) ? '' : ' Unavailable in this Obsidian version; turn this off to resume analysis.'),
+				render: setting => setting.addToggle(toggle => {
+					toggle.setValue(this.plugin.settings.respectObsidianExcludedFiles)
+						.setDisabled(!supportsNativeExclusions(this.app) && !this.plugin.settings.respectObsidianExcludedFiles)
+						.onChange(async value => {
+							await this.setControlValue('respectObsidianExcludedFiles', value);
+							toggle.setValue(this.plugin.settings.respectObsidianExcludedFiles)
+								.setDisabled(!supportsNativeExclusions(this.app) && !this.plugin.settings.respectObsidianExcludedFiles);
+						});
+				}),
+			},
+		];
 	}
 
 	/** Reasoning-effort picker, shared by extraction and Smart Search. */
@@ -412,6 +446,7 @@ export class SettingsTab extends PluginSettingTab {
 						desc: 'Automatically analyze notes when you save them.',
 						control: { type: 'toggle', key: 'autoAnalyzeOnSave' },
 					},
+					...this.getExclusionSettings(),
 				],
 			},
 			{
@@ -698,7 +733,7 @@ export class SettingsTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Analyze entire vault',
-						desc: 'After confirmation, enumerate and analyze every markdown note. Existing unchanged notes are skipped.',
+						desc: 'After confirmation, analyze eligible markdown notes. Excluded and unchanged notes are skipped.',
 						aliases: ['Batch analysis', 'Vault enumeration'],
 						render: setting => setting.addButton(button => {
 							const updateButton = () => {
@@ -712,8 +747,8 @@ export class SettingsTab extends PluginSettingTab {
 									new Notice('Cancelling vault analysis...');
 									return;
 								}
-								const message = 'Analyze every markdown note in your vault?\n\n' +
-									'The plugin will enumerate markdown file paths after confirmation and make up to one API call per changed note.\n\n' +
+								const message = 'Analyze eligible markdown notes in your vault?\n\n' +
+									'The plugin will enumerate markdown file paths after confirmation, skip excluded notes, and send changed eligible notes to your configured provider in chunks.\n\n' +
 									'You can cancel at any time.';
 								void new ConfirmModal(this.app, message, async () => {
 									this.refreshSettings();
@@ -970,6 +1005,11 @@ export class SettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
+
+		for (const definition of this.getExclusionSettings()) {
+			const setting = new Setting(containerEl).setName(definition.name).setDesc(definition.desc ?? '');
+			definition.render?.(setting);
+		}
 
 		// Smart Search model section
 		new Setting(containerEl).setName('Smart search model').setHeading();
@@ -1391,7 +1431,7 @@ export class SettingsTab extends PluginSettingTab {
 		vaultWarning.createEl('strong', { text: 'Warning:' });
 		vaultWarning.appendText(' Analyzing the entire vault will:');
 		const warningList = vaultWarning.createEl('ul');
-		warningList.createEl('li', { text: 'Make one API call per note (can be expensive for large vaults)' });
+		warningList.createEl('li', { text: 'Send changed eligible notes to your provider in chunks (can be expensive for large vaults)' });
 		warningList.createEl('li', { text: 'Take a long time (approx. 10-15 seconds per note)' });
 		warningList.createEl('li', { text: 'May hit rate limits depending on your API plan' });
 		vaultWarning.createEl('em', { text: 'Already analyzed notes will be skipped unless changed.' });
@@ -1419,8 +1459,8 @@ export class SettingsTab extends PluginSettingTab {
 						// Button will update after analysis stops
 						window.setTimeout(updateButtonState, 1000);
 					} else {
-						const message = 'Analyze every markdown note in your vault?\n\n' +
-							'The plugin will enumerate markdown file paths after confirmation and make up to one API call per changed note.\n\n' +
+						const message = 'Analyze eligible markdown notes in your vault?\n\n' +
+							'The plugin will enumerate markdown file paths after confirmation, skip excluded notes, and send changed eligible notes to your configured provider in chunks.\n\n' +
 							`You can cancel at any time.`;
 
 						void new ConfirmModal(this.app, message, async () => {
