@@ -38,6 +38,17 @@ const check = (n: string, c: boolean, extra = '') => { if (!c) fail++; console.l
 		return t.search(['zebra'], 2)[0].key === 'b';
 	})());
 
+	// --- name matching respects word edges; snippets are plain text ---
+	const { calculateMatchScore } = await import('../src/query/match');
+	check('"의료 인공지능" does not contain the name "의료인"', calculateMatchScore('의료 인공지능 윤리', '의료인') < 0.5,
+		String(calculateMatchScore('의료 인공지능 윤리', '의료인')));
+	check('a particle is still allowed', calculateMatchScore('트랜스포머는 무엇인가', '트랜스포머') >= 0.6);
+	check('a plural is still allowed', calculateMatchScore('about transformers', 'transformer') >= 0.6);
+	check('spacing variants still match', calculateMatchScore('머신 러닝의 역사', '머신러닝') >= 0.6);
+	const { plainText } = await import('../src/query/engine');
+	check('snippet text drops markdown', plainText('#### Title\n- item **bold** [[Note|alias]] [x](http://y)\\t- z') .replace(/\s+/g, ' ').trim() === 'Title item bold alias x z',
+		JSON.stringify(plainText('#### Title\n- item **bold** [[Note|alias]] [x](http://y)\\t- z')));
+
 	// --- visibility ---
 	check('config dir hidden', !isQueryVisiblePath(ctx, '.obsidian/plugins/x.md'));
 	check('parent traversal rejected', !isQueryVisiblePath({ ...ctx, isMarkdownFile: () => true }, '../outside.md'));

@@ -43,6 +43,7 @@ class SearchModal extends Modal {
 		const { contentEl } = this;
 		contentEl.empty();
 		contentEl.addClass('simple-graph-search-modal');
+		this.modalEl.addClass('sgb-search-modal');
 
 		contentEl.createEl('h2', { text: 'Search graph and notes' });
 
@@ -218,7 +219,7 @@ class SearchModal extends Modal {
 function describeWhy(hit: NoteHit): string {
 	const parts: string[] = [];
 	if (hit.matchedWords.length) parts.push(`Matched: ${hit.matchedWords.join(', ')}`);
-	if (hit.connections.length) parts.push(`Via: ${hit.connections.map(describeConnection).join('; ')}`);
+	if (hit.connections.length) parts.push(`Via: ${hit.connections.slice(0, 3).map(describeConnection).join('; ')}`);
 	return parts.join(' · ');
 }
 

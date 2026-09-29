@@ -83,6 +83,11 @@ const modernHeaders = (method: string, name?: string) => ({
 	check('discover: lists both eras', body(discover).result.supportedVersions.includes(MODERN) && body(discover).result.supportedVersions.includes('2025-06-18'));
 	check('discover: serverInfo in _meta', body(discover).result._meta['io.modelcontextprotocol/serverInfo'].name === 'simple-graph-builder');
 	check('discover: instructions', typeof body(discover).result.instructions === 'string');
+	check('discover: caching hints (required by CacheableResult)',
+		Number.isInteger(body(discover).result.ttlMs) && body(discover).result.ttlMs >= 0 && ['public', 'private'].includes(body(discover).result.cacheScope));
+	const mlist = await dispatcher.handle({ jsonrpc: '2.0', id: 29, method: 'tools/list', params: { _meta: meta } }, modernHeaders('tools/list'));
+	check('tools/list: caching hints (required by CacheableResult)',
+		body(mlist).result.ttlMs > 0 && body(mlist).result.cacheScope === 'public' && body(mlist).result.tools.length === 6);
 
 	const mcall = await dispatcher.handle(
 		{ jsonrpc: '2.0', id: 21, method: 'tools/call', params: { name: 'graph_overview', arguments: {}, _meta: meta } },

@@ -42,7 +42,35 @@ export function jaccardSimilarity(setA: Set<string>, setB: Set<string>): number 
  * more information per character, so two syllables are already specific.
  */
 function minEmbeddedLength(name: string): number {
-	return /[ㄱ-힝一-鿿]/.test(name) ? 2 : 4;
+	return /[\u3131-\uD79D\u4E00-\u9FFF]/.test(name) ? 2 : 4;
+}
+
+/** Longest tail a word may carry past an embedded name: a particle or plural. */
+const MAX_SUFFIX = 2;
+
+/**
+ * Whether `name` (lowercased, spaces removed) appears in `query` starting at a
+ * word and ending at a word end, give or take a short suffix. Spaces are
+ * ignored for the comparison because Korean spacing varies ("머신 러닝"), but
+ * word edges still count: "의료 인공지능" must not match the name "의료인".
+ */
+function containsAsWord(query: string, name: string): boolean {
+	const words = normalizeKey(query).split(/\s+/).filter(Boolean);
+	const starts: number[] = [];
+	const ends: number[] = [];
+	let joined = '';
+	for (const word of words) {
+		starts.push(joined.length);
+		joined += word;
+		ends.push(joined.length);
+	}
+	for (let i = 0; i < starts.length; i++) {
+		if (!joined.startsWith(name, starts[i])) continue;
+		const end = starts[i] + name.length;
+		const wordEnd = ends.find(e => e >= end);
+		if (wordEnd !== undefined && wordEnd - end <= MAX_SUFFIX) return true;
+	}
+	return false;
 }
 
 /**
@@ -76,7 +104,7 @@ export function calculateMatchScore(query: string, name: string): number {
 		return 0.7 + (lengthRatio * 0.1) + positionBonus;
 	}
 
-	if (nameLower.length >= minEmbeddedLength(nameLower) && queryLower.includes(nameLower)) {
+	if (nameLower.length >= minEmbeddedLength(nameLower) && containsAsWord(query, nameLower)) {
 		const lengthRatio = nameLower.length / queryLower.length;
 		return 0.6 + (lengthRatio * 0.1);
 	}

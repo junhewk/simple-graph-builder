@@ -308,7 +308,7 @@ export class SettingsTab extends PluginSettingTab {
 
 		return [
 			{
-				name: 'Agent access',
+				name: 'Enable agent access',
 				desc: mcp.supported
 					? 'Let AI agents such as Claude Code, Claude Desktop and Codex search this vault and its knowledge graph, read-only. ' +
 						'A server on this computer (127.0.0.1) answers only requests carrying your token, and never serves excluded notes. ' +
@@ -329,8 +329,13 @@ export class SettingsTab extends PluginSettingTab {
 			},
 			{
 				name: 'Status',
-				desc: describeMcpStatus(mcp.status),
+				desc: 'Whether the server is running.',
 				visible: enabled,
+				// Rendered, not a static desc: the searchable settings page builds
+				// these definitions once, before the server has started.
+				render: (setting: Setting) => {
+					setting.setDesc(describeMcpStatus(mcp.status));
+				},
 			},
 			{
 				name: 'Port',

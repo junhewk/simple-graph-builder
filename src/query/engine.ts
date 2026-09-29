@@ -694,7 +694,7 @@ function addSeed(seeds: Map<number, number>, index: number | undefined, weight: 
 
 /** Excerpt around the first query word found, or the opening of the note. */
 export function makeSnippet(content: string, words: { word: string; tokens: string[] }[], width = 240): string {
-	const text = content.normalize('NFC').replace(/^---\n[\s\S]*?\n---\n?/, '');
+	const text = plainText(content);
 	const lower = normalizeText(text);
 	let pos = -1;
 	for (const { word } of words) {
@@ -710,6 +710,23 @@ export function makeSnippet(content: string, words: { word: string; tokens: stri
 	const start = pos < 0 ? 0 : Math.max(0, pos - Math.floor(width / 3));
 	const excerpt = text.slice(start, start + width).replace(/\s+/g, ' ').trim();
 	return `${start > 0 ? '…' : ''}${excerpt}${start + width < text.length ? '…' : ''}`;
+}
+
+/** Markdown reduced to readable text, for previews. */
+export function plainText(markdown: string): string {
+	return markdown
+		.normalize('NFC')
+		.replace(/^---\n[\s\S]*?\n---\n?/, '')
+		.replace(/```[\s\S]*?```/g, ' ')
+		.replace(/!\[\[[^\]]*\]\]/g, ' ')
+		.replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+		.replace(/\[\[([^\]|]*\|)?([^\]]*)\]\]/g, '$2')
+		.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+		.replace(/<[^>]+>/g, ' ')
+		.replace(/\\[tn]/g, '\n')
+		.replace(/^\s{0,3}(#{1,6}|>+|[-*+]|\d+[.)])\s+/gm, '')
+		.replace(/(\*\*|__|~~|==|`)/g, '')
+		.replace(/%%[\s\S]*?%%/g, ' ');
 }
 
 export function noteTitle(path: string): string {

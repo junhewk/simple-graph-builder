@@ -22,6 +22,16 @@ const META_VERSION = 'io.modelcontextprotocol/protocolVersion';
 const META_CAPABILITIES = 'io.modelcontextprotocol/clientCapabilities';
 const META_SERVER_INFO = 'io.modelcontextprotocol/serverInfo';
 
+/**
+ * Caching hints, required on `server/discover` and `tools/list` results in
+ * 2026-07-28 (CacheableResult). Clients that validate results strictly, such
+ * as Claude Code, discard a tool list without them. The tool set never
+ * changes while the server runs; the discovery instructions carry live
+ * counts, so they go stale sooner. Neither result depends on who asks.
+ */
+const TOOLS_TTL_MS = 60 * 60 * 1000;
+const DISCOVER_TTL_MS = 5 * 60 * 1000;
+
 export const ErrorCode = {
 	ParseError: -32700,
 	InvalidRequest: -32600,
@@ -149,13 +159,15 @@ export class McpDispatcher {
 						supportedVersions: SUPPORTED_VERSIONS,
 						capabilities: { tools: { listChanged: false } },
 						instructions: this.instructions(),
+						ttlMs: DISCOVER_TTL_MS,
+						cacheScope: 'public',
 						_meta: { [META_SERVER_INFO]: this.serverInfo() },
 					},
 				};
 			case 'ping':
 				return { ok: {} };
 			case 'tools/list':
-				return { ok: { tools: this.tools.list() } };
+				return { ok: { tools: this.tools.list(), ttlMs: TOOLS_TTL_MS, cacheScope: 'public' } };
 			case 'tools/call': {
 				if (typeof params.name !== 'string') return { invalid: 'tools/call needs a tool name.' };
 				const args = params.arguments === undefined ? {} : params.arguments;

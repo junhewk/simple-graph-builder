@@ -102,9 +102,13 @@
 	min-width: 450px;
 }
 
+.modal.sgb-search-modal {
+	width: min(760px, 92vw);
+}
+
 .simple-graph-search-modal .search-results {
 	margin-top: 1em;
-	max-height: 400px;
+	max-height: 60vh;
 	overflow-y: auto;
 }
 
