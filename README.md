@@ -10,44 +10,60 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ## What's new in 0.7.0
 
-**Agent access.** AI agents such as Claude Code, Claude Desktop and Codex can now
-search your vault and its knowledge graph directly, through a local
-[MCP](https://modelcontextprotocol.io) server built into the plugin. Agents
-can already grep files. What they get here is what grep cannot give them:
-Obsidian's resolved links and backlinks, the extracted entities and their
-typed relations with the note each came from, and graph-aware ranking. Turn
-it on under **Settings → Agent access** and copy the configuration for your
-client. See [Agent Access (MCP)](#agent-access-mcp).
+### Agent access: your vault and graph, for AI agents
 
-- **Advanced search replaces Smart Search.** The search window
-  (**Search graph and notes**) now ranks notes by text match *and* by closeness in
-  the graph, so a note about a matched entity shows up even when it never uses
-  your words. Each result says why it is there. It makes no API calls. The
-  LLM-powered Smart Search is removed: an agent connected over MCP does that job
-  better.
+AI agents such as **Claude Code**, **Codex** and **Claude Desktop** can now query
+your vault and its knowledge graph directly.
+
+The plugin itself provides this. Obsidian has no agent interface of its own:
+while Obsidian is open, Simple Graph Builder runs a small
+[MCP](https://modelcontextprotocol.io) server on your computer at
+`http://127.0.0.1:27180/mcp`. Agents connect to it and call its tools. It is
+off by default and desktop only.
+
+```
+Claude Code / Codex ──HTTP──┐
+                            ├──► Simple Graph Builder (inside Obsidian) ──► your notes + knowledge graph
+Claude Desktop ──► bridge ──┘
+```
+
+Agents can already grep files. The server gives them what grep cannot:
+Obsidian's resolved links and backlinks, the entities extracted from your
+notes, the relations between them with the note each relation came from, and
+search that follows the graph. There are six read-only tools: `search`,
+`get_entity`, `get_note`, `neighbors`, `find_path` and `graph_overview`.
+
+Turn it on under **Settings → Agent access** and copy the command or config for
+your client. Tested with Claude Code 2.1 and Codex 0.158; Claude Desktop
+connects through a small bridge script the plugin provides. Agents cannot
+change your vault or spend your API credits, and notes you exclude from
+analysis are never served. See [Agent Access (MCP)](#agent-access-mcp).
+
+### Also in 0.7.0
+
+- **Advanced search replaces Smart Search.** The search window (**Search graph
+  and notes**, same command and hotkey) ranks notes by text match *and* by
+  closeness in the graph. A note about a matched entity shows up even when it
+  never uses your words, and each result says why it is there: the words it
+  matched and the entities that connect it. It makes no API calls and handles
+  Korean particles (`머신러닝은` finds `머신러닝`). The LLM-powered Smart Search
+  is removed; an agent connected over MCP does that job better.
 - **DeepSeek** is a new provider, defaulting to `deepseek-flash` (DeepSeek-V4.1-Flash).
-- **GPT-6 Luna** (`gpt-6-luna`) is the OpenAI default for new installs.
-- **Renames are followed.** Renaming a note now moves its entities' provenance
-  with it. Before, the graph kept pointing at the old path.
+- **GPT-6 Luna** (`gpt-6-luna`) is the OpenAI default for new installs, and a
+  saved `gpt-5.6-luna` moves to it.
+- **Renamed notes keep their entities.** Renaming a note now moves the
+  provenance of its entities and relations along with it. Before, the graph
+  kept pointing at the old path.
 - **Fix:** a note named like an entity (say `Transformer.md` next to the entity
-  "Transformer") no longer captures that entity's new relationships.
+  "Transformer") no longer captures that entity's new relationships, which
+  were then lost on save.
 
 See [Upgrading to 0.7.0](#upgrading-to-070).
 
-## What's new in 0.6.1
+### Previously, in 0.6.1
 
-Keep configuration files and other unwanted notes out of analysis with the new
-**Excluded files and folders** setting under **Analysis**. For example, add
-`skills/**` to skip that folder and everything beneath it.
-
-- **Exclusions apply everywhere:** manual current-note analysis, vault analysis, and auto-analysis skip matching notes before reading their content or calling a provider.
-- **Optional Obsidian integration:** turn on **Respect Obsidian excluded files** to also honor **Files and links → Excluded files**. This toggle is off by default.
-- **Clear feedback:** vault analysis reports excluded notes separately, and manual analysis explains why a note was skipped.
-- **Existing graph data is kept:** adding an exclusion affects future analysis without removing prior entities, relationships, or written links. Upgrading does not trigger re-analysis.
-
-See [Analysis Exclusions](#analysis-exclusions) for supported patterns and
-[Upgrading to 0.6.0](#upgrading-to-060) for the previous release’s write-back and
-storage improvements. Addresses [issue #1](https://github.com/junhewk/simple-graph-builder/issues/1).
+Analysis exclusions: keep folders and files out of analysis with paths or globs
+such as `skills/**`. See [Analysis Exclusions](#analysis-exclusions).
 
 ## Why Lightweight Ontology?
 
@@ -257,9 +273,12 @@ Off by default. This is the only part of the plugin that writes into your notes.
 
 ### Agent Access (MCP)
 
-Off by default, desktop only. When on, Obsidian runs an
-[MCP](https://modelcontextprotocol.io) server at `http://127.0.0.1:27180/mcp`
-that agents can query while Obsidian is open.
+Off by default, desktop only. When on, this plugin runs an
+[MCP](https://modelcontextprotocol.io) server inside Obsidian at
+`http://127.0.0.1:27180/mcp` that agents can query while Obsidian is open.
+Obsidian itself has no MCP support; the server is this plugin's, and it
+stops when Obsidian quits or the plugin is disabled. It is unrelated to other
+plugins' servers, such as Local REST API.
 
 - **Agent access**: master toggle
 - **Status**: running, or why it is not (for example, the port is taken by another vault)
@@ -291,6 +310,23 @@ The agent gets six read-only tools:
 
 Agents are told to cite notes as `[[wikilinks]]` and to treat note text as data,
 not instructions.
+
+**How relationships reach the agent.** The graph combines three kinds of connection:
+
+| Kind | Example | Source |
+|------|---------|--------|
+| Entity → entity relation | Anthropic —develops→ Claude | Extracted by the LLM during analysis, with a free-form verb, an optional detail, and the note it came from |
+| Note → entity mention | *AI 기본법.md* mentions 인공지능 | Which notes each entity was extracted from |
+| Note → note link | `[[240604 질병청 간담회]]` | Obsidian's own resolved wikilinks, for every note, analyzed or not |
+
+Each tool uses them differently:
+
+- **`search`** combines all three into one network and spreads relevance outward from what your words matched. Relations and mentions count fully; wikilinks count half.
+- **`get_entity`** and **`neighbors`** return relations, with verb, direction, detail and the note each came from.
+- **`get_note`** returns links, backlinks and mentioned entities.
+- **`find_path`** tries relations first, then goes through notes.
+
+A relation is served only when both of its entities and its source note are visible. Relation quality is only as good as extraction: verbs are not standardized, and duplicate entities (say, "AI" and "인공지능") split the graph until they are merged.
 
 **What agents can and cannot see.** Only Markdown notes, and never anything in
 `.obsidian` or other dot folders. Notes matching your

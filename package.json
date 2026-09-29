@@ -1,6 +1,6 @@
 {
 	"name": "simple-graph-builder",
-	"version": "0.6.1",
+	"version": "0.7.0",
 	"description": "Build a knowledge graph from your notes using LLM-powered entity extraction, and let AI agents search it over MCP. Supports Claude, OpenAI, Gemini, DeepSeek, and Ollama.",
 	"main": "main.js",
 	"scripts": {
