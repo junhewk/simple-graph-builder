@@ -8,7 +8,8 @@ import { DEFAULT_EFFORT } from './extraction/providers/effort';
  * 3 = per-provider API keys
  * 4 = vault write-back settings (additive: defaults fill themselves in)
  * 5 = analysis exclusions (additive)
- * 6 = Smart Search removed (its keys deleted); gpt-5.6-luna -> gpt-6-luna
+ * 6 = Smart Search removed (its keys deleted); gpt-5.6-luna -> gpt-6-luna;
+ *     agent access settings (additive)
  */
 export const CURRENT_SETTINGS_VERSION = 6;
 
@@ -55,6 +56,11 @@ export const DEFAULT_SETTINGS: Settings = {
 	writeRelationshipsSection: true,
 	enableRelatedWriteback: false,
 	relatedPropertyName: 'related',
+	// Agent access (off by default)
+	mcpEnabled: false,
+	mcpPort: 27180,
+	mcpNodePath: 'node',
+	mcpToken: '',
 	settingsVersion: CURRENT_SETTINGS_VERSION,
 };
 

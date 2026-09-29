@@ -66,3 +66,10 @@ export class Notice {
   setMessage(message: string) { notices.push(message); return this; }
   hide() { /* nothing to tear down here */ }
 }
+/** The MCP server is desktop-only; suites run as "mobile" unless they opt in. */
+export const Platform = { isDesktopApp: false, isMobile: false, isMobileApp: false };
+export class FileSystemAdapter {
+  constructor(private base = '/vault') {}
+  getBasePath() { return this.base; }
+  getFullPath(path: string) { return `${this.base}/${path}`; }
+}

@@ -16,6 +16,7 @@ import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWrite
 import { QueryEngine } from './query/engine';
 import { ObsidianVaultSource } from './query/obsidian-source';
 import { loadHashes, renameNoteHash, saveHashes } from './graph/hashes';
+import { McpController } from './mcp/controller';
 
 export default class SimpleGraphBuilderPlugin extends Plugin {
 	settings: Settings;
@@ -23,6 +24,8 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	/** Search and lookup over graph + vault, shared by the search modal and MCP. */
 	queryEngine: QueryEngine;
 	private querySource: ObsidianVaultSource;
+	/** Agent access: the local MCP server. */
+	mcp: McpController;
 	/** Exclusion settings the query index was built under. */
 	private indexedExclusions = '';
 	/** Marks vault writes the plugin made, so they don't look like user edits. */
@@ -54,6 +57,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		this.querySource = new ObsidianVaultSource(this);
 		this.queryEngine = new QueryEngine(this.graphCache, this.querySource);
 		this.indexedExclusions = exclusionKey(this.settings);
+		this.mcp = new McpController(this);
 
 		// Register graph view
 		this.registerView(GRAPH_VIEW_TYPE, (leaf) => new GraphView(leaf, this));
@@ -180,6 +184,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		this.app.workspace.onLayoutReady(() => {
 			this.repairNoteLayer(false);
 			this.registerIndexEvents();
+			if (this.settings.mcpEnabled) void this.mcp.start();
 		});
 	}
 
@@ -339,6 +344,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	onunload(): void {
 		// Flush any pending graph changes
 		void this.graphCache.flush();
+		void this.mcp?.stop();
 	}
 
 	async loadSettings() {

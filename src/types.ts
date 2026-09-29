@@ -428,6 +428,17 @@ export interface Settings {
 	writeRelationshipsSection: boolean; // list relationships as links in entity notes
 	enableRelatedWriteback: boolean; // add a `related:` property to analyzed notes
 	relatedPropertyName: string;     // default: 'related'
+	// Agent access (MCP). Desktop only, off by default: a local HTTP server.
+	mcpEnabled: boolean;
+	mcpPort: number;                 // default: 27180
+	/** Node executable for the Claude Desktop bridge; GUI apps on macOS often lack the shell PATH. */
+	mcpNodePath: string;
+	/**
+	 * Fallback token storage for Obsidian < 1.8.7 only. Newer versions keep the
+	 * token in per-device local storage so it is not synced or committed with
+	 * the vault's config folder.
+	 */
+	mcpToken: string;
 	// Migration bookkeeping. Bump when a migration step is added; see
 	// src/settings-migration.ts.
 	settingsVersion: number;

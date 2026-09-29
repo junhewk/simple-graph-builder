@@ -240,7 +240,8 @@ function error(status: number, id: Id | null, code: number, message: string, dat
 }
 
 function quote(value: unknown): string {
-	return value === undefined ? '(missing)' : `'${String(value)}'`;
+	if (value === undefined) return '(missing)';
+	return `'${typeof value === 'string' ? value : JSON.stringify(value)}'`;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {

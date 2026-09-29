@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import './graph-harness';
 import { SettingsTab } from '../src/ui/settings-tab';
 import SimpleGraphBuilderPlugin from '../src/main';
+import { McpController } from '../src/mcp/controller';
 import { Setting, pendingDebounces, flushDebounces, allBodies, resetBodies, notices } from './obsidian-stub';
 import { fakeSyncPlugin } from './vault-stub';
 import { DEFAULT_SETTINGS, CURRENT_SETTINGS_VERSION } from '../src/settings';
@@ -67,6 +68,8 @@ async function main() {
 		await ctx.graphCache.ensureLoaded();
 		const { plugin, vault } = ctx;
 		plugin.saveSettings = SimpleGraphBuilderPlugin.prototype.saveSettings.bind(plugin);
+		// The settings page draws the Agent access section from the controller.
+		(plugin as unknown as { mcp: McpController }).mcp = new McpController(plugin as never);
 		await plugin.saveData({ graph: { nodes: [], edges: [], version: 3 }, hashes: { hashes: [{ path: 'old.md', hash: 'old', analyzedAt: 1 }] } });
 		const before = ctx.latest();
 		let enumerations = 0;

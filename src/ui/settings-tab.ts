@@ -1,4 +1,4 @@
-import { App, Notice, PluginSettingTab, Setting, TextComponent } from 'obsidian';
+import { App, Notice, PluginSettingTab, Setting, TextComponent, debounce } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
 import { ApiProvider, EmbeddingProvider, ExtractionMode, LocalApiStyle } from '../types';
 import { MODEL_OPTIONS, EMBEDDING_MODEL_OPTIONS } from '../settings';
@@ -11,6 +11,7 @@ import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWrite
 import { normalizeFolder } from '../sync/filenames';
 import { ConfirmModal } from './confirm-modal';
 import { parseExcludedPatterns, supportsNativeExclusions } from '../analysis/exclusions';
+import type { McpStatus } from '../mcp/controller';
 
 interface DeclarativeControl {
 	type: 'toggle' | 'dropdown' | 'text' | 'slider';
@@ -285,6 +286,130 @@ export class SettingsTab extends PluginSettingTab {
 		];
 	}
 
+	// A port typed digit by digit must not restart the server per keystroke.
+	private readonly debouncedMcpRestart = debounce(() => {
+		void this.plugin.mcp.restart().then(() => this.refreshSettings());
+	}, 1000, true);
+
+	/**
+	 * Agent access (MCP). Shared by both settings renderers. Render-only items,
+	 * so the legacy page can draw them with the same code.
+	 */
+	private getAgentAccessSettings(): DeclarativeSettingDefinition[] {
+		const mcp = this.plugin.mcp;
+		const enabled = () => this.plugin.settings.mcpEnabled && mcp.supported;
+		const copy = (text: string, what: string) => {
+			void navigator.clipboard.writeText(text).then(
+				() => new Notice(`${what} copied.`),
+				() => new Notice(`Could not copy ${what.toLowerCase()}.`)
+			);
+		};
+		const masked = (text: string) => text.split(mcp.token()).join('<token>');
+
+		return [
+			{
+				name: 'Agent access',
+				desc: mcp.supported
+					? 'Let AI agents such as Claude Code, Claude Desktop and Codex search this vault and its knowledge graph, read-only. ' +
+						'A server on this computer (127.0.0.1) answers only requests carrying your token, and never serves excluded notes. ' +
+						'Entity descriptions may reflect any note an entity was extracted from.'
+					: 'Agent access runs a local server, so it is available on desktop only.',
+				aliases: ['MCP', 'Claude Code', 'Codex', 'Claude Desktop'],
+				render: (setting: Setting) => {
+					setting.addToggle(toggle => {
+						toggle.setValue(enabled()).setDisabled(!mcp.supported).onChange(async value => {
+							this.plugin.settings.mcpEnabled = value;
+							await this.plugin.saveSettings();
+							if (value) await mcp.start();
+							else await mcp.stop();
+							this.refreshSettings();
+						});
+					});
+				},
+			},
+			{
+				name: 'Status',
+				desc: describeMcpStatus(mcp.status),
+				visible: enabled,
+			},
+			{
+				name: 'Port',
+				desc: 'Local port for the server. Change it if another vault or app already uses it; then copy the connection settings again.',
+				visible: enabled,
+				render: (setting: Setting) => {
+					setting.addText(text => {
+						text.setPlaceholder('27180').setValue(String(this.plugin.settings.mcpPort)).onChange(async value => {
+							const port = Number(value);
+							if (!Number.isInteger(port) || port < 1024 || port > 65535) return;
+							this.plugin.settings.mcpPort = port;
+							await this.plugin.saveSettings();
+							this.debouncedMcpRestart();
+						});
+					});
+				},
+			},
+			{
+				name: 'Access token',
+				desc: mcp.tokenIsLocal
+					? 'Stored on this device only, not in the vault, so it is not synced. Regenerating it disconnects every configured agent.'
+					: 'Stored in this plugin\'s data.json. Regenerating it disconnects every configured agent.',
+				visible: enabled,
+				render: (setting: Setting) => {
+					setting.addButton(button => button.setButtonText('Copy').onClick(() => copy(mcp.token(), 'Token')));
+					setting.addButton(button => button.setButtonText('Regenerate').onClick(() => {
+						new ConfirmModal(this.app, 'Regenerate the access token? Agents configured with the old one stop working until you paste the new settings.', async () => {
+							await mcp.regenerateToken();
+							this.refreshSettings();
+						}).open();
+					}));
+				},
+			},
+			{
+				name: 'Claude Code',
+				desc: 'Run the copied command once in a terminal.',
+				visible: enabled,
+				render: (setting: Setting) => {
+					setting.setDesc(`Run this once in a terminal: ${masked(mcp.snippets().claudeCode)}`);
+					setting.addButton(button => button.setButtonText('Copy command').setCta().onClick(() => copy(mcp.snippets().claudeCode, 'Command')));
+				},
+			},
+			{
+				name: 'Codex',
+				desc: 'Add this block to ~/.codex/config.toml.',
+				visible: enabled,
+				render: (setting: Setting) => {
+					setting.addButton(button => button.setButtonText('Copy config').onClick(() => copy(mcp.snippets().codex, 'Codex config')));
+				},
+			},
+			{
+				name: 'Claude Desktop',
+				desc: 'Merge the copied config into claude_desktop_config.json (Claude Desktop → Settings → Developer → Edit config), then restart Claude Desktop. It runs a small bridge script from this plugin\'s folder and needs Node.js.',
+				visible: enabled,
+				render: (setting: Setting) => {
+					const config = mcp.snippets().claudeDesktop;
+					if (!config) {
+						setting.setDesc('Unavailable: the vault is not on a local file system.');
+						return;
+					}
+					setting.addButton(button => button.setButtonText('Copy config').onClick(() => copy(config, 'Claude Desktop config')));
+				},
+			},
+			{
+				name: 'Node.js executable',
+				desc: 'Used by the Claude Desktop config. If Claude Desktop cannot find node, enter its full path (run "which node" in a terminal).',
+				visible: enabled,
+				render: (setting: Setting) => {
+					setting.addText(text => {
+						text.setPlaceholder('Path to node').setValue(this.plugin.settings.mcpNodePath).onChange(async value => {
+							this.plugin.settings.mcpNodePath = value.trim() || 'node';
+							await this.plugin.saveSettings();
+						});
+					});
+				},
+			},
+		];
+	}
+
 	/** Reasoning-effort picker. */
 	private addEffortSetting(
 		container: HTMLElement,
@@ -418,6 +543,11 @@ export class SettingsTab extends PluginSettingTab {
 					},
 					...this.getExclusionSettings(),
 				],
+			},
+			{
+				type: 'group',
+				heading: 'Agent access',
+				items: this.getAgentAccessSettings(),
 			},
 			{
 				type: 'group',
@@ -841,7 +971,7 @@ export class SettingsTab extends PluginSettingTab {
 		this.providerSettingsEls.deepseek = containerEl.createDiv();
 		new Setting(this.providerSettingsEls.deepseek)
 			.setName('API key')
-			.setDesc('DeepSeek key')
+			.setDesc('Your DeepSeek API key')
 			.addText(text => {
 				text
 					.setPlaceholder('Enter API key')
@@ -954,6 +1084,14 @@ export class SettingsTab extends PluginSettingTab {
 			});
 
 		for (const definition of this.getExclusionSettings()) {
+			const setting = new Setting(containerEl).setName(definition.name).setDesc(definition.desc ?? '');
+			definition.render?.(setting);
+		}
+
+		// Agent access section
+		new Setting(containerEl).setName('Agent access').setHeading();
+		for (const definition of this.getAgentAccessSettings()) {
+			if (definition.visible && !definition.visible()) continue;
 			const setting = new Setting(containerEl).setName(definition.name).setDesc(definition.desc ?? '');
 			definition.render?.(setting);
 		}
@@ -1582,5 +1720,20 @@ export class SettingsTab extends PluginSettingTab {
 			console.error('Failed to compute embeddings:', error);
 			new Notice(`Failed to compute embeddings: ${(error as Error).message}`);
 		}
+	}
+}
+
+function describeMcpStatus(status: McpStatus): string {
+	switch (status.state) {
+		case 'running':
+			return `Running at http://127.0.0.1:${status.port}/mcp`;
+		case 'starting':
+			return 'Starting…';
+		case 'error':
+			return status.message;
+		case 'unsupported':
+			return 'Not available on this device.';
+		default:
+			return 'Stopped.';
 	}
 }
