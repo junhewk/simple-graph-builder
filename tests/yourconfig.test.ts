@@ -1,5 +1,5 @@
 import { settingsToExtractionOptions, settingsToEmbeddingOptions, getEmbeddings } from '../src/extraction/llm-client';
-import { getSmartSearchConfig, DEFAULT_SETTINGS, supportsToolCalling } from '../src/settings';
+import { DEFAULT_SETTINGS } from '../src/settings';
 import { getAdapter } from '../src/extraction/providers/index';
 import { Settings } from '../src/types';
 import { captured, setScripted } from './obsidian-stub';
@@ -15,7 +15,6 @@ const s: Settings = {
   localApiStyle: 'openai',
   ollamaHost: 'http://100.122.169.13:8091',
   ollamaModel: 'qwen3.6-27b-mtp-q8',
-  smartSearchOllamaModel: 'qwen3.6-27b-mtp-q8',
   enableEmbeddings: true,
   embeddingProvider: 'openai',
   embeddingApiKey: 'sk-cloud-key',
@@ -27,10 +26,6 @@ const s: Settings = {
   check('extraction routes to the local server', ex.provider === 'ollama' && ex.ollamaHost === 'http://100.122.169.13:8091');
   check('extraction uses the OpenAI-compatible style', ex.localApiStyle === 'openai');
   check('extraction model is the served one', ex.model === 'qwen3.6-27b-mtp-q8');
-
-  const ss = getSmartSearchConfig(s);
-  check('smart search follows the same local server', ss.provider === 'ollama' && ss.model === 'qwen3.6-27b-mtp-q8');
-  check('smart search is not blocked by the tool-calling denylist', supportsToolCalling(s) === true);
 
   const adapter = getAdapter('ollama', { apiKey: '', ollamaHost: s.ollamaHost, localApiStyle: 'openai' });
   check('local model is allowed to do structured output', adapter.capabilities(s.ollamaModel).structuredOutput === true);

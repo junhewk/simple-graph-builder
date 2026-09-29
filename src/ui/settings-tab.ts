@@ -246,8 +246,7 @@ export class SettingsTab extends PluginSettingTab {
 
 		await this.plugin.saveSettings();
 		if ([
-			'apiProvider', 'localApiStyle', 'useSeparateSmartSearchModel',
-			'smartSearchProvider', 'enableEmbeddings', 'embeddingProvider',
+			'apiProvider', 'localApiStyle', 'enableEmbeddings', 'embeddingProvider',
 			'embeddingLocalApiStyle', 'resolutionThresholdHigh', 'resolutionThresholdLow',
 		].includes(key)) {
 			this.refreshSettings();
@@ -286,7 +285,7 @@ export class SettingsTab extends PluginSettingTab {
 		];
 	}
 
-	/** Reasoning-effort picker, shared by extraction and Smart Search. */
+	/** Reasoning-effort picker. */
 	private addEffortSetting(
 		container: HTMLElement,
 		opts: { name: string; desc: string; get: () => EffortLevel; set: (value: EffortLevel) => Promise<void> }
@@ -321,12 +320,6 @@ export class SettingsTab extends PluginSettingTab {
 			gemini: 'geminiModel',
 			ollama: 'ollamaModel',
 		} as const;
-		const smartSearchModelKeys = {
-			claude: 'smartSearchClaudeModel',
-			openai: 'smartSearchOpenaiModel',
-			gemini: 'smartSearchGeminiModel',
-			ollama: 'smartSearchOllamaModel',
-		} as const;
 		const providerOptions = {
 			claude: 'Claude',
 			openai: 'OpenAI',
@@ -347,27 +340,6 @@ export class SettingsTab extends PluginSettingTab {
 				render: (setting: Setting) => this.configureModelSetting(setting, {
 					name: `${providerLabels[provider]} model`,
 					desc: 'Model to use for entity extraction.',
-					provider,
-					get: () => this.plugin.settings[key],
-					set: async model => {
-						this.plugin.settings[key] = model;
-						await this.plugin.saveSettings();
-					},
-				}),
-			};
-		});
-
-		const smartSearchModels = (Object.keys(providerLabels) as ApiProvider[]).map(provider => {
-			const key = smartSearchModelKeys[provider];
-			return {
-				name: `${providerLabels[provider]} model for smart search`,
-				desc: 'Model used to answer smart search queries.',
-				aliases: ['Smart search model'],
-				visible: () => this.plugin.settings.useSeparateSmartSearchModel &&
-					this.plugin.settings.smartSearchProvider === provider,
-				render: (setting: Setting) => this.configureModelSetting(setting, {
-					name: `${providerLabels[provider]} model for smart search`,
-					desc: 'Model used to answer smart search queries.',
 					provider,
 					get: () => this.plugin.settings[key],
 					set: async model => {
@@ -414,11 +386,6 @@ export class SettingsTab extends PluginSettingTab {
 						control: { type: 'text', key: 'ollamaHost', placeholder: 'http://localhost:11434' },
 					},
 					...extractionModels,
-					{
-						name: 'Local smart search compatibility',
-						desc: 'Smart search requires tool calling. Qwen3 and gpt-oss are recommended; Gemma3 and deepseek-r1 have limited support.',
-						visible: () => this.plugin.settings.apiProvider === 'ollama',
-					},
 				],
 			},
 			{
@@ -447,45 +414,6 @@ export class SettingsTab extends PluginSettingTab {
 						control: { type: 'toggle', key: 'autoAnalyzeOnSave' },
 					},
 					...this.getExclusionSettings(),
-				],
-			},
-			{
-				type: 'group',
-				heading: 'Smart search model',
-				items: [
-					{
-						name: 'Use separate model for smart search',
-						desc: 'Configure a different provider and model for smart search queries.',
-						control: { type: 'toggle', key: 'useSeparateSmartSearchModel' },
-					},
-					{
-						name: 'Smart search provider',
-						desc: 'Select the provider for smart search queries.',
-						visible: () => this.plugin.settings.useSeparateSmartSearchModel,
-						control: { type: 'dropdown', key: 'smartSearchProvider', options: providerOptions },
-					},
-					...(['claude', 'openai', 'gemini'] as ApiProvider[]).map(provider => ({
-						name: `${providerLabels[provider]} API key for smart search`,
-						desc: 'Smart search uses a different provider, so it needs that provider’s key.',
-						aliases: ['Smart search API key'],
-						visible: () => this.plugin.settings.useSeparateSmartSearchModel &&
-							this.plugin.settings.smartSearchProvider === provider &&
-							this.plugin.settings.apiProvider !== provider,
-						render: (setting: Setting) => {
-							this.configureApiKeySetting(setting, provider);
-							if (!this.plugin.settings.apiKeys?.[provider]) {
-								setting.descEl.createDiv({ cls: 'sgb-model-warning sgb-model-warning-error' })
-									.appendText(`No ${providerLabels[provider]} key is configured.`);
-							}
-						},
-					})),
-					...smartSearchModels,
-					{
-						name: 'Smart search reasoning effort',
-						desc: 'How much the model reasons while exploring the graph.',
-						visible: () => this.plugin.settings.useSeparateSmartSearchModel,
-						control: { type: 'dropdown', key: 'smartSearchEffort', options: effortOptions },
-					},
 				],
 			},
 			{
@@ -951,17 +879,6 @@ export class SettingsTab extends PluginSettingTab {
 			},
 		});
 
-		// Tool calling warning for Ollama
-		const ollamaWarning = this.providerSettingsEls.ollama.createDiv({ cls: 'setting-item-description sgb-ollama-warning' });
-		ollamaWarning.createEl('strong', { text: 'Smart search compatibility:' });
-		ollamaWarning.appendText(' Some models have limited tool calling support.');
-		ollamaWarning.createEl('br');
-		ollamaWarning.appendText('Limited support: ');
-		ollamaWarning.createEl('code', { text: 'Gemma3' });
-		ollamaWarning.createEl('br');
-		ollamaWarning.appendText('Recommended: ');
-		ollamaWarning.createEl('code', { text: 'Qwen3' });
-
 		// Update visibility based on current provider
 		this.updateProviderSettings();
 
@@ -1009,129 +926,6 @@ export class SettingsTab extends PluginSettingTab {
 		for (const definition of this.getExclusionSettings()) {
 			const setting = new Setting(containerEl).setName(definition.name).setDesc(definition.desc ?? '');
 			definition.render?.(setting);
-		}
-
-		// Smart Search model section
-		new Setting(containerEl).setName('Smart search model').setHeading();
-
-		const smartSearchInfo = containerEl.createDiv({ cls: 'setting-item-description sgb-smart-search-info' });
-		smartSearchInfo.appendText('By default, Smart search uses the same model as extraction. You can configure a separate model for better search results (e.g., use a faster model for extraction and a more capable model for search).');
-
-		// Use separate Smart Search model toggle
-		new Setting(containerEl)
-			.setName('Use separate model for smart search')
-			.setDesc('Enable to configure a different model for smart search queries.')
-			.addToggle(toggle => {
-				toggle
-					.setValue(this.plugin.settings.useSeparateSmartSearchModel)
-					.onChange(async (value) => {
-						this.plugin.settings.useSeparateSmartSearchModel = value;
-						await this.plugin.saveSettings();
-						this.refreshSettings(); // Refresh to show/hide model settings
-					});
-			});
-
-		// Only show Smart Search model settings if enabled
-		if (this.plugin.settings.useSeparateSmartSearchModel) {
-			// Smart Search provider
-			new Setting(containerEl)
-				.setName('Smart search provider')
-				.setDesc('Select the provider for smart search queries.')
-				.addDropdown(dropdown => {
-					dropdown
-						.addOption('claude', 'Claude')
-						.addOption('openai', 'OpenAI')
-						.addOption('gemini', 'Gemini')
-						.addOption('ollama', 'Ollama (local)')
-						.setValue(this.plugin.settings.smartSearchProvider)
-						.onChange(async (value) => {
-							this.plugin.settings.smartSearchProvider = value as ApiProvider;
-							await this.plugin.saveSettings();
-							this.refreshSettings(); // Refresh to update model options
-						});
-				});
-
-			// Smart Search model for selected provider
-			const smartSearchProvider = this.plugin.settings.smartSearchProvider;
-			const smartSearchModelKeys = {
-				claude: 'smartSearchClaudeModel',
-				openai: 'smartSearchOpenaiModel',
-				gemini: 'smartSearchGeminiModel',
-				ollama: 'smartSearchOllamaModel',
-			} as const;
-			const smartSearchLabels: Record<ApiProvider, string> = {
-				claude: 'Claude',
-				openai: 'OpenAI',
-				gemini: 'Gemini',
-				ollama: 'Ollama',
-			};
-			const smartSearchKey = smartSearchModelKeys[smartSearchProvider];
-
-			if (smartSearchProvider !== 'ollama' && smartSearchProvider !== this.plugin.settings.apiProvider) {
-				// That provider's own settings block is hidden, so surface its key here.
-				const ssKey = new Setting(containerEl)
-					.setName(`${smartSearchLabels[smartSearchProvider]} API key`)
-					.setDesc('Smart search uses a different provider, so it needs that provider’s key.')
-					.addText(text => {
-						text
-							.setPlaceholder('Enter API key')
-							.setValue(this.plugin.settings.apiKeys?.[smartSearchProvider] ?? '')
-							.onChange(async (value) => {
-								this.plugin.settings.apiKeys = {
-									...this.plugin.settings.apiKeys,
-									[smartSearchProvider]: value,
-								};
-								await this.plugin.saveSettings();
-								this.refreshSettings();
-							});
-						text.inputEl.type = 'password';
-					});
-
-				if (!this.plugin.settings.apiKeys?.[smartSearchProvider]) {
-					ssKey.descEl
-						.createDiv({ cls: 'sgb-model-warning sgb-model-warning-error' })
-						.appendText(`No ${smartSearchLabels[smartSearchProvider]} key set. Smart search will fail until one is entered.`);
-				}
-			}
-
-			this.addModelSetting(containerEl, {
-				name: `${smartSearchLabels[smartSearchProvider]} model for smart search`,
-				desc: 'Model used to answer smart search queries.',
-				provider: smartSearchProvider,
-				get: () => this.plugin.settings[smartSearchKey],
-				set: async (value) => {
-					this.plugin.settings[smartSearchKey] = value;
-					await this.plugin.saveSettings();
-				},
-			});
-
-			this.addEffortSetting(containerEl, {
-				name: 'Smart search reasoning effort',
-				desc: 'How much the model reasons while exploring the graph. Higher levels answer harder questions but cost more.',
-				get: () => this.plugin.settings.smartSearchEffort,
-				set: async (value) => {
-					this.plugin.settings.smartSearchEffort = value;
-					await this.plugin.saveSettings();
-				},
-			});
-
-			if (smartSearchProvider === 'ollama') {
-				const warning = containerEl.createDiv({
-					cls: 'setting-item-description sgb-ollama-warning',
-				});
-				warning.createEl('strong', { text: 'Tool calling required:' });
-				warning.appendText(' smart search works by querying the graph, so the model must support tool calls.');
-				warning.createEl('br');
-				warning.appendText('Limited support: ');
-				warning.createEl('code', { text: 'deepseek-r1:*' });
-				warning.appendText(', ');
-				warning.createEl('code', { text: 'gemma3:*' });
-				warning.createEl('br');
-				warning.appendText('Recommended: ');
-				warning.createEl('code', { text: 'qwen3:*' });
-				warning.appendText(', ');
-				warning.createEl('code', { text: 'gpt-oss:*' });
-			}
 		}
 
 		// View section

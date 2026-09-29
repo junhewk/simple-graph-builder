@@ -1,3 +1,10 @@
+/**
+ * Provider-neutral tool-calling loop.
+ *
+ * No production caller since Smart Search was removed in 0.7.0. Kept because
+ * tool calling is part of the adapter contract, and it is what the adapters'
+ * tool round-trip tests drive.
+ */
 import {
 	Credentials,
 	LlmRequest,

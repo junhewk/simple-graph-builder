@@ -34,21 +34,6 @@ export const MODEL_OPTIONS: Record<ApiProvider, string[]> = {
 	],
 };
 
-/**
- * Local Ollama models known to handle tool calling poorly. Cloud providers are
- * not listed: all six supported cloud models call tools reliably.
- */
-const LIMITED_TOOL_SUPPORT_PATTERNS = [
-	'deepseek-r1', // Reasoning-focused, limited tool support
-	'gemma3',      // Limited tool calling support
-];
-
-export function getLimitedToolSupportModels(): string[] {
-	return ['deepseek-r1:*', 'gemma3:*'];
-}
-
-export type ModelPurpose = 'extraction' | 'smartSearch';
-
 export interface ResolvedModel {
 	provider: ApiProvider;
 	model: string;
@@ -60,31 +45,21 @@ export interface ResolvedModel {
 }
 
 /**
- * The single provider/model/key resolver. Replaces the three near-duplicate
- * lookup blocks that previously lived in llm-client.ts and settings.ts and had
- * already drifted apart (Smart Search used to send the extraction provider's
- * API key regardless of which provider it was actually calling).
+ * The single provider/model/key resolver. Every model call in the plugin is
+ * extraction (or its entity-match verification) since Smart Search was removed
+ * in 0.7.0.
  */
-export function resolveModelConfig(settings: Settings, purpose: ModelPurpose): ResolvedModel {
-	const useSeparate = purpose === 'smartSearch' && settings.useSeparateSmartSearchModel;
+export function resolveModelConfig(settings: Settings): ResolvedModel {
+	const provider: ApiProvider = settings.apiProvider;
 
-	const provider: ApiProvider = useSeparate ? settings.smartSearchProvider : settings.apiProvider;
+	const model = pick(provider, {
+		claude: settings.claudeModel,
+		openai: settings.openaiModel,
+		gemini: settings.geminiModel,
+		ollama: settings.ollamaModel,
+	});
 
-	const model = useSeparate
-		? pick(provider, {
-			claude: settings.smartSearchClaudeModel,
-			openai: settings.smartSearchOpenaiModel,
-			gemini: settings.smartSearchGeminiModel,
-			ollama: settings.smartSearchOllamaModel,
-		})
-		: pick(provider, {
-			claude: settings.claudeModel,
-			openai: settings.openaiModel,
-			gemini: settings.geminiModel,
-			ollama: settings.ollamaModel,
-		});
-
-	const effort = purpose === 'smartSearch' ? settings.smartSearchEffort : settings.extractionEffort;
+	const effort = settings.extractionEffort;
 
 	return {
 		provider,
@@ -110,7 +85,7 @@ function pick(provider: ApiProvider, models: Record<ApiProvider, string>): strin
  * saved a per-provider key.
  */
 export function getExtractionConfigError(settings: Settings): string | null {
-	const { provider, apiKey, model } = resolveModelConfig(settings, 'extraction');
+	const { provider, apiKey, model } = resolveModelConfig(settings);
 	if (provider !== 'ollama' && !apiKey) {
 		return 'Please configure your API key in settings';
 	}
@@ -118,17 +93,4 @@ export function getExtractionConfigError(settings: Settings): string | null {
 		return 'Ollama model must be set in settings first';
 	}
 	return null;
-}
-
-/**
- * Whether the effective Smart Search model can call tools at all. Smart Search
- * is useless without them — it can only answer by querying the graph.
- */
-export function supportsToolCalling(settings: Settings): boolean {
-	const { provider, model } = resolveModelConfig(settings, 'smartSearch');
-	if (provider !== 'ollama') {
-		return true;
-	}
-	const lower = model.toLowerCase();
-	return !LIMITED_TOOL_SUPPORT_PATTERNS.some((pattern) => lower.includes(pattern));
 }

@@ -356,48 +356,6 @@ export interface OntologyExtractionResult {
 }
 
 // ============================================
-// Graph Search Types (for smart search tools)
-// ============================================
-
-export interface SearchNodeResult {
-	name: string;
-	entityType: EntityType;
-	label?: string;          // Legacy: for backwards compatibility
-	score: number;
-}
-
-export interface RelationshipResult {
-	from: string;
-	to: string;
-	relationship: string;    // free-form verb
-	type?: string; // Legacy: for backwards compatibility
-	detail?: string;
-}
-
-export interface ConnectedNodeResult {
-	name: string;
-	entityType: EntityType;
-	label?: string;          // Legacy: for backwards compatibility
-	path: string[];
-}
-
-export interface PathStep {
-	node: string;
-	via?: string;            // free-form relationship verb
-	detail?: string;
-}
-
-export interface PathResult {
-	found: boolean;
-	path: PathStep[];
-}
-
-export interface SourceNoteResult {
-	path: string;
-	title: string;
-}
-
-// ============================================
 // API & Settings
 // ============================================
 
@@ -431,7 +389,7 @@ export interface Settings {
 	 * fallback so installs that predate per-provider keys keep working.
 	 */
 	apiKey: string;
-	/** Per-provider API keys, so a cross-provider Smart Search sends the right one. */
+	/** Per-provider API keys, so switching providers never sends the wrong key. */
 	apiKeys: Partial<Record<ApiProvider, string>>;
 	// Model selection per provider (for KG building / extraction)
 	claudeModel: string;
@@ -447,14 +405,6 @@ export interface Settings {
 	autoAnalyzeOnSave: boolean;  // Analyze notes automatically when saved
 	excludedPatterns: string[]; // Vault-relative paths and simple globs, one per UI line
 	respectObsidianExcludedFiles: boolean; // Opt in to Obsidian's native exclusion list
-	// Smart Search model settings (separate from extraction)
-	useSeparateSmartSearchModel: boolean;  // default: false - use same model as extraction
-	smartSearchProvider: ApiProvider;      // default: same as apiProvider
-	smartSearchClaudeModel: string;
-	smartSearchOpenaiModel: string;
-	smartSearchGeminiModel: string;
-	smartSearchOllamaModel: string;
-	smartSearchEffort: EffortLevel;        // default: 'minimal'
 	// View settings
 	openGraphInMain: boolean;    // Open graph view in main window instead of sidebar
 	graphMinDegree: number;      // Minimum connections to show node in graph (default: 0)

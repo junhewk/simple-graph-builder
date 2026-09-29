@@ -38,9 +38,17 @@ const CHAT_MODEL_KEYS = [
 	'claudeModel',
 	'openaiModel',
 	'geminiModel',
+] as const;
+
+/** Smart Search was removed in 0.7.0; its stored settings are dropped. */
+const REMOVED_SMART_SEARCH_KEYS = [
+	'useSeparateSmartSearchModel',
+	'smartSearchProvider',
 	'smartSearchClaudeModel',
 	'smartSearchOpenaiModel',
 	'smartSearchGeminiModel',
+	'smartSearchOllamaModel',
+	'smartSearchEffort',
 ] as const;
 
 function migrateId(value: string, rules: [RegExp, string][]): string {
@@ -102,7 +110,7 @@ export function migrateSettings(settings: Settings, storedVersion: number): Migr
 	}
 
 	// v3: the single shared API key becomes a per-provider map, so a
-	// cross-provider Smart Search stops sending the wrong one. The old value is
+	// cross-provider Smart Search stopped sending the wrong one. The old value is
 	// attributed to the provider it was actually entered for.
 	if (storedVersion < 3) {
 		const keys = { ...(next.apiKeys ?? {}) };
@@ -119,6 +127,17 @@ export function migrateSettings(settings: Settings, storedVersion: number): Migr
 	// records that an older install was seen.
 	// v5 likewise adds analysis exclusions through DEFAULT_SETTINGS, preserving
 	// the existing graph and hashes without re-analysis or cleanup.
+
+	// v6: Smart Search is gone. Not version-gated: deleting keys that are
+	// already absent is a no-op, and a settings file restored from an older
+	// backup should still come out clean.
+	const raw = next as unknown as Record<string, unknown>;
+	for (const key of REMOVED_SMART_SEARCH_KEYS) {
+		if (key in raw) {
+			delete raw[key];
+			notes.push(`${key}: removed (Smart Search was replaced by Advanced search)`);
+		}
+	}
 
 	next.settingsVersion = CURRENT_SETTINGS_VERSION;
 

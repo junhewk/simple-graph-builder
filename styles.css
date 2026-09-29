@@ -360,104 +360,6 @@
 	background: var(--background-modifier-hover);
 }
 
-/* Smart Search Modal */
-.smart-search-modal {
-	min-width: 500px;
-	max-width: 700px;
-}
-
-.smart-search-section-title {
-	font-size: 1em;
-	font-weight: 600;
-	margin: 1.5em 0 0.5em 0;
-	color: var(--text-normal);
-	border-bottom: 1px solid var(--background-modifier-border);
-	padding-bottom: 0.25em;
-}
-
-.smart-search-answer {
-	padding: 0.75em;
-	background: var(--background-secondary);
-	border-radius: 6px;
-	line-height: 1.5;
-}
-
-.smart-search-nodes-list,
-.smart-search-notes-list {
-	list-style: none;
-	padding: 0;
-	margin: 0;
-}
-
-.smart-search-node-item,
-.smart-search-note-item {
-	display: flex;
-	align-items: baseline;
-	flex-wrap: wrap;
-	gap: 0.5em;
-	padding: 0.5em 0;
-	border-bottom: 1px solid var(--background-modifier-border);
-}
-
-.smart-search-node-item:last-child,
-.smart-search-note-item:last-child {
-	border-bottom: none;
-}
-
-.smart-search-node-name-container {
-	display: flex;
-	align-items: center;
-	gap: 0.5em;
-	flex-shrink: 0;
-}
-
-.smart-search-label-badge {
-	display: inline-block;
-	padding: 0.15em 0.5em;
-	border-radius: 3px;
-	font-size: 0.75em;
-	font-weight: 500;
-	color: white;
-	text-transform: uppercase;
-}
-
-.smart-search-node-link,
-.smart-search-note-link {
-	color: var(--text-accent);
-	text-decoration: none;
-	font-weight: 500;
-	cursor: pointer;
-}
-
-.smart-search-node-link:hover,
-.smart-search-note-link:hover {
-	text-decoration: underline;
-}
-
-.smart-search-separator {
-	color: var(--text-faint);
-	margin: 0 0.25em;
-}
-
-.smart-search-node-relevance,
-.smart-search-note-relevance {
-	color: var(--text-muted);
-	font-size: 0.9em;
-	font-style: italic;
-}
-
-.smart-search-error {
-	color: var(--text-error);
-	padding: 1em;
-}
-
-.smart-search-empty {
-	color: var(--text-muted);
-	font-style: italic;
-	text-align: center;
-	padding: 2em;
-}
-
 /* Entity Merge Modal */
 .entity-merge-modal {
 	min-width: 450px;
@@ -598,13 +500,6 @@
 	width: 180px;
 }
 
-.sgb-ollama-warning {
-	margin-top: 8px;
-	padding: 8px;
-	background: var(--background-modifier-message);
-	border-radius: 4px;
-}
-
 /* Per-model capability notice shown under a model picker. Empty unless the
    selected model lacks a feature, so it collapses when there is nothing to say. */
 .sgb-model-warning:not(:empty) {
@@ -673,63 +568,6 @@
 
 .sgb-graph-container-relative {
 	position: relative;
-}
-
-/* Smart Search Modal - Additional Styles */
-.sgb-smart-search-content {
-	padding: 20px;
-}
-
-.sgb-smart-search-title {
-	margin: 0 0 8px 0;
-	font-size: 1.5em;
-	font-weight: 600;
-}
-
-.sgb-smart-search-desc {
-	margin: 0 0 16px 0;
-	color: var(--text-muted);
-	font-size: 0.9em;
-}
-
-.sgb-smart-search-input-container {
-	width: 100%;
-	margin-bottom: 12px;
-}
-
-.sgb-smart-search-textarea {
-	width: 100%;
-	box-sizing: border-box;
-	padding: 10px;
-	resize: vertical;
-}
-
-.sgb-smart-search-btn-container {
-	margin-bottom: 16px;
-}
-
-.sgb-smart-search-warning {
-	padding: 10px;
-	margin-bottom: 12px;
-	background: var(--background-modifier-error);
-	border-radius: 4px;
-	color: var(--text-error);
-}
-
-.sgb-smart-search-status {
-	display: none;
-	padding: 10px;
-	color: var(--text-muted);
-	font-style: italic;
-}
-
-.sgb-smart-search-status.visible {
-	display: block;
-}
-
-.sgb-btn-disabled {
-	opacity: 0.5;
-	cursor: not-allowed;
 }
 
 /* Confirm Modal */

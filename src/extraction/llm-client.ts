@@ -162,7 +162,7 @@ function mergeChunkResults(results: OntologyExtractionResult[]): OntologyExtract
  * Helper to create ExtractionOptions from Settings
  */
 export function settingsToExtractionOptions(settings: Settings): ExtractionOptions {
-	const resolved = resolveModelConfig(settings, 'extraction');
+	const resolved = resolveModelConfig(settings);
 	return {
 		provider: resolved.provider,
 		apiKey: resolved.apiKey,

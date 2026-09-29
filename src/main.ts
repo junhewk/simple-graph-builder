@@ -9,7 +9,6 @@ import { GraphCache } from './graph/cache';
 import { rebuildNoteLayer } from './graph/merge';
 import { analyzeCurrentNote, removeCurrentNoteFromGraph, clearAllGraphData, autoAnalyzeFile } from './commands/analyze';
 import { openSearchModal } from './commands/search';
-import { openSmartSearch } from './commands/smart-search';
 import { WriteGuard } from './sync';
 import { getAnalysisEligibility, reportAnalysisUnavailable } from './analysis/exclusions';
 import { ConfirmModal } from './ui/confirm-modal';
@@ -90,12 +89,6 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			id: 'open-neighborhood-view',
 			name: 'Open note neighborhood panel',
 			callback: () => void this.activateNeighborhoodView(),
-		});
-
-		this.addCommand({
-			id: 'smart-search',
-			name: 'Smart search (AI-powered)',
-			callback: () => void openSmartSearch(this),
 		});
 
 		this.addCommand({

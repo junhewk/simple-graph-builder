@@ -1,5 +1,4 @@
 import { Settings } from './types';
-import { resolveModelConfig, ResolvedModel } from './extraction/providers/models';
 import { DEFAULT_EFFORT } from './extraction/providers/effort';
 
 /**
@@ -9,24 +8,16 @@ import { DEFAULT_EFFORT } from './extraction/providers/effort';
  * 3 = per-provider API keys
  * 4 = vault write-back settings (additive: defaults fill themselves in)
  * 5 = analysis exclusions (additive)
+ * 6 = Smart Search removed (its keys deleted); gpt-5.6-luna -> gpt-6-luna
  */
-export const CURRENT_SETTINGS_VERSION = 5;
+export const CURRENT_SETTINGS_VERSION = 6;
 
 // The model catalog and the provider/model/key resolver now live with the
 // provider adapters. Re-exported here so existing importers keep working.
 export {
 	MODEL_OPTIONS,
-	supportsToolCalling,
-	getLimitedToolSupportModels,
 	resolveModelConfig,
 } from './extraction/providers/models';
-
-/**
- * Get the effective Smart Search configuration.
- */
-export function getSmartSearchConfig(settings: Settings): ResolvedModel {
-	return resolveModelConfig(settings, 'smartSearch');
-}
 
 export const DEFAULT_SETTINGS: Settings = {
 	apiProvider: 'claude',
@@ -43,14 +34,6 @@ export const DEFAULT_SETTINGS: Settings = {
 	autoAnalyzeOnSave: false,
 	excludedPatterns: [],
 	respectObsidianExcludedFiles: false,
-	// Smart Search model settings
-	useSeparateSmartSearchModel: false,
-	smartSearchProvider: 'claude',
-	smartSearchClaudeModel: 'claude-sonnet-5',
-	smartSearchOpenaiModel: 'gpt-5.6-luna',
-	smartSearchGeminiModel: 'gemini-3.6-flash',
-	smartSearchOllamaModel: 'qwen3:32b',
-	smartSearchEffort: DEFAULT_EFFORT,
 	// View settings
 	openGraphInMain: false,
 	graphMinDegree: 0,

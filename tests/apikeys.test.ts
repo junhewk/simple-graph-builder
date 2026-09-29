@@ -1,4 +1,4 @@
-import { getSmartSearchConfig, DEFAULT_SETTINGS, CURRENT_SETTINGS_VERSION } from '../src/settings';
+import { DEFAULT_SETTINGS, CURRENT_SETTINGS_VERSION } from '../src/settings';
 import { resolveModelConfig, getExtractionConfigError } from '../src/extraction/providers/models';
 import { migrateSettings } from '../src/settings-migration';
 import { settingsToEmbeddingOptions } from '../src/extraction/llm-client';
@@ -8,25 +8,22 @@ let fail = 0;
 const check = (n: string, c: boolean, extra = '') => { if (!c) fail++; console.log(`${c ? 'ok  ' : 'FAIL'} ${n}${extra ? ' :: ' + extra : ''}`); };
 const S = (o: Partial<Settings>) => ({ ...DEFAULT_SETTINGS, ...o } as Settings);
 
-// THE BUG: extraction on Claude, Smart Search on OpenAI.
+// Each provider sends its own key, never another provider's.
 const cross = S({
   apiProvider: 'claude',
   apiKeys: { claude: 'sk-ant-CLAUDE', openai: 'sk-OPENAI' },
-  useSeparateSmartSearchModel: true,
-  smartSearchProvider: 'openai',
 });
-check('extraction gets the Claude key', resolveModelConfig(cross, 'extraction').apiKey === 'sk-ant-CLAUDE');
-check('SMART SEARCH GETS THE OPENAI KEY (was the Claude key)', getSmartSearchConfig(cross).apiKey === 'sk-OPENAI', getSmartSearchConfig(cross).apiKey);
+check('extraction gets the Claude key', resolveModelConfig(cross).apiKey === 'sk-ant-CLAUDE');
 
 // three providers, three keys, no crosstalk
-const all = S({ apiKeys: { claude: 'K-C', openai: 'K-O', gemini: 'K-G' }, useSeparateSmartSearchModel: true });
+const all = S({ apiKeys: { claude: 'K-C', openai: 'K-O', gemini: 'K-G' } });
 for (const [p, k] of [['claude','K-C'],['openai','K-O'],['gemini','K-G']] as const) {
-  check(`smartSearchProvider=${p} -> ${k}`, getSmartSearchConfig({ ...all, smartSearchProvider: p }).apiKey === k);
+  check(`apiProvider=${p} -> ${k}`, resolveModelConfig({ ...all, apiProvider: p }).apiKey === k);
 }
 
 // legacy fallback: an install that never set per-provider keys
 const legacy = S({ apiKey: 'LEGACY', apiKeys: {}, apiProvider: 'gemini' });
-check('falls back to the legacy shared key', resolveModelConfig(legacy, 'extraction').apiKey === 'LEGACY');
+check('falls back to the legacy shared key', resolveModelConfig(legacy).apiKey === 'LEGACY');
 
 // migration seeds the map from the shared key
 const m = migrateSettings(S({ apiKey: 'OLD-KEY', apiProvider: 'openai', apiKeys: {} }), 2);

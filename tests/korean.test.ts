@@ -14,7 +14,7 @@ import { fakePlugin } from './graph-harness';
 import { GraphCache } from '../src/graph/cache';
 import { generateNodeId, generateEdgeId, normalizeName } from '../src/graph/merge';
 import { searchGraphCache } from '../src/graph/search';
-import { searchNodes } from '../src/graph/tools';
+import { calculateMatchScore } from '../src/query/match';
 import { normalizeKey, normalizeUnicode, OntologyEdge, OntologyNode } from '../src/types';
 
 let fail = 0;
@@ -93,10 +93,8 @@ async function main() {
 
 	// --- search: the headline Korean feature ---
 	check('plain search finds the NFD spelling', searchGraphCache(cache, NFD).length > 0);
-	const viaTools = searchNodes(cache, NFD);
-	check('bigram search finds it via the other form', viaTools.length > 0, JSON.stringify(viaTools.map(r => r.name)));
-	check('bigram search scores it as an exact match',
-		viaTools[0]?.score === 1, String(viaTools[0]?.score));
+	const score = calculateMatchScore(NFD, cache.getNodeByName(NFC)?.properties.name ?? '');
+	check('name matcher scores the other form as an exact match', score === 1, String(score));
 
 	// --- idempotence: a second load must be a no-op ---
 	const canonical = cache.getGraphData();
