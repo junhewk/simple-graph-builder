@@ -1,8 +1,10 @@
-import { postJsonWithDowngrade } from './http';
+import type { ApiProvider } from '../../types';
+import { DowngradeFlags, postJsonWithDowngrade } from './http';
 import { createError } from './errors';
 import { EffortLevel } from './effort';
 import {
 	Credentials,
+	JsonSchemaObject,
 	LlmRequest,
 	LlmResult,
 	ModelCapabilities,
@@ -30,8 +32,123 @@ interface ChatCompletionsResponse {
 }
 
 /**
- * Adapter for local servers that speak the OpenAI Chat Completions API:
- * llama.cpp's `llama-server`, LM Studio, vLLM, LiteLLM and similar.
+ * What differs between servers that speak the OpenAI Chat Completions API.
+ *
+ * Message, tool and tool-call handling is identical everywhere and lives in the
+ * adapter below; the dialect covers where to send, how to authenticate, and the
+ * two knobs every vendor extends differently: structured output and reasoning.
+ */
+export interface ChatCompletionsDialect {
+	id: ApiProvider;
+	/** Resolves the endpoint, throwing a config error if it cannot. */
+	endpoint(creds: Credentials): { url: string; ollamaHost?: string };
+	headers(creds: Credentials): Record<string, string> | undefined;
+	responseFormat(schema: { name: string; schema: JsonSchemaObject }): unknown;
+	/** Only called while the effort hint is still being sent (see postJsonWithDowngrade). */
+	applyEffort(body: Record<string, unknown>, effort: EffortLevel): void;
+	maxTokens(req: LlmRequest, flags: DowngradeFlags): number;
+	/** Extra system text appended after the caller's own system prompt. */
+	extraSystem?(req: LlmRequest): string | undefined;
+	/** Retries when the server answers with neither text nor tool calls. */
+	emptyRetries: number;
+	/** Prefix for an error reported inside an HTTP 200 body. */
+	errorLabel: string;
+	/** Who returned nothing, as in "Empty response from ___." */
+	emptyLabel: string;
+	capabilities(model: string): ModelCapabilities;
+}
+
+export function createChatCompletionsAdapter(dialect: ChatCompletionsDialect): ProviderAdapter {
+	return {
+		id: dialect.id,
+
+		capabilities(model: string): ModelCapabilities {
+			return dialect.capabilities(model);
+		},
+
+		async complete(req: LlmRequest, creds: Credentials): Promise<LlmResult> {
+			const target = dialect.endpoint(creds);
+
+			for (let attempt = 0; ; attempt++) {
+				const data = await postJsonWithDowngrade<ChatCompletionsResponse>((flags) => {
+					const body: Record<string, unknown> = {
+						model: req.model,
+						messages: toMessages(req.turns, joinSystem(req.system, dialect.extraSystem?.(req))),
+						stream: false,
+						max_tokens: dialect.maxTokens(req, flags),
+					};
+
+					if (req.tools?.length) {
+						body.tools = req.tools.map((tool) => ({
+							type: 'function',
+							function: {
+								name: tool.name,
+								description: tool.description,
+								parameters: tool.parameters,
+							},
+						}));
+					}
+
+					if (flags.effort) {
+						dialect.applyEffort(body, req.effort);
+					}
+
+					if (req.responseSchema) {
+						body.response_format = dialect.responseFormat(req.responseSchema);
+					}
+
+					return {
+						url: target.url,
+						provider: dialect.id,
+						ollamaHost: target.ollamaHost,
+						headers: dialect.headers(creds),
+						body,
+					};
+				});
+
+				// Some builds report failure with HTTP 200 and an error body.
+				if (data.error) {
+					const message = typeof data.error === 'string' ? data.error : data.error.message;
+					throw createError('api_error', `${dialect.errorLabel} error: ${message ?? 'unknown'}`);
+				}
+
+				const choice = data.choices?.[0];
+				const message = choice?.message ?? {};
+				const text = message.content ?? '';
+
+				const toolCalls: ToolInvocation[] = (message.tool_calls ?? []).map((call, index) => ({
+					// Not every server assigns ids; synthesise a stable one when absent.
+					id: call.id || `${call.function?.name ?? 'tool'}_${index}`,
+					name: call.function?.name ?? '',
+					arguments: parseArguments(call.function?.arguments),
+				}));
+
+				if (!text && toolCalls.length === 0) {
+					if (choice?.finish_reason === 'length') {
+						throw createError(
+							'api_error',
+							`${dialect.emptyLabel} ran out of output tokens before answering. ` +
+								'Lower the reasoning effort in settings.'
+						);
+					}
+					if (attempt < dialect.emptyRetries) continue;
+					throw createError('api_error', `Empty response from ${dialect.emptyLabel}.`);
+				}
+
+				return {
+					text,
+					toolCalls,
+					raw: message,
+					finishReason: choice?.finish_reason,
+				};
+			}
+		},
+	};
+}
+
+/**
+ * Local servers that speak the OpenAI Chat Completions API: llama.cpp's
+ * `llama-server`, LM Studio, vLLM, LiteLLM and similar.
  *
  * Chat Completions rather than the Responses API on purpose. llama-server does
  * expose `/v1/responses`, but only as a shim that rewrites the request into a
@@ -39,8 +156,45 @@ interface ChatCompletionsResponse {
  * (`text.format`, `reasoning.effort`) are not guaranteed to survive the
  * conversion. Chat Completions is the surface these servers actually implement.
  */
-export const openaiCompatibleAdapter: ProviderAdapter = {
+const LOCAL_DIALECT: ChatCompletionsDialect = {
 	id: 'ollama',
+
+	endpoint(creds) {
+		const baseUrl = (creds.ollamaHost || '').replace(/\/+$/, '');
+		if (!baseUrl) {
+			throw createError('config_error', 'No server address configured for the local LLM server.');
+		}
+		return {
+			// Some servers are mounted at a prefix, so only add /v1 when the
+			// configured address does not already include it.
+			url: `${baseUrl}${/\/v\d+$/.test(baseUrl) ? '' : '/v1'}/chat/completions`,
+			ollamaHost: baseUrl,
+		};
+	},
+
+	// llama-server needs no key by default; send one only if given.
+	headers: (creds) => (creds.apiKey ? { Authorization: `Bearer ${creds.apiKey}` } : undefined),
+
+	responseFormat: (schema) => ({
+		type: 'json_schema',
+		json_schema: {
+			name: schema.name,
+			schema: schema.schema,
+			strict: false,
+		},
+	}),
+
+	applyEffort(body, effort) {
+		const mapped = toReasoningEffort(effort);
+		if (mapped) {
+			body.reasoning_effort = mapped;
+		}
+	},
+
+	maxTokens: (req) => req.maxOutputTokens,
+	emptyRetries: 0,
+	errorLabel: 'Local server',
+	emptyLabel: 'the local LLM server',
 
 	capabilities(): ModelCapabilities {
 		// Local servers vary by model and build; the effort downgrade in http.ts
@@ -48,90 +202,9 @@ export const openaiCompatibleAdapter: ProviderAdapter = {
 		// silently dropped.
 		return { tools: true, structuredOutput: true, effort: true };
 	},
-
-	async complete(req: LlmRequest, creds: Credentials): Promise<LlmResult> {
-		const baseUrl = (creds.ollamaHost || '').replace(/\/+$/, '');
-		if (!baseUrl) {
-			throw createError('config_error', 'No server address configured for the local LLM server.');
-		}
-
-		const data = await postJsonWithDowngrade<ChatCompletionsResponse>((flags) => {
-			const body: Record<string, unknown> = {
-				model: req.model,
-				messages: toMessages(req.turns, req.system),
-				stream: false,
-				max_tokens: req.maxOutputTokens,
-			};
-
-			if (req.tools?.length) {
-				body.tools = req.tools.map((tool) => ({
-					type: 'function',
-					function: {
-						name: tool.name,
-						description: tool.description,
-						parameters: tool.parameters,
-					},
-				}));
-			}
-
-			if (flags.effort) {
-				const effort = toReasoningEffort(req.effort);
-				if (effort) {
-					body.reasoning_effort = effort;
-				}
-			}
-
-			if (req.responseSchema) {
-				body.response_format = {
-					type: 'json_schema',
-					json_schema: {
-						name: req.responseSchema.name,
-						schema: req.responseSchema.schema,
-						strict: false,
-					},
-				};
-			}
-
-			return {
-				// Some servers are mounted at a prefix, so only add /v1 when the
-				// configured address does not already include it.
-				url: `${baseUrl}${/\/v\d+$/.test(baseUrl) ? '' : '/v1'}/chat/completions`,
-				provider: 'ollama',
-				ollamaHost: baseUrl,
-				// llama-server needs no key by default; send one only if given.
-				headers: creds.apiKey ? { Authorization: `Bearer ${creds.apiKey}` } : undefined,
-				body,
-			};
-		});
-
-		// Some builds report failure with HTTP 200 and an error body.
-		if (data.error) {
-			const message = typeof data.error === 'string' ? data.error : data.error.message;
-			throw createError('api_error', `Local server error: ${message ?? 'unknown'}`);
-		}
-
-		const message = data.choices?.[0]?.message ?? {};
-		const text = message.content ?? '';
-
-		const toolCalls: ToolInvocation[] = (message.tool_calls ?? []).map((call, index) => ({
-			// Not every server assigns ids; synthesise a stable one when absent.
-			id: call.id || `${call.function?.name ?? 'tool'}_${index}`,
-			name: call.function?.name ?? '',
-			arguments: parseArguments(call.function?.arguments),
-		}));
-
-		if (!text && toolCalls.length === 0) {
-			throw createError('api_error', 'Empty response from the local LLM server.');
-		}
-
-		return {
-			text,
-			toolCalls,
-			raw: message,
-			finishReason: data.choices?.[0]?.finish_reason,
-		};
-	},
 };
+
+export const openaiCompatibleAdapter = createChatCompletionsAdapter(LOCAL_DIALECT);
 
 function toReasoningEffort(effort: EffortLevel): string | undefined {
 	switch (effort) {
@@ -180,6 +253,11 @@ function toMessages(turns: Turn[], system: string | undefined): unknown[] {
 	}
 
 	return messages;
+}
+
+function joinSystem(system: string | undefined, extra: string | undefined): string | undefined {
+	if (!extra) return system;
+	return system ? `${system}\n\n${extra}` : extra;
 }
 
 function isChatMessage(raw: unknown): raw is ChatMessage {
