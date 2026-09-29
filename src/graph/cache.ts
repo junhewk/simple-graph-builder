@@ -76,12 +76,20 @@ export class GraphCache {
 	private nodesByEntityType: Map<string, OntologyNode[]> = new Map();
 	private nodesByLabel: Map<string, OntologyNode[]> = new Map(); // Legacy
 	private nodesBySourceNote: Map<string, OntologyNode[]> = new Map();
+	// Entities only. NOTE nodes are named after the note's basename, so letting
+	// them in here made `Transformer.md` shadow the entity "Transformer" and
+	// extraction then merged new relationships into the note node, which
+	// flush() drops.
 	private nodeByName: Map<string, OntologyNode> = new Map(); // normalizeKey(name) -> node
 	private nodeByAlias: Map<string, OntologyNode> = new Map(); // normalizeKey(alias) -> node
 	private edgeById: Map<string, OntologyEdge> = new Map();
 	private edgesBySource: Map<string, OntologyEdge[]> = new Map();
 	private edgesByTarget: Map<string, OntologyEdge[]> = new Map();
 	private edgesBySourceNote: Map<string, OntologyEdge[]> = new Map();
+
+	// Bumped on every index change so derived views (the query engine) can
+	// tell when their snapshot is stale without diffing the graph.
+	private revision = 0;
 
 	// Resolution cache (persistent across sessions)
 	private resolutionCache: Map<string, string> = new Map(); // normalizeKey(token) -> node ID
@@ -431,6 +439,7 @@ export class GraphCache {
 		this.edgesBySource.clear();
 		this.edgesByTarget.clear();
 		this.edgesBySourceNote.clear();
+		this.revision++;
 
 		for (const node of this.nodes) {
 			this.indexNode(node);
@@ -457,6 +466,7 @@ export class GraphCache {
 	 * Add a node to all indexes.
 	 */
 	private indexNode(node: OntologyNode): void {
+		this.revision++;
 		this.nodeById.set(node.id, node);
 
 		// Index by entity type
@@ -471,6 +481,8 @@ export class GraphCache {
 		for (const notePath of node.sourceNotes) {
 			this.addToMapIndex(this.nodesBySourceNote, notePath, node);
 		}
+
+		if (isNoteNode(node)) return;
 
 		// Index by name (lowercase for case-insensitive lookup)
 		this.nodeByName.set(normalizeKey(node.properties.name), node);
@@ -490,15 +502,21 @@ export class GraphCache {
 	 * Remove a node from all indexes.
 	 */
 	private unindexNode(node: OntologyNode): void {
+		this.revision++;
 		this.nodeById.delete(node.id);
-		this.nodeByName.delete(normalizeKey(node.properties.name));
+
+		// Only drop keys this node owns: another entity may hold the same
+		// spelling, and removing its entry would make it unfindable by name.
+		const nameKey = normalizeKey(node.properties.name);
+		if (this.nodeByName.get(nameKey) === node) this.nodeByName.delete(nameKey);
 
 		// Remove from alias index
 		const aliases = node.properties.aliases;
 		if (aliases && Array.isArray(aliases)) {
 			for (const alias of aliases) {
 				if (typeof alias === 'string') {
-					this.nodeByAlias.delete(normalizeKey(alias));
+					const aliasKey = normalizeKey(alias);
+					if (this.nodeByAlias.get(aliasKey) === node) this.nodeByAlias.delete(aliasKey);
 				}
 			}
 		}
@@ -545,6 +563,7 @@ export class GraphCache {
 	 * Add an edge to all indexes.
 	 */
 	private indexEdge(edge: OntologyEdge): void {
+		this.revision++;
 		this.edgeById.set(edge.id, edge);
 		this.addEdgeToMapIndex(this.edgesBySource, edge.source, edge);
 		this.addEdgeToMapIndex(this.edgesByTarget, edge.target, edge);
@@ -558,6 +577,7 @@ export class GraphCache {
 	 * Remove an edge from all indexes.
 	 */
 	private unindexEdge(edge: OntologyEdge): void {
+		this.revision++;
 		this.edgeById.delete(edge.id);
 
 		const sourceArr = this.edgesBySource.get(edge.source);
@@ -584,6 +604,13 @@ export class GraphCache {
 	/**
 	 * Get the full graph data (for Cytoscape, etc.)
 	 */
+	/**
+	 * Monotonic counter that changes whenever any node or edge index changes.
+	 */
+	getRevision(): number {
+		return this.revision;
+	}
+
 	getGraphData(): GraphData {
 		return {
 			nodes: [...this.nodes],
@@ -635,7 +662,7 @@ export class GraphCache {
 	 */
 	addAliasToNode(nodeId: string, alias: string): boolean {
 		const node = this.nodeById.get(nodeId);
-		if (!node) return false;
+		if (!node || isNoteNode(node)) return false;
 
 		const lowerAlias = normalizeKey(alias);
 
@@ -657,6 +684,7 @@ export class GraphCache {
 		node.properties.aliases.push(alias);
 		this.nodeByAlias.set(lowerAlias, node);
 		node.updatedAt = Date.now();
+		this.revision++;
 
 		this.markDirty();
 		return true;

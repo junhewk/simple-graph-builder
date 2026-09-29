@@ -1,4 +1,4 @@
-import { OntologyNode, RawExtractionNode, ResolutionResult, ResolutionStats, Settings, getNodeEntityType, getEdgeRelationship, normalizeKey } from '../types';
+import { OntologyNode, RawExtractionNode, ResolutionResult, ResolutionStats, Settings, getNodeEntityType, getEdgeRelationship, isNoteNode, normalizeKey } from '../types';
 import { GraphCache } from './cache';
 import { getEmbeddings, settingsToEmbeddingOptions, verifyEntityMatch, settingsToExtractionOptions, EmbeddingOptions } from '../extraction/llm-client';
 import { generateNodeId, generateEdgeId } from './merge';
@@ -73,7 +73,10 @@ export class EntityResolver {
 		const cachedNodeId = this.cache.getResolvedNodeId(lowerName);
 		if (cachedNodeId) {
 			const node = this.cache.getNodeById(cachedNodeId);
-			if (node) {
+			// Before 0.7.0 a note named like an entity could win the name
+			// lookup, and that note's id was cached here. Never resolve an
+			// extracted entity onto a NOTE node.
+			if (node && !isNoteNode(node)) {
 				this.stats.cached++;
 				const result: ResolutionResult = {
 					nodeId: cachedNodeId,
