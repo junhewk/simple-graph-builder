@@ -66,24 +66,35 @@ export function supportsNativeExclusions(app: App): boolean {
 	return typeof nativeCache(app).isUserIgnored === 'function';
 }
 
-export function getAnalysisEligibility(plugin: SimpleGraphBuilderPlugin, file: TFile): AnalysisEligibility {
-	if (isPluginManagedNote(plugin, file)) {
-		return { status: 'excluded', reason: 'This is a plugin-managed entity note' };
-	}
-	if (matchesExcludedPath(file.path, plugin.settings.excludedPatterns)) {
+/**
+ * The user's own exclusions: path patterns plus, if opted in, Obsidian's
+ * "Excluded files". Shared by analysis and by the query engine, which must not
+ * reveal what the user kept away from the LLM.
+ */
+export function userExclusion(plugin: SimpleGraphBuilderPlugin, path: string): { status: 'ok' } | { status: 'excluded' | 'unavailable'; reason: string } {
+	if (matchesExcludedPath(path, plugin.settings.excludedPatterns)) {
 		return { status: 'excluded', reason: 'This note matches an excluded file or folder pattern' };
 	}
 	if (plugin.settings.respectObsidianExcludedFiles) {
 		try {
 			const cache = nativeCache(plugin.app);
 			if (typeof cache.isUserIgnored !== 'function') throw new Error('Native exclusion matcher unavailable');
-			const ignored = cache.isUserIgnored(file.path);
+			const ignored = cache.isUserIgnored(path);
 			if (typeof ignored !== 'boolean') throw new Error('Invalid native exclusion result');
 			if (ignored) return { status: 'excluded', reason: 'This note is excluded by Obsidian' };
 		} catch {
 			return { status: 'unavailable', reason: NATIVE_EXCLUSION_ERROR };
 		}
 	}
+	return { status: 'ok' };
+}
+
+export function getAnalysisEligibility(plugin: SimpleGraphBuilderPlugin, file: TFile): AnalysisEligibility {
+	if (isPluginManagedNote(plugin, file)) {
+		return { status: 'excluded', reason: 'This is a plugin-managed entity note' };
+	}
+	const user = userExclusion(plugin, file.path);
+	if (user.status !== 'ok') return user;
 	lastUnavailableNotice.delete(plugin);
 	return { status: 'allowed' };
 }
