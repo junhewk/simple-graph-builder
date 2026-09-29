@@ -194,6 +194,29 @@
 	font-style: italic;
 }
 
+.simple-graph-search-modal .search-result-folder {
+	font-size: 0.8em;
+	color: var(--text-faint);
+	flex-shrink: 1;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	max-width: 40%;
+}
+
+.simple-graph-search-modal .search-result-snippet {
+	margin-top: 0.3em;
+	font-size: 0.85em;
+	color: var(--text-muted);
+	line-height: 1.4;
+}
+
+.simple-graph-search-modal .search-status,
+.simple-graph-search-modal .search-seed {
+	font-size: 0.85em;
+	color: var(--text-muted);
+}
+
 .simple-graph-search-modal .search-summary {
 	font-size: 0.85em;
 	color: var(--text-muted);

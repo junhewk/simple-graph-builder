@@ -536,11 +536,12 @@ export class GraphView extends ItemView {
 			this.highlightConnected(node);
 		});
 
-		// Double-click on node to search
+		// Double-click on a node: search around it (a note seeds by path)
 		this.cy.on('dbltap', 'node', (evt: cytoscape.EventObject) => {
-			const { name } = nodeData(evt.target as cytoscape.NodeSingular);
-			if (name) {
-				openSearchModal(this.plugin, name);
+			const { id, name, entityType, sourceNotes } = nodeData(evt.target as cytoscape.NodeSingular);
+			const seed = entityType === 'NOTE' ? sourceNotes?.[0] : id;
+			if (seed) {
+				openSearchModal(this.plugin, '', { seed, seedLabel: name });
 			}
 		});
 

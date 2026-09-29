@@ -13,7 +13,6 @@
 import { fakePlugin } from './graph-harness';
 import { GraphCache } from '../src/graph/cache';
 import { generateNodeId, generateEdgeId, normalizeName } from '../src/graph/merge';
-import { searchGraphCache } from '../src/graph/search';
 import { calculateMatchScore } from '../src/query/match';
 import { normalizeKey, normalizeUnicode, OntologyEdge, OntologyNode } from '../src/types';
 
@@ -92,7 +91,6 @@ async function main() {
 	check('lookup by NFD name', cache.getNodeByName(NFD)?.id === normalizeKey(nfcId));
 
 	// --- search: the headline Korean feature ---
-	check('plain search finds the NFD spelling', searchGraphCache(cache, NFD).length > 0);
 	const score = calculateMatchScore(NFD, cache.getNodeByName(NFC)?.properties.name ?? '');
 	check('name matcher scores the other form as an exact match', score === 1, String(score));
 

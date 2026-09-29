@@ -1,4 +1,4 @@
-import { Plugin, TFile, debounce, Menu, Notice, WorkspaceLeaf } from 'obsidian';
+import { Plugin, TFile, TFolder, debounce, Menu, Notice, WorkspaceLeaf } from 'obsidian';
 import { Settings, PluginData } from './types';
 import { DEFAULT_SETTINGS } from './settings';
 import { migrateSettings } from './settings-migration';
@@ -13,10 +13,18 @@ import { WriteGuard } from './sync';
 import { getAnalysisEligibility, reportAnalysisUnavailable } from './analysis/exclusions';
 import { ConfirmModal } from './ui/confirm-modal';
 import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from './sync/batch';
+import { QueryEngine } from './query/engine';
+import { ObsidianVaultSource } from './query/obsidian-source';
+import { loadHashes, renameNoteHash, saveHashes } from './graph/hashes';
 
 export default class SimpleGraphBuilderPlugin extends Plugin {
 	settings: Settings;
 	graphCache: GraphCache;
+	/** Search and lookup over graph + vault, shared by the search modal and MCP. */
+	queryEngine: QueryEngine;
+	private querySource: ObsidianVaultSource;
+	/** Exclusion settings the query index was built under. */
+	private indexedExclusions = '';
 	/** Marks vault writes the plugin made, so they don't look like user edits. */
 	writeGuard = new WriteGuard();
 	private statusBarItem: HTMLElement | null = null;
@@ -28,10 +36,24 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		true
 	);
 
+	// A folder rename arrives as one event per file; rebuild the note layer once.
+	private debouncedNoteLayerRebuild = debounce(
+		() => {
+			rebuildNoteLayer(this.graphCache, this.app);
+			this.updateStatusBar();
+			void this.graphCache.flush();
+		},
+		1000,
+		true
+	);
+
 	async onload() {
 		await this.loadSettings();
 		this.graphCache = new GraphCache(this);
 		await this.graphCache.ensureLoaded();
+		this.querySource = new ObsidianVaultSource(this);
+		this.queryEngine = new QueryEngine(this.graphCache, this.querySource);
+		this.indexedExclusions = exclusionKey(this.settings);
 
 		// Register graph view
 		this.registerView(GRAPH_VIEW_TYPE, (leaf) => new GraphView(leaf, this));
@@ -63,7 +85,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 
 		this.addCommand({
 			id: 'search-related-notes',
-			name: 'Search related notes',
+			name: 'Search graph and notes',
 			callback: () => void openSearchModal(this),
 		});
 
@@ -155,8 +177,54 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 
 		// The note layer needs metadataCache.resolvedLinks, which is not populated
 		// at plugin load. Only runs when there is something to do.
-		this.app.workspace.onLayoutReady(() => this.repairNoteLayer(false));
+		this.app.workspace.onLayoutReady(() => {
+			this.repairNoteLayer(false);
+			this.registerIndexEvents();
+		});
 	}
+
+	/**
+	 * Keep the query index and the graph's provenance in step with the vault.
+	 * Registered after layout-ready so the startup flood of create events is
+	 * skipped (the index is built from a full scan instead) and so
+	 * resolvedLinks is populated. Unlike auto-analyze, these ignore writeGuard:
+	 * the plugin's own writes are real content changes the index must see.
+	 */
+	private registerIndexEvents(): void {
+		this.registerEvent(this.app.metadataCache.on('changed', (file) => {
+			if (file.extension !== 'md') return;
+			this.querySource.invalidate();
+			this.queryEngine.onNoteChanged(file.path);
+		}));
+		this.registerEvent(this.app.metadataCache.on('resolved', () => {
+			this.queryEngine.onLinksChanged();
+		}));
+		this.registerEvent(this.app.vault.on('rename', (file, oldPath) => {
+			this.querySource.invalidate();
+			if (file instanceof TFolder) {
+				this.queryEngine.onLinksChanged();
+				return;
+			}
+			if (!(file instanceof TFile) || file.extension !== 'md') return;
+			this.queryEngine.onNoteRenamed(oldPath, file.path);
+			void this.followRename(oldPath, file.path);
+		}));
+		this.registerEvent(this.app.vault.on('delete', (file) => {
+			this.querySource.invalidate();
+			if (file instanceof TFile && file.extension === 'md') this.queryEngine.onNoteDeleted(file.path);
+		}));
+	}
+
+	/** Move provenance and the analysis hash to a renamed note's new path. */
+	private async followRename(oldPath: string, newPath: string): Promise<void> {
+		const moved = this.graphCache.renameSourceNote(oldPath, newPath);
+		const hashes = await loadHashes(this);
+		if (hashes.hashes.some(h => h.path === oldPath)) {
+			await saveHashes(this, renameNoteHash(hashes, oldPath, newPath));
+		}
+		if (moved.nodes || moved.edges) this.debouncedNoteLayerRebuild();
+	}
+
 
 	/**
 	 * Build (or repair) the NOTE node layer from data already in the graph.
@@ -302,5 +370,19 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		};
 		data.settings = this.settings;
 		await this.saveData(data);
+
+		// Exclusions decide what search and agents may see; re-index under the new rules.
+		if (this.queryEngine) {
+			const exclusions = exclusionKey(this.settings);
+			if (exclusions !== this.indexedExclusions) {
+				this.indexedExclusions = exclusions;
+				this.querySource.invalidate();
+				this.queryEngine.invalidate();
+			}
+		}
 	}
+}
+
+function exclusionKey(settings: Settings): string {
+	return JSON.stringify([settings.excludedPatterns, settings.respectObsidianExcludedFiles]);
 }

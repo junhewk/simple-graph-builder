@@ -1,26 +1,42 @@
-import { App, Modal, Setting } from 'obsidian';
+import { App, Modal, Setting, debounce } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
-import { searchGraphCache, SearchResult } from '../graph/search';
+import type { Connection, EntityHit, NoteHit, SearchResponse } from '../query/types';
 
-/**
- * Open search modal, optionally with an initial query.
- */
-export function openSearchModal(plugin: SimpleGraphBuilderPlugin, initialQuery?: string): void {
-	new SearchModal(plugin.app, plugin, initialQuery).open();
+export interface SearchModalOptions {
+	/** Start the graph walk from this node: an entity id or a note path. */
+	seed?: string;
+	seedLabel?: string;
 }
 
+/**
+ * Open the search modal, optionally with an initial query or a starting node.
+ */
+export function openSearchModal(plugin: SimpleGraphBuilderPlugin, initialQuery?: string, options: SearchModalOptions = {}): void {
+	new SearchModal(plugin.app, plugin, initialQuery, options).open();
+}
+
+/**
+ * Advanced search: notes and entities ranked by text match plus graph
+ * proximity (see src/query/engine.ts). No API calls; results explain
+ * themselves -- which words matched, and which entities connect a note to the
+ * query.
+ */
 class SearchModal extends Modal {
 	private plugin: SimpleGraphBuilderPlugin;
 	private resultsContainer: HTMLElement;
-	private initialQuery: string | undefined;
-	private currentQuery = '';
-	private exactMatch = false; // Default to fuzzy match for better discovery
-	private labelFilter = ''; // Optional label filter
+	private statusEl: HTMLElement;
+	private query: string;
+	private readonly options: SearchModalOptions;
+	private typeFilter = '';
+	/** Bumped per search, so a slow result never overwrites a newer one. */
+	private generation = 0;
+	private readonly debouncedSearch = debounce(() => void this.performSearch(), 200, true);
 
-	constructor(app: App, plugin: SimpleGraphBuilderPlugin, initialQuery?: string) {
+	constructor(app: App, plugin: SimpleGraphBuilderPlugin, initialQuery = '', options: SearchModalOptions = {}) {
 		super(app);
 		this.plugin = plugin;
-		this.initialQuery = initialQuery;
+		this.query = initialQuery;
+		this.options = options;
 	}
 
 	onOpen() {
@@ -28,64 +44,47 @@ class SearchModal extends Modal {
 		contentEl.empty();
 		contentEl.addClass('simple-graph-search-modal');
 
-		contentEl.createEl('h2', { text: 'Search related notes' });
+		contentEl.createEl('h2', { text: 'Search graph and notes' });
 
-		// Search input
 		new Setting(contentEl)
 			.setName('Search query')
-			.setDesc('Enter a concept, entity name, or topic')
+			.setDesc('Words, a concept, or an entity name. Related notes rank too, even without the words.')
 			.addText(text => {
-				text.setPlaceholder('Search concepts, projects, or topics')
-					.onChange((value) => {
-						this.currentQuery = value;
-						this.performSearch();
+				text.setPlaceholder('Search notes, concepts, projects, or topics')
+					.setValue(this.query)
+					.onChange(value => {
+						this.query = value;
+						this.debouncedSearch();
 					});
-
-				// Set initial query if provided
-				if (this.initialQuery) {
-					text.setValue(this.initialQuery);
-					this.currentQuery = this.initialQuery;
-				}
-
 				text.inputEl.focus();
 			});
 
-		// Label filter dropdown
-		const labels = this.plugin.graphCache.getAllLabels();
-		if (labels.length > 0) {
+		const types = this.plugin.queryEngine.entityTypes();
+		if (types.length > 0) {
 			new Setting(contentEl)
-				.setName('Filter by entity type')
-				.setDesc('Only show nodes with this entity type')
+				.setName('Filter entities by type')
 				.addDropdown(dropdown => {
 					dropdown.addOption('', 'All entity types');
-					for (const label of labels.sort()) {
-						dropdown.addOption(label, label);
-					}
+					for (const type of types) dropdown.addOption(type, type);
 					dropdown.onChange(value => {
-						this.labelFilter = value;
-						this.performSearch();
+						this.typeFilter = value;
+						void this.performSearch();
 					});
 				});
 		}
 
-		// Exact match toggle
-		new Setting(contentEl)
-			.setName('Exact match')
-			.setDesc('Only match nodes with exact name (case-insensitive)')
-			.addToggle(toggle => {
-				toggle
-					.setValue(this.exactMatch)
-					.onChange(value => {
-						this.exactMatch = value;
-						this.performSearch();
-					});
-			});
-
+		this.statusEl = contentEl.createDiv({ cls: 'search-status' });
 		this.resultsContainer = contentEl.createDiv({ cls: 'search-results' });
 
-		// If initial query provided, perform search immediately
-		if (this.initialQuery) {
-			this.performSearch();
+		void this.plugin.queryEngine.ensureIndexed((indexed, total) => {
+			this.statusEl.setText(indexed < total ? `Indexing notes… ${indexed}/${total}` : '');
+		}).then(() => {
+			this.statusEl.setText('');
+			if (this.query.trim() || this.options.seed) void this.performSearch();
+		});
+
+		if (this.query.trim() || this.options.seed) {
+			void this.performSearch();
 		} else {
 			this.showHint();
 		}
@@ -93,115 +92,144 @@ class SearchModal extends Modal {
 
 	private showHint() {
 		this.resultsContainer.empty();
-		const stats = this.plugin.graphCache.getStats();
-		const hint = this.resultsContainer.createEl('p', { cls: 'search-hint' });
-		hint.textContent = `Enter a search term to find nodes. Graph has ${stats.nodes} nodes across ${Object.keys(stats.labels).length} labels.`;
+		const overview = this.plugin.queryEngine.overview();
+		this.resultsContainer.createEl('p', {
+			cls: 'search-hint',
+			text: `Search ${overview.notes.total.toLocaleString()} notes and ${overview.entities.toLocaleString()} entities.`,
+		});
 	}
 
-	private performSearch() {
-		this.resultsContainer.empty();
-
-		if (!this.currentQuery.trim()) {
+	private async performSearch() {
+		const generation = ++this.generation;
+		if (!this.query.trim() && !this.options.seed) {
 			this.showHint();
 			return;
 		}
 
-		const results = searchGraphCache(this.plugin.graphCache, this.currentQuery, {
-			exactMatch: this.exactMatch,
-			labelFilter: this.labelFilter || undefined,
+		const response = await this.plugin.queryEngine.search(this.query, {
+			limit: 20,
+			types: this.typeFilter ? [this.typeFilter] : undefined,
+			seed: this.options.seed,
 		});
+		if (generation !== this.generation) return;
+		this.render(response);
+	}
 
-		if (results.length === 0) {
+	private render(response: SearchResponse) {
+		this.resultsContainer.empty();
+
+		if (this.options.seed && this.options.seedLabel) {
 			this.resultsContainer.createEl('p', {
-				text: 'No matching nodes found',
-				cls: 'search-no-results'
+				cls: 'search-seed',
+				text: `Around: ${this.options.seedLabel}`,
+			});
+		}
+
+		if (response.notes.length === 0 && response.entities.length === 0) {
+			this.resultsContainer.createEl('p', {
+				text: response.indexing ? 'No matches yet. Still indexing notes…' : 'No matches found',
+				cls: 'search-no-results',
 			});
 			return;
 		}
 
-		// Group results by label for better organization
-		const resultsByLabel = new Map<string, SearchResult[]>();
-		for (const result of results) {
-			if (!resultsByLabel.has(result.nodeLabel)) {
-				resultsByLabel.set(result.nodeLabel, []);
-			}
-			resultsByLabel.get(result.nodeLabel)!.push(result);
-		}
-
-		// Display results grouped by label
-		for (const [label, labelResults] of resultsByLabel) {
+		if (response.notes.length > 0) {
 			const section = this.resultsContainer.createDiv({ cls: 'search-label-section' });
-			section.createEl('h4', { text: label, cls: 'search-label-header' });
-
+			section.createEl('h4', { text: 'Notes', cls: 'search-label-header' });
 			const list = section.createEl('ul', { cls: 'search-results-list' });
-			for (const result of labelResults) {
-				const item = list.createEl('li', { cls: 'search-result-item' });
+			for (const hit of response.notes) this.renderNote(list, hit);
+		}
 
-				// Header row: name + score
-				const headerRow = item.createDiv({ cls: 'search-result-header' });
-
-				// Node name
-				headerRow.createSpan({
-					text: result.nodeName,
-					cls: 'search-result-name',
-				});
-
-				// Score badge
-				headerRow.createSpan({
-					text: `${Math.round(result.score * 100)}%`,
-					cls: 'search-result-score',
-				});
-
-				// Source notes
-				if (result.sourceNotes.length > 0) {
-					const notesEl = item.createDiv({ cls: 'search-result-notes' });
-					notesEl.createSpan({ text: 'Found in: ', cls: 'search-result-notes-label' });
-
-					for (let i = 0; i < Math.min(result.sourceNotes.length, 3); i++) {
-						const notePath = result.sourceNotes[i];
-						const noteLink = notesEl.createEl('a', {
-							text: this.getNoteName(notePath),
-							cls: 'search-result-note-link',
-						});
-						noteLink.addEventListener('click', (e) => {
-							e.preventDefault();
-							void this.openNote(notePath);
-						});
-
-						if (i < Math.min(result.sourceNotes.length, 3) - 1) {
-							notesEl.createSpan({ text: ', ' });
-						}
-					}
-
-					if (result.sourceNotes.length > 3) {
-						notesEl.createSpan({
-							text: ` +${result.sourceNotes.length - 3} more`,
-							cls: 'search-result-more',
-						});
-					}
-				}
+		if (response.entities.length > 0) {
+			const byType = new Map<string, EntityHit[]>();
+			for (const hit of response.entities) {
+				const list = byType.get(hit.type) ?? [];
+				list.push(hit);
+				byType.set(hit.type, list);
+			}
+			for (const [type, hits] of byType) {
+				const section = this.resultsContainer.createDiv({ cls: 'search-label-section' });
+				section.createEl('h4', { text: type, cls: 'search-label-header' });
+				const list = section.createEl('ul', { cls: 'search-results-list' });
+				for (const hit of hits) this.renderEntity(list, hit);
 			}
 		}
 
-		// Summary
 		const summary = this.resultsContainer.createEl('p', { cls: 'search-summary' });
-		summary.textContent = `Found ${results.length} nodes across ${resultsByLabel.size} labels`;
+		summary.setText(`${response.notes.length} notes, ${response.entities.length} entities`);
 	}
 
-	private getNoteName(path: string): string {
-		return path.replace(/\.md$/, '').split('/').pop() || path;
+	private renderNote(list: HTMLElement, hit: NoteHit) {
+		const item = list.createEl('li', { cls: 'search-result-item' });
+		const header = item.createDiv({ cls: 'search-result-header' });
+		const link = header.createEl('a', { text: hit.title, cls: 'search-result-name search-result-note-link' });
+		link.addEventListener('click', (e) => {
+			e.preventDefault();
+			void this.openNote(hit.path);
+		});
+		const folder = hit.path.includes('/') ? hit.path.slice(0, hit.path.lastIndexOf('/')) : '';
+		if (folder) header.createSpan({ text: folder, cls: 'search-result-folder' });
+		header.createSpan({ text: `${Math.round(hit.score * 100)}%`, cls: 'search-result-score' });
+
+		if (hit.snippet) item.createDiv({ text: hit.snippet, cls: 'search-result-snippet' });
+
+		const why = describeWhy(hit);
+		if (why) item.createDiv({ text: why, cls: 'search-result-notes' });
+	}
+
+	private renderEntity(list: HTMLElement, hit: EntityHit) {
+		const item = list.createEl('li', { cls: 'search-result-item' });
+		const header = item.createDiv({ cls: 'search-result-header' });
+		header.createSpan({ text: hit.name, cls: 'search-result-name' });
+		header.createSpan({ text: `${Math.round(hit.score * 100)}%`, cls: 'search-result-score' });
+		if (hit.description) item.createDiv({ text: hit.description, cls: 'search-result-snippet' });
+
+		const details = this.plugin.queryEngine.getEntity(hit.id);
+		const notes = 'sourceNotes' in details ? details.sourceNotes : [];
+		if (notes.length > 0) {
+			const notesEl = item.createDiv({ cls: 'search-result-notes' });
+			notesEl.createSpan({ text: 'Found in: ', cls: 'search-result-notes-label' });
+			const shown = notes.slice(0, 3);
+			shown.forEach((path, i) => {
+				const link = notesEl.createEl('a', { text: noteName(path), cls: 'search-result-note-link' });
+				link.addEventListener('click', (e) => {
+					e.preventDefault();
+					void this.openNote(path);
+				});
+				if (i < shown.length - 1) notesEl.createSpan({ text: ', ' });
+			});
+			if (hit.noteCount > shown.length) {
+				notesEl.createSpan({ text: ` +${hit.noteCount - shown.length} more`, cls: 'search-result-more' });
+			}
+		}
 	}
 
 	private async openNote(path: string) {
-		const file = this.app.vault.getAbstractFileByPath(path);
-		if (file) {
-			await this.app.workspace.openLinkText(path, '', false);
-			this.close();
-		}
+		await this.app.workspace.openLinkText(path, '', false);
+		this.close();
 	}
 
 	onClose() {
-		const { contentEl } = this;
-		contentEl.empty();
+		this.generation++;
+		this.contentEl.empty();
 	}
+}
+
+function describeWhy(hit: NoteHit): string {
+	const parts: string[] = [];
+	if (hit.matchedWords.length) parts.push(`Matched: ${hit.matchedWords.join(', ')}`);
+	if (hit.connections.length) parts.push(`Via: ${hit.connections.map(describeConnection).join('; ')}`);
+	return parts.join(' · ');
+}
+
+function describeConnection(connection: Connection): string {
+	if (!connection.via) return connection.entity.name;
+	const arrow = connection.via.direction === 'out'
+		? `${connection.entity.name} —${connection.via.verb}→ ${connection.via.matched.name}`
+		: `${connection.via.matched.name} —${connection.via.verb}→ ${connection.entity.name}`;
+	return arrow;
+}
+
+function noteName(path: string): string {
+	return path.replace(/\.md$/, '').split('/').pop() || path;
 }

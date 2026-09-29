@@ -1,5 +1,5 @@
 import { Notice } from 'obsidian';
-import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, isLegacyGraphData, isLegacyWikilinkEdge, isNoteLayerEdge, isNoteNode, noteNodeIds, ResolutionCache, EmbeddingIndex, labelToEntityType, normalizeKey, normalizeUnicode } from '../types';
+import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, NOTE_ID_PREFIX, isLegacyGraphData, isLegacyWikilinkEdge, isNoteLayerEdge, isNoteNode, noteNodeIds, ResolutionCache, EmbeddingIndex, labelToEntityType, normalizeKey, normalizeUnicode } from '../types';
 import { DEFAULT_SETTINGS, DEFAULT_EMBEDDING_DIMENSIONS, getEmbeddingDimensions } from '../settings';
 import { loadEmbeddingsBinary, saveEmbeddingsBinary, cosineSimilarity } from '../extraction/llm-client';
 import type SimpleGraphBuilderPlugin from '../main';
@@ -767,6 +767,54 @@ export class GraphCache {
 
 		this.markDirty();
 		return true;
+	}
+
+	/**
+	 * Follow a note rename: provenance (sourceNotes, edge evidence) and entity
+	 * note paths move to the new path. Without this they point at a file that
+	 * no longer exists, and anything that checks the path -- the query engine
+	 * serves nothing whose source it cannot see -- loses those entities.
+	 *
+	 * The old path's NOTE node is dropped; rebuildNoteLayer adds the new one.
+	 */
+	renameSourceNote(oldPath: string, newPath: string): { nodes: number; edges: number } {
+		const from = normalizeUnicode(oldPath);
+		const to = normalizeUnicode(newPath);
+		let nodes = 0;
+		let edges = 0;
+		if (from === to) return { nodes, edges };
+
+		const affected = new Set([...this.getNodesBySourceNote(from), ...this.getNodesBySourceNote(oldPath)]);
+		for (const node of affected) {
+			if (isNoteNode(node)) continue;
+			this.unindexNode(node);
+			node.sourceNotes = [...new Set(node.sourceNotes.map(p => (normalizeUnicode(p) === from ? to : p)))];
+			this.indexNode(node);
+			nodes++;
+		}
+
+		for (const node of this.nodes) {
+			const entityNotePath = node.properties.entityNotePath;
+			if (typeof entityNotePath === 'string' && normalizeUnicode(entityNotePath) === from) {
+				node.properties.entityNotePath = to;
+				nodes++;
+			}
+		}
+
+		const evidence = new Set([...this.getEdgesBySourceNote(from), ...this.getEdgesBySourceNote(oldPath)]);
+		for (const edge of evidence) {
+			if (this.isDerivedEdge(edge)) continue;
+			this.unindexEdge(edge);
+			edge.sourceNote = to;
+			this.indexEdge(edge);
+			edges++;
+		}
+
+		const staleNoteNode = this.nodeById.get(`${NOTE_ID_PREFIX}${normalizeKey(from)}`);
+		if (staleNoteNode) this.removeNode(staleNoteNode.id);
+
+		if (nodes || edges) this.markDirty();
+		return { nodes, edges };
 	}
 
 	// --- Edge operations (O(1) lookups) ---
