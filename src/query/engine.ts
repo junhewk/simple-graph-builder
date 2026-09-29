@@ -210,12 +210,12 @@ export class QueryEngine {
 		if (tokens.length === 0 && seedIndex === undefined) return response;
 
 		// 1. Lexical note hits
-		const lexical = this.notes.search(tokens, 100, p => snap.isNote(p));
+		const lexical = this.notes.search(tokens, 100, p => snap.isNote(p)).filter(h => coversAWord(h.matched, words));
 		const maxLex = lexical[0]?.score ?? 0;
 		const lexNorm = new Map(lexical.map(h => [h.key, maxLex ? h.score / maxLex : 0]));
 
 		// 2. Entity matches
-		const matched = matchEntities(snap, query, tokens);
+		const matched = matchEntities(snap, query, words);
 
 		// 3. Seeds: the two groups get equal say when both exist
 		const seeds = new Map<number, number>();
@@ -312,15 +312,10 @@ export class QueryEngine {
 		return snap.nodeIndexOfNote(normalizeVaultPath(seed));
 	}
 
-	private matchedWords(path: string, words: { word: string; tokens: string[] }[]): string[] {
+	private matchedWords(path: string, words: QueryWord[]): string[] {
 		const terms = this.notes.termsOf(path);
 		if (!terms) return [];
-		return words
-			.filter(w => {
-				const hits = w.tokens.filter(t => terms.has(t)).length;
-				return hits > 0 && hits >= Math.ceil(w.tokens.length / 2);
-			})
-			.map(w => w.word);
+		return words.filter(w => coversAWord(terms, [w])).map(w => w.word);
 	}
 
 	// --- lookups ---
@@ -546,7 +541,7 @@ export class QueryEngine {
 
 // --- helpers ---
 
-function matchEntities(snap: GraphSnapshot, query: string, tokens: string[]): Map<string, { score: number; match: EntityHit['match'] }> {
+function matchEntities(snap: GraphSnapshot, query: string, words: QueryWord[]): Map<string, { score: number; match: EntityHit['match'] }> {
 	const out = new Map<string, { score: number; match: EntityHit['match'] }>();
 	const trimmed = query.trim();
 	if (!trimmed) return out;
@@ -562,13 +557,28 @@ function matchEntities(snap: GraphSnapshot, query: string, tokens: string[]): Ma
 		}
 	}
 
-	const described = snap.entityText.search(tokens, SEED_LIMIT);
+	const tokens = words.flatMap(w => w.tokens);
+	const described = snap.entityText.search(tokens, SEED_LIMIT).filter(h => coversAWord(h.matched, words));
 	const max = described[0]?.score ?? 0;
 	for (const hit of described) {
 		if (out.has(hit.key) || !max) continue;
 		out.set(hit.key, { score: 0.5 * (hit.score / max), match: 'description' });
 	}
 	return out;
+}
+
+type QueryWord = { word: string; tokens: string[] };
+
+/**
+ * A hit must match at least half the tokens of some query word. Korean words
+ * are bigram-tokenized, so without this "머신러닝은" (machine learning) would
+ * match "딥러닝" (deep learning) through the single shared bigram 러닝.
+ */
+function coversAWord(matched: ReadonlySet<string>, words: QueryWord[]): boolean {
+	return words.some(w => {
+		const hits = w.tokens.filter(t => matched.has(t)).length;
+		return hits > 0 && hits >= Math.ceil(w.tokens.length / 2);
+	});
 }
 
 function connectionsFor(snap: GraphSnapshot, path: string, matched: Set<string>): Connection[] {

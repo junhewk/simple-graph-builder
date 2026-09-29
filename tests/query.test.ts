@@ -76,6 +76,10 @@ const check = (n: string, c: boolean, extra = '') => { if (!c) fail++; console.l
 	const ko = await engine.search('인공지능은');
 	check('Korean query with a particle finds the note', ko.notes[0]?.path === 'Korean/인공지능.md', JSON.stringify(ko.notes.map(n => n.path)));
 
+	const partial = await engine.search('지능형로봇');
+	check('one shared bigram is not a match', !partial.notes.some(n => n.path === 'Korean/인공지능.md' && n.matchedWords.length > 0) &&
+		!partial.entities.some(e => e.id === 'concept:인공지능' && e.match === 'description'), JSON.stringify(partial.notes.map(n => n.path)));
+
 	const nfd = await engine.search('인공지능'.normalize('NFD'));
 	check('NFD query finds the NFC note', nfd.notes[0]?.path === 'Korean/인공지능.md');
 
