@@ -19,7 +19,7 @@ const MODEL_MIGRATIONS: [RegExp, string][] = [
 
 	// OpenAI. Small/cheap tiers land on the mini model, everything else on Luna.
 	[/^(gpt-.*-(mini|nano)|gpt-.*-(mini|nano)-.*|o\d-mini)/, 'gpt-5.4-mini'],
-	[/^(gpt-|o\d)/, 'gpt-5.6-luna'],
+	[/^(gpt-|o\d)/, 'gpt-6-luna'],
 
 	// Gemini. Lite tier keeps its tier.
 	[/^gemini-.*(lite|flash-8b)/, 'gemini-3.5-flash-lite'],
@@ -127,6 +127,13 @@ export function migrateSettings(settings: Settings, storedVersion: number): Migr
 	// records that an older install was seen.
 	// v5 likewise adds analysis exclusions through DEFAULT_SETTINGS, preserving
 	// the existing graph and hashes without re-analysis or cleanup.
+
+	// v6: GPT-6 Luna replaces GPT-5.6 Luna. Only that exact ID moves: the mini
+	// tier is a deliberate cost choice and stays put.
+	if (storedVersion < 6 && next.openaiModel === 'gpt-5.6-luna') {
+		next.openaiModel = 'gpt-6-luna';
+		notes.push('openaiModel: gpt-5.6-luna → gpt-6-luna');
+	}
 
 	// v6: Smart Search is gone. Not version-gated: deleting keys that are
 	// already absent is a no-op, and a settings file restored from an older

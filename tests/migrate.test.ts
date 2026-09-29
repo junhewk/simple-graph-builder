@@ -34,7 +34,7 @@ check('gemini-2.0-flash -> 3.6-flash', run({ geminiModel: 'gemini-2.0-flash' }).
 check('gemini-3-pro-preview -> 3.6-flash', run({ geminiModel: 'gemini-3-pro-preview' }).settings.geminiModel === 'gemini-3.6-flash');
 check('gpt-4.1-mini -> gpt-5.4-mini', run({ openaiModel: 'gpt-4.1-mini' }).settings.openaiModel === 'gpt-5.4-mini');
 check('gpt-5-nano -> gpt-5.4-mini', run({ openaiModel: 'gpt-5-nano' }).settings.openaiModel === 'gpt-5.4-mini');
-check('gpt-5.1 -> gpt-5.6-luna', run({ openaiModel: 'gpt-5.1' }).settings.openaiModel === 'gpt-5.6-luna');
+check('gpt-5.1 -> gpt-6-luna', run({ openaiModel: 'gpt-5.1' }).settings.openaiModel === 'gpt-6-luna');
 check('claude-haiku dated -> claude-haiku-4-5', run({ claudeModel: 'claude-haiku-4-5-20251001' }).settings.claudeModel === 'claude-haiku-4-5');
 check('claude-3-opus -> claude-sonnet-5', run({ claudeModel: 'claude-3-opus-20240229' }).settings.claudeModel === 'claude-sonnet-5');
 check('dead text-embedding-004 -> gemini-embedding-001@768', run({ embeddingModel: 'text-embedding-004' }).settings.embeddingModel === 'gemini-embedding-001@768');
@@ -51,12 +51,20 @@ const deliberate = run({ claudeModel: 'claude-haiku-4-5' }, CURRENT_SETTINGS_VER
 check('already-current version is not re-migrated', deliberate.settings.claudeModel === 'claude-haiku-4-5' && deliberate.notes.length === 0);
 const custom = run({ claudeModel: 'my-proxy/custom-model' });
 check('unrecognised custom model left alone', custom.settings.claudeModel === 'my-proxy/custom-model', custom.settings.claudeModel);
+// v6: GPT-6 Luna
+check('v5 gpt-5.6-luna -> gpt-6-luna', run({ openaiModel: 'gpt-5.6-luna' }, 5).settings.openaiModel === 'gpt-6-luna');
+check('v5 gpt-5.4-mini stays mini', run({ openaiModel: 'gpt-5.4-mini' }, 5).settings.openaiModel === 'gpt-5.4-mini');
+check('a v6 install keeps a deliberate gpt-5.6-luna',
+  run({ openaiModel: 'gpt-5.6-luna' }, CURRENT_SETTINGS_VERSION).settings.openaiModel === 'gpt-5.6-luna');
+check('pre-v2 gpt-4o lands on gpt-6-luna', run({ openaiModel: 'gpt-4o' }).settings.openaiModel === 'gpt-6-luna');
+check('new installs default to gpt-6-luna', DEFAULT_SETTINGS.openaiModel === 'gpt-6-luna');
+
 // v6: Smart Search removal
 const current = run({ useSeparateSmartSearchModel: true, smartSearchEffort: 'high' }, CURRENT_SETTINGS_VERSION);
 check('smart search keys are removed even at the current version',
   !('useSeparateSmartSearchModel' in current.settings) && !('smartSearchEffort' in current.settings));
 check('removal is idempotent', migrateSettings(current.settings, CURRENT_SETTINGS_VERSION).notes.length === 0);
-check('current models are stable under migration', run({ claudeModel: 'claude-sonnet-5', openaiModel: 'gpt-5.6-luna', geminiModel: 'gemini-3.6-flash' }).notes.length === 0);
+check('current models are stable under migration', run({ claudeModel: 'claude-sonnet-5', openaiModel: 'gpt-6-luna', geminiModel: 'gemini-3.6-flash' }).notes.length === 0);
 
 console.log(fail ? `\n${fail} FAILURES` : '\nall pass');
 process.exit(fail ? 1 : 0);

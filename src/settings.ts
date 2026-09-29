@@ -24,7 +24,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	apiKey: '',
 	apiKeys: {},
 	claudeModel: 'claude-sonnet-5',
-	openaiModel: 'gpt-5.4-mini',
+	openaiModel: 'gpt-6-luna',
 	geminiModel: 'gemini-3.6-flash',
 	deepseekModel: 'deepseek-flash',
 	ollamaModel: 'gpt-oss:20b',

@@ -56,7 +56,7 @@ const creds = { apiKey: 'sk-test' };
   // ---- OpenAI ----
   setScripted({ status: 200, body: { output: [{ type: 'reasoning' }, { type: 'message', content: [{ type: 'output_text', text: 'yo' }] }], status: 'completed' } });
 
-  await openaiAdapter.complete({ model: 'gpt-5.6-luna', effort: 'minimal', maxOutputTokens: 4096, system: 'SYS', turns: [{ kind: 'user', text: 'q' }] }, creds);
+  await openaiAdapter.complete({ model: 'gpt-6-luna', effort: 'minimal', maxOutputTokens: 4096, system: 'SYS', turns: [{ kind: 'user', text: 'q' }] }, creds);
   check('openai endpoint is /v1/responses', captured.url === 'https://api.openai.com/v1/responses');
   check('openai no temperature', captured.body.temperature === undefined);
   check('openai no max_tokens (uses max_output_tokens)', captured.body.max_tokens === undefined && captured.body.max_output_tokens === 4096);
@@ -64,14 +64,14 @@ const creds = { apiKey: 'sk-test' };
   check('system -> instructions', captured.body.instructions === 'SYS');
   check('store:false', captured.body.store === false);
 
-  await openaiAdapter.complete({ model: 'gpt-5.6-luna', effort: 'max', maxOutputTokens: 4096, turns: [{ kind: 'user', text: 'q' }] }, creds);
+  await openaiAdapter.complete({ model: 'gpt-6-luna', effort: 'max', maxOutputTokens: 4096, turns: [{ kind: 'user', text: 'q' }] }, creds);
   check('max -> xhigh', captured.body.reasoning?.effort === 'xhigh');
 
-  await openaiAdapter.complete({ model: 'gpt-5.6-luna', effort: 'auto', maxOutputTokens: 4096, turns: [{ kind: 'user', text: 'q' }] }, creds);
+  await openaiAdapter.complete({ model: 'gpt-6-luna', effort: 'auto', maxOutputTokens: 4096, turns: [{ kind: 'user', text: 'q' }] }, creds);
   check('auto -> no reasoning field', captured.body.reasoning === undefined);
 
   await openaiAdapter.complete({
-    model: 'gpt-5.6-luna', effort: 'auto', maxOutputTokens: 4096,
+    model: 'gpt-6-luna', effort: 'auto', maxOutputTokens: 4096,
     tools: [{ name: 'f', description: 'd', parameters: { type: 'object', properties: { a: { type: 'string' } }, required: [] } }],
     turns: [
       { kind: 'user', text: 'q' },
@@ -85,12 +85,12 @@ const creds = { apiKey: 'sk-test' };
   check('assistant raw spread into input (reasoning replayed)', inp[1].type === 'reasoning' && inp[2].type === 'function_call');
   check('tool result is function_call_output w/ call_id', inp[3].type === 'function_call_output' && inp[3].call_id === 'call_1');
 
-  const r2 = await openaiAdapter.complete({ model: 'gpt-5.6-luna', effort: 'auto', maxOutputTokens: 4096, turns: [{ kind: 'user', text: 'q' }] }, creds);
+  const r2 = await openaiAdapter.complete({ model: 'gpt-6-luna', effort: 'auto', maxOutputTokens: 4096, turns: [{ kind: 'user', text: 'q' }] }, creds);
   check('openai text read from output_text block', r2.text === 'yo');
 
   // function_call arguments arrive as a JSON string and must be parsed
   setScripted({ status: 200, body: { output: [{ type: 'function_call', call_id: 'c1', name: 'search', arguments: '{"query":"x"}' }] } });
-  const r3 = await openaiAdapter.complete({ model: 'gpt-5.6-luna', effort: 'auto', maxOutputTokens: 4096, turns: [{ kind: 'user', text: 'q' }] }, creds);
+  const r3 = await openaiAdapter.complete({ model: 'gpt-6-luna', effort: 'auto', maxOutputTokens: 4096, turns: [{ kind: 'user', text: 'q' }] }, creds);
   check('openai args parsed from JSON string', (r3.toolCalls[0].arguments as any).query === 'x');
   check('empty text + toolCalls is not an error', r3.text === '' && r3.toolCalls.length === 1);
 

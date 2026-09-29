@@ -11,7 +11,7 @@ export const MODEL_OPTIONS: Record<ApiProvider, string[]> = {
 		'claude-haiku-4-5',
 	],
 	openai: [
-		'gpt-5.6-luna',
+		'gpt-6-luna',
 		'gpt-5.4-mini',
 	],
 	gemini: [
