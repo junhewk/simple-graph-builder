@@ -206,8 +206,8 @@ embeddings = await embedder.embed_texts([e.name for e in entities])
 
 > **Historical figures.** These were measured against the 2024–2025 model line-up
 > and are kept for the order-of-magnitude comparison below. The plugin now uses
-> `gpt-5.4-mini` / `gpt-5.6-luna`, `claude-sonnet-5` / `claude-haiku-4-5`, and
-> `gemini-3.6-flash` / `gemini-3.5-flash-lite`, which price differently — see the
+> `gpt-6-luna` / `gpt-5.4-mini`, `claude-sonnet-5` / `claude-haiku-4-5`,
+> `gemini-3.6-flash` / `gemini-3.5-flash-lite`, and `deepseek-flash`, which price differently — see the
 > providers' current rate cards rather than extrapolating from this table.
 
 For 200 articles with ~20 chunks each (4,000 extraction calls):

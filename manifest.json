@@ -3,7 +3,7 @@
 	"name": "Simple Graph Builder",
 	"version": "0.6.1",
 	"minAppVersion": "1.7.2",
-	"description": "Build a knowledge graph from your notes using LLM-powered entity extraction. Supports Claude, OpenAI, Gemini, and Ollama.",
+	"description": "Build a knowledge graph from your notes using LLM-powered entity extraction, and let AI agents search it over MCP. Supports Claude, OpenAI, Gemini, DeepSeek, and Ollama.",
 	"author": "Junhewk Kim",
 	"authorUrl": "https://github.com/junhewk",
 	"fundingUrl": "https://buymeacoffee.com/junhewkkim",

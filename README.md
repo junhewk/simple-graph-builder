@@ -8,6 +8,32 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
+## What's new in 0.7.0
+
+**Agent access.** AI agents such as Claude Code, Claude Desktop and Codex can now
+search your vault and its knowledge graph directly, through a local
+[MCP](https://modelcontextprotocol.io) server built into the plugin. Agents
+can already grep files. What they get here is what grep cannot give them:
+Obsidian's resolved links and backlinks, the extracted entities and their
+typed relations with the note each came from, and graph-aware ranking. Turn
+it on under **Settings → Agent access** and copy the configuration for your
+client. See [Agent Access (MCP)](#agent-access-mcp).
+
+- **Advanced search replaces Smart Search.** The search window
+  (**Search graph and notes**) now ranks notes by text match *and* by closeness in
+  the graph, so a note about a matched entity shows up even when it never uses
+  your words. Each result says why it is there. It makes no API calls. The
+  LLM-powered Smart Search is removed: an agent connected over MCP does that job
+  better.
+- **DeepSeek** is a new provider, defaulting to `deepseek-flash` (DeepSeek-V4.1-Flash).
+- **GPT-6 Luna** (`gpt-6-luna`) is the OpenAI default for new installs.
+- **Renames are followed.** Renaming a note now moves its entities' provenance
+  with it. Before, the graph kept pointing at the old path.
+- **Fix:** a note named like an entity (say `Transformer.md` next to the entity
+  "Transformer") no longer captures that entity's new relationships.
+
+See [Upgrading to 0.7.0](#upgrading-to-070).
+
 ## What's new in 0.6.1
 
 Keep configuration files and other unwanted notes out of analysis with the new
@@ -37,15 +63,16 @@ This design provides **structured entity classification with expressive relation
 
 - **Lightweight Ontology Model**: Simple but expressive - 10 fixed entity types + free-form relationship verbs with detail annotations
 - **Hybrid Entity Resolution**: Multi-stage deduplication pipeline combining fast lookups with embedding similarity and LLM verification (inspired by KGGen [3])
-- **Smart Search**: AI-powered natural language queries over your knowledge graph with multi-path exploration
+- **Agent Access (MCP)**: Let Claude Code, Claude Desktop or Codex search your vault and knowledge graph through a local, token-protected, read-only MCP server
+- **Advanced Search**: Notes and entities ranked by text match plus graph proximity (Personalized PageRank, as in HippoRAG [6]), with an explanation for every result and no API calls
 - **Configurable Analysis Exclusions**: Skip files and folders using paths or globs, with optional support for Obsidian’s own exclusion list
 - **Entity Extraction**: Automatically extract entities from your notes using AI (configurable extraction depth)
 - **Schema-enforced Extraction**: Every extraction request carries a JSON schema, and replies are validated against it — malformed entities are reported and dropped rather than silently polluting the graph
 - **Internal Link Support**: Automatically processes `[[wikilinks]]` to build note-to-note connections
 - **Vault Write-Back (opt-in)**: Mirror the graph into your vault as real Obsidian links, so it also appears in the built-in graph view, backlinks and properties — entity notes carry the resolution aliases, which is what makes Obsidian treat "ML" and "머신러닝" as one note
-- **Multiple LLM Support**: Works with Claude, OpenAI, Gemini, and local servers — Ollama plus anything OpenAI-compatible (llama.cpp, LM Studio, vLLM)
-- **Reasoning Effort Control**: Tune how hard the model thinks, separately for extraction and Smart Search
-- **Korean Language Support**: Bigram Jaccard similarity for robust Korean text matching (handles particles and spacing variations), with all names normalized to Unicode NFC so composed and decomposed Hangul resolve to the same entity
+- **Multiple LLM Support**: Works with Claude, OpenAI, Gemini, DeepSeek, and local servers — Ollama plus anything OpenAI-compatible (llama.cpp, LM Studio, vLLM)
+- **Reasoning Effort Control**: Tune how hard the model thinks during extraction
+- **Korean Language Support**: Bigram-based matching in both entity resolution and search, so particles ("머신러닝은") and spacing variations still match, with all names normalized to Unicode NFC so composed and decomposed Hangul resolve to the same entity
 - **Interactive Graph View**: Visualize your knowledge graph with a ForceAtlas2 layout, connectivity-scaled nodes, and importance-weighted edges so hubs and clusters are immediately visible
 - **Large Graph Support**: Optimized for thousands of nodes with fast rendering
 - **Note Neighborhood Panel**: See connections for the current note in a sidebar
@@ -76,8 +103,7 @@ This approach resolves most entities via fast hash lookups, reserving expensive 
 | Command | Description |
 |---------|-------------|
 | `Analyze current note` | Extract entities from the active note |
-| `Search related notes` | Find notes by entity name (exact/fuzzy match) |
-| `Smart Search (AI)` | Natural language search using LLM to explore the graph |
+| `Search graph and notes` | Advanced search over notes and entities (no API calls) |
 | `Open graph view` | Show the knowledge graph visualization |
 | `Open note neighborhood panel` | Show current note's connections in sidebar |
 | `Remove current note from graph` | Remove active note from the graph |
@@ -147,8 +173,8 @@ Right-click a node to:
 ## Settings
 
 ### API Configuration
-- **API Provider**: Choose between Claude, OpenAI, Gemini, or Ollama (local)
-- **API Key**: Stored per provider, so extraction and Smart Search can use different providers without one overwriting the other's key. Not needed for a local server unless it was started with `--api-key`.
+- **API Provider**: Choose between Claude, OpenAI, Gemini, DeepSeek, or Ollama (local)
+- **API Key**: Stored per provider, so switching providers never sends one provider's key to another. Not needed for a local server unless it was started with `--api-key`.
 - **Server API** (local only): Which API the local server speaks — *Ollama* (`/api/chat`) or *OpenAI-compatible* (`/v1/chat/completions`). Use OpenAI-compatible for llama.cpp's `llama-server`, LM Studio, vLLM and similar; set **Host** to the base address without the `/v1` suffix.
 - **Model**: Select or enter a custom model name
 
@@ -195,16 +221,6 @@ kept. Use **Remove current note from graph** to remove prior contributions.
 Standalone write-back commands remain independent of analysis exclusions.
 Plugin-managed entity notes are always excluded from analysis.
 
-### Smart Search Model
-You can configure a separate model for Smart Search queries, allowing you to use faster/cheaper models for extraction while using more capable models for search:
-- **Use separate model for smart search**: Enable to configure a different model
-- **Smart search provider**: Choose provider (Claude, OpenAI, Gemini, Ollama)
-- **Smart search model**: Select or enter a custom model name
-- **Smart search reasoning effort**: Set independently from extraction — searching benefits from more reasoning than extraction does
-- **API key**: Shown when Smart Search uses a different provider than extraction, since that provider's own settings block is hidden
-
-This is useful for optimizing cost vs. quality - e.g., use `gpt-5.4-mini` for extraction and `gpt-5.6-luna` for search.
-
 ### Entity Resolution (Opt-in)
 Enable embedding-based entity resolution for intelligent deduplication:
 - **Enable embeddings**: Turn on the hybrid resolution pipeline
@@ -239,22 +255,81 @@ Off by default. This is the only part of the plugin that writes into your notes.
 
 **What the plugin edits, exactly:** in your own notes, only that one property — your prose is never touched. In entity notes, the `aliases`, `entity-type` and `sgb-id` properties and the text between the `%% sgb:managed:start %%` and `%% sgb:managed:end %%` markers. Anything you write outside those markers is kept through every regeneration, and a file that does not carry the plugin's `sgb-id` is never overwritten or deleted.
 
+### Agent Access (MCP)
+
+Off by default, desktop only. When on, Obsidian runs an
+[MCP](https://modelcontextprotocol.io) server at `http://127.0.0.1:27180/mcp`
+that agents can query while Obsidian is open.
+
+- **Agent access**: master toggle
+- **Status**: running, or why it is not (for example, the port is taken by another vault)
+- **Port**: change it if something else uses 27180, then copy the settings again
+- **Access token**: every request must carry it. It is kept in this device's local storage, not in the vault, so it is never synced or committed. **Regenerate** disconnects every configured agent
+- **Claude Code**: copies one command to run in a terminal:
+  ```bash
+  claude mcp add --transport http --scope user obsidian-graph http://127.0.0.1:27180/mcp --header "Authorization: Bearer <token>"
+  ```
+- **Codex**: copies a block for `~/.codex/config.toml`:
+  ```toml
+  [mcp_servers.obsidian-graph]
+  url = "http://127.0.0.1:27180/mcp"
+  http_headers = { "Authorization" = "Bearer <token>" }
+  ```
+- **Claude Desktop**: copies an entry for `claude_desktop_config.json` (Claude Desktop → Settings → Developer → Edit config). Claude Desktop only starts local command-line servers, so the entry runs a small bridge script, `mcp-bridge.cjs`, that the plugin keeps in its own folder. It needs [Node.js](https://nodejs.org)
+- **Node.js executable**: if Claude Desktop cannot find `node`, enter its full path (`which node` in a terminal)
+
+The agent gets six read-only tools:
+
+| Tool | What it returns |
+|------|-----------------|
+| `search` | Notes and entities ranked by text match and graph proximity, each with the matched words and the entities that connect it to the query |
+| `get_entity` | An entity's type, description and aliases, the notes it came from, and its relations in both directions with the source note of each |
+| `get_note` | A note's tags, links, backlinks, mentioned entities and related notes (by shared entities), and optionally its text |
+| `neighbors` | Entities within 1–3 relation hops, with the path of verbs that reaches each |
+| `find_path` | How two entities or notes connect, step by step |
+| `graph_overview` | Counts, entity types, the most central entities and the most common relations |
+
+Agents are told to cite notes as `[[wikilinks]]` and to treat note text as data,
+not instructions.
+
+**What agents can and cannot see.** Only Markdown notes, and never anything in
+`.obsidian` or other dot folders. Notes matching your
+[Analysis Exclusions](#analysis-exclusions) are never served: not by search,
+not by path, and not as the evidence behind a relation. Nor is an entity that
+was extracted only from excluded notes. An entity that also appears in a
+visible note is served, and its description may reflect every note it was
+extracted from. The server listens on 127.0.0.1 only, refuses requests from
+web pages, and cannot change your vault.
+
 ### Data Management
 - View graph statistics (nodes by entity type, total relationships)
 - Clear all graph data
 
 ## Supported Models
 
-Note analysis requires a model that can return **structured output** (JSON schema). Models that cannot are refused with a message rather than silently producing a lower-quality graph, and the settings panel flags them as you select them.
+Note analysis requires a model that can return **structured output**. Models that cannot are refused with a message rather than silently producing a lower-quality graph, and the settings panel flags them as you select them.
 
 | Provider | Models |
 |----------|--------|
 | Claude | `claude-sonnet-5`, `claude-haiku-4-5` |
-| OpenAI | `gpt-5.6-luna`, `gpt-5.4-mini` |
+| OpenAI | `gpt-6-luna`, `gpt-5.4-mini` |
 | Gemini | `gemini-3.6-flash`, `gemini-3.5-flash-lite` |
+| DeepSeek | `deepseek-flash` |
 | Local | any model your server exposes — Ollama, or an OpenAI-compatible server such as llama.cpp's `llama-server`, LM Studio or vLLM |
 
-Any other model can be typed into the **Custom…** field. Smart Search additionally needs tool calling; for local servers, start `llama-server` with `--jinja`, and prefer `qwen3:*` or `gpt-oss:*` on Ollama.
+Any other model can be typed into the **Custom…** field, for example `deepseek-v4-pro`.
+
+DeepSeek offers JSON mode rather than schema-enforced output, so the plugin
+puts the schema in the prompt and still validates every reply against it. At
+the default *Minimal* reasoning effort, DeepSeek's thinking is switched off.
+At higher levels it stays on, and the output budget is raised to 32k tokens,
+because DeepSeek counts thinking against it.
+
+## Upgrading to 0.7.0
+
+- **Smart Search is gone.** Its separate model settings are removed from your settings file on first load. **Search graph and notes** (same command, same hotkey) is the replacement inside Obsidian; for question answering, connect an agent through [Agent Access](#agent-access-mcp).
+- **Model:** a stored `gpt-5.6-luna` becomes `gpt-6-luna`. Every other model choice, including `gpt-5.4-mini`, is left alone. New installs default to `gpt-6-luna` for OpenAI.
+- **Nothing is re-analyzed.** The graph is unchanged, and the search index is built in memory from your notes the first time you search.
 
 ## Upgrading to 0.6.0
 
@@ -340,28 +415,19 @@ Edges follow the same logic. Zoomed out they are drawn bold, because a 1px line 
 The result is a graph of distinct clusters rather than one dense block. If yours still looks crowded, raise **Minimum connections** or turn off **Show note nodes** to thin it out.
 
 ### Search
-Two search modes are available:
+1. Run command: `Search graph and notes` (or double-click a node in the graph view to search around it)
+2. Type words, a concept or an entity name. Korean particles are fine: `머신러닝은` finds `머신러닝`
+3. **Notes** are ranked by how well they match *and* how close they are in the graph to what matched. Under each note: a snippet, the words it matched, and the entities connecting it to your query. For example, `Via: Transformer —uses→ Attention` means the note mentions Transformer, which uses the Attention you searched for
+4. **Entities** are listed by type with the notes they appear in
+5. Click a note to open it
 
-#### Basic Search
-1. Run command: `Search related notes`
-2. Enter a concept or entity name
-3. Toggle **Exact match** for precise matching
-4. Click results to navigate to notes
-
-#### Smart Search (AI)
-1. Run command: `Smart Search (AI)`
-2. Enter a natural language question (e.g., "What methods did we use for the recommendation project?")
-3. The LLM explores the graph using tool calls, following multiple paths
-4. View the AI-generated answer with relevant nodes and source notes
-5. Click source note links to navigate
-
-**Note**: Smart Search requires models with tool calling support. Some Ollama models (`deepseek-r1:*`, `gemma3:*`) have limited support. Recommended: `qwen3:*`, `gpt-oss:*` for Ollama.
+Search makes no API calls. The first search after Obsidian starts builds an index of your notes, and later edits keep it up to date.
 
 ## API Costs
 
 This plugin makes API calls to extract entities from your notes.
 
-- **Claude, OpenAI, Gemini**: Each note analysis and Smart Search query will incur API costs based on your provider's pricing
+- **Claude, OpenAI, Gemini, DeepSeek**: Each note analysis incurs API costs at your provider's pricing. Search and Agent Access make no API calls
 - **Ollama**: Free (runs locally on your machine)
 
 ### Embedding Costs (if enabled)
@@ -379,6 +445,7 @@ Consider using Ollama for cost-free operation, or batch analyze during off-peak 
 - No data is stored externally; all graph data stays in your vault
 - Consider using Ollama for fully local, private processing
 - Embeddings are stored locally in binary format (`embeddings.bin`)
+- **Agent Access** (off by default) serves your notes to AI agents you connect. They see notes, not your API keys or settings, and never your excluded notes. What an agent does with what it reads (for example, sending it to its own model provider) is governed by that agent
 
 ### If you version-control your vault
 
@@ -410,7 +477,7 @@ Simple Graph Builder combines the simplicity of LightRAG with KGGen's hybrid res
 npm install
 npm run dev     # watch build
 npm run build   # production build (typecheck + bundle)
-npm test        # provider wire-level tests
+npm test        # wire-level and engine tests
 npm test -- gemini   # run one suite
 npm run eval    # live end-to-end check against the real provider APIs
 ```
@@ -426,10 +493,12 @@ npx esbuild tests/layout.test.ts --bundle --platform=node --outfile=/tmp/layout.
 SGB_LAYOUT_BENCH=1 node /tmp/layout.cjs
 ```
 
+`tests/query.test.ts` and the `tests/mcp-*.test.ts` suites cover search and agent access against an in-memory vault that includes an excluded folder. `mcp-http` starts a real server on a free port, checks every rejection path (token, Host/Origin, method, content type, size), and drives the Claude Desktop bridge as a child process.
+
 `npm run eval` is the opposite end: it bundles `tests/*.eval.ts` against a stub whose `requestUrl` performs real HTTP, then runs the full extraction pipeline against every provider you have a key for in the environment. Providers without a key are skipped, so it is safe to run with just one.
 
 ```bash
-ANTHROPIC_API_KEY=... OPENAI_API_KEY=... GEMINI_API_KEY=... npm run eval
+ANTHROPIC_API_KEY=... OPENAI_API_KEY=... GEMINI_API_KEY=... DEEPSEEK_API_KEY=... npm run eval
 ```
 
 ## References
@@ -443,6 +512,8 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... GEMINI_API_KEY=... npm run eval
 [4] Neo4j, Inc. (2024). "Neo4j GraphRAG Package for Python." https://neo4j.com/docs/neo4j-graphrag-python/current/
 
 [5] Veen, A. (2024). "pgvector: Open-source vector similarity search for Postgres." https://github.com/pgvector/pgvector
+
+[6] Gutiérrez, B. J., et al. (2024). "HippoRAG: Neurobiologically Inspired Long-Term Memory for Large Language Models." NeurIPS 2024. arXiv:2405.14831. https://github.com/OSU-NLP-Group/HippoRAG
 
 ## Support
 
