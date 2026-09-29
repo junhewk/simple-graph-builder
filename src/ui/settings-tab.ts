@@ -312,18 +312,21 @@ export class SettingsTab extends PluginSettingTab {
 			claude: 'Claude',
 			openai: 'OpenAI',
 			gemini: 'Gemini',
+			deepseek: 'DeepSeek',
 			ollama: 'Ollama',
 		};
 		const extractionModelKeys = {
 			claude: 'claudeModel',
 			openai: 'openaiModel',
 			gemini: 'geminiModel',
+			deepseek: 'deepseekModel',
 			ollama: 'ollamaModel',
 		} as const;
 		const providerOptions = {
 			claude: 'Claude',
 			openai: 'OpenAI',
 			gemini: 'Gemini',
+			deepseek: 'DeepSeek (cloud)',
 			ollama: 'Ollama (local)',
 		};
 		const effortOptions = Object.fromEntries(
@@ -360,7 +363,7 @@ export class SettingsTab extends PluginSettingTab {
 						desc: 'Select the provider for entity extraction.',
 						control: { type: 'dropdown', key: 'apiProvider', options: providerOptions },
 					},
-					...(['claude', 'openai', 'gemini'] as ApiProvider[]).map(provider => ({
+					...(['claude', 'openai', 'gemini', 'deepseek'] as ApiProvider[]).map(provider => ({
 						name: `${providerLabels[provider]} API key`,
 						desc: `API key used for ${providerLabels[provider]} requests.`,
 						aliases: ['API key'],
@@ -746,6 +749,7 @@ export class SettingsTab extends PluginSettingTab {
 					.addOption('claude', 'Claude')
 					.addOption('openai', 'OpenAI')
 					.addOption('gemini', 'Gemini')
+					.addOption('deepseek', 'DeepSeek (cloud)')
 					.addOption('ollama', 'Ollama (local)')
 					.setValue(this.plugin.settings.apiProvider)
 					.onChange(async (value) => {
@@ -829,6 +833,32 @@ export class SettingsTab extends PluginSettingTab {
 			get: () => this.plugin.settings.geminiModel,
 			set: async (value) => {
 				this.plugin.settings.geminiModel = value;
+				await this.plugin.saveSettings();
+			},
+		});
+
+		// DeepSeek settings
+		this.providerSettingsEls.deepseek = containerEl.createDiv();
+		new Setting(this.providerSettingsEls.deepseek)
+			.setName('API key')
+			.setDesc('DeepSeek key')
+			.addText(text => {
+				text
+					.setPlaceholder('Enter API key')
+					.setValue(this.plugin.settings.apiKeys?.deepseek ?? '')
+					.onChange(async (value) => {
+						this.plugin.settings.apiKeys = { ...this.plugin.settings.apiKeys, deepseek: value };
+						await this.plugin.saveSettings();
+					});
+				text.inputEl.type = 'password';
+			});
+		this.addModelSetting(this.providerSettingsEls.deepseek, {
+			name: 'Model',
+			desc: 'DeepSeek model to use',
+			provider: 'deepseek',
+			get: () => this.plugin.settings.deepseekModel,
+			set: async (value) => {
+				this.plugin.settings.deepseekModel = value;
 				await this.plugin.saveSettings();
 			},
 		});
@@ -996,7 +1026,7 @@ export class SettingsTab extends PluginSettingTab {
 			// Embedding provider
 			new Setting(containerEl)
 				.setName('Embedding provider')
-				.setDesc('Select the provider for embeddings. Claude does not offer embeddings.')
+				.setDesc('Select the provider for embeddings. Claude and DeepSeek do not offer embeddings.')
 				.addDropdown(dropdown => {
 					dropdown
 						.addOption('openai', 'OpenAI')
@@ -1485,7 +1515,7 @@ export class SettingsTab extends PluginSettingTab {
 
 	private updateProviderSettings() {
 		const currentProvider = this.plugin.settings.apiProvider;
-		const providers: ApiProvider[] = ['claude', 'openai', 'gemini', 'ollama'];
+		const providers: ApiProvider[] = ['claude', 'openai', 'gemini', 'deepseek', 'ollama'];
 
 		for (const provider of providers) {
 			const el = this.providerSettingsEls[provider];

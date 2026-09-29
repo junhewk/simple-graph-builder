@@ -47,7 +47,7 @@ for (const p of ['gemini', 'ollama'] as const) {
   check(`${p}: enum survives the strip`, out.includes('PERSON') && out.includes('TOPIC'));
   check(`${p}: required survives the strip`, out.includes('"required"'));
 }
-for (const p of ['claude', 'openai'] as const) {
+for (const p of ['claude', 'openai', 'deepseek'] as const) {
   check(`${p}: schema passed through untouched`, JSON.stringify(toProviderSchema(ONTOLOGY_JSON_SCHEMA, p)) === JSON.stringify(ONTOLOGY_JSON_SCHEMA));
 }
 check('stripping does not mutate the original', JSON.stringify(ONTOLOGY_JSON_SCHEMA).includes('additionalProperties'));

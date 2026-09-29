@@ -26,6 +26,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	claudeModel: 'claude-sonnet-5',
 	openaiModel: 'gpt-5.4-mini',
 	geminiModel: 'gemini-3.6-flash',
+	deepseekModel: 'deepseek-flash',
 	ollamaModel: 'gpt-oss:20b',
 	ollamaHost: 'http://localhost:11434',
 	localApiStyle: 'ollama',

@@ -359,7 +359,7 @@ export interface OntologyExtractionResult {
 // API & Settings
 // ============================================
 
-export type ApiProvider = 'claude' | 'openai' | 'gemini' | 'ollama';
+export type ApiProvider = 'claude' | 'openai' | 'gemini' | 'deepseek' | 'ollama';
 
 /**
  * Embedding provider options.
@@ -395,6 +395,7 @@ export interface Settings {
 	claudeModel: string;
 	openaiModel: string;
 	geminiModel: string;
+	deepseekModel: string;
 	ollamaModel: string;
 	ollamaHost: string;     // Local server URL (default: http://localhost:11434)
 	localApiStyle: LocalApiStyle;  // default: 'ollama'

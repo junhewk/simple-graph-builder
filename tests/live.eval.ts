@@ -31,12 +31,14 @@ const KEYS: Partial<Record<ApiProvider, string | undefined>> = {
 	claude: process.env.ANTHROPIC_API_KEY,
 	openai: process.env.OPENAI_API_KEY,
 	gemini: process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY,
+	deepseek: process.env.DEEPSEEK_API_KEY,
 };
 
 const CHEAP_MODEL: Partial<Record<ApiProvider, string>> = {
 	claude: 'claude-haiku-4-5',
 	openai: 'gpt-5.4-mini',
 	gemini: 'gemini-3.5-flash-lite',
+	deepseek: 'deepseek-flash',
 };
 
 // Settings shaped exactly like the bug reporter's install: per-provider keys
@@ -52,6 +54,7 @@ function userShapedSettings(provider: ApiProvider): Settings {
 		claudeModel: CHEAP_MODEL.claude!,
 		openaiModel: CHEAP_MODEL.openai!,
 		geminiModel: CHEAP_MODEL.gemini!,
+		deepseekModel: CHEAP_MODEL.deepseek!,
 		extractionEffort: 'minimal',
 	};
 }
@@ -60,7 +63,7 @@ function userShapedSettings(provider: ApiProvider): Settings {
 	const providers = (Object.keys(KEYS) as ApiProvider[]).filter((p) => KEYS[p]);
 
 	if (providers.length === 0) {
-		console.log('skip: no API keys in env (ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY) — nothing evaluated');
+		console.log('skip: no API keys in env (ANTHROPIC_API_KEY / OPENAI_API_KEY / GEMINI_API_KEY / DEEPSEEK_API_KEY) — nothing evaluated');
 		process.exit(0);
 	}
 

@@ -153,7 +153,8 @@ function describe(value: unknown): string {
 
 /**
  * Gemini and Ollama validate against an OpenAPI-flavoured subset that rejects
- * `additionalProperties`. Anthropic and OpenAI take the schema as-is.
+ * `additionalProperties`. Anthropic, OpenAI and DeepSeek take the schema as-is
+ * (DeepSeek only ever sees it in the prompt; its JSON mode takes no schema).
  */
 export function toProviderSchema(schema: JsonSchemaObject, provider: ApiProvider): JsonSchemaObject {
 	if (provider === 'gemini' || provider === 'ollama') {

@@ -15,9 +15,9 @@ const cross = S({
 });
 check('extraction gets the Claude key', resolveModelConfig(cross).apiKey === 'sk-ant-CLAUDE');
 
-// three providers, three keys, no crosstalk
-const all = S({ apiKeys: { claude: 'K-C', openai: 'K-O', gemini: 'K-G' } });
-for (const [p, k] of [['claude','K-C'],['openai','K-O'],['gemini','K-G']] as const) {
+// four providers, four keys, no crosstalk
+const all = S({ apiKeys: { claude: 'K-C', openai: 'K-O', gemini: 'K-G', deepseek: 'K-D' } });
+for (const [p, k] of [['claude','K-C'],['openai','K-O'],['gemini','K-G'],['deepseek','K-D']] as const) {
   check(`apiProvider=${p} -> ${k}`, resolveModelConfig({ ...all, apiProvider: p }).apiKey === k);
 }
 

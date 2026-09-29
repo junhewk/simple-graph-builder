@@ -18,6 +18,9 @@ export const MODEL_OPTIONS: Record<ApiProvider, string[]> = {
 		'gemini-3.6-flash',
 		'gemini-3.5-flash-lite',
 	],
+	deepseek: [
+		'deepseek-flash',
+	],
 	ollama: [
 		'gpt-oss:20b',
 		'gpt-oss:120b',
@@ -56,6 +59,7 @@ export function resolveModelConfig(settings: Settings): ResolvedModel {
 		claude: settings.claudeModel,
 		openai: settings.openaiModel,
 		gemini: settings.geminiModel,
+		deepseek: settings.deepseekModel,
 		ollama: settings.ollamaModel,
 	});
 
