@@ -3,6 +3,9 @@ on:
   push:
     tags:
       - "*"
+  # Manual runs build and test only, so workflow changes can be checked
+  # without publishing anything; the attest and release steps need a tag.
+  workflow_dispatch:
 
 jobs:
   build:
@@ -12,11 +15,11 @@ jobs:
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v7
       - name: Use Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v7
         with:
-          node-version: "18.x"
+          node-version: "22.x"
       - name: Build plugin
         run: |
           npm install
@@ -26,13 +29,15 @@ jobs:
         run: npm test
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@v4
         with:
           subject-path: |
             main.js
             manifest.json
             styles.css
       - name: Create release
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
