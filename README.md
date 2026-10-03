@@ -8,62 +8,58 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
-## What's new in 0.7.0
+## What's new in 0.7.1
 
-### Agent access: your vault and graph, for AI agents
+### Import literature reviews from med-lit-mcp
 
-AI agents such as **Claude Code**, **Codex** and **Claude Desktop** can now query
-your vault and its knowledge graph directly.
+[**med-lit-mcp**](https://github.com/junhewk/med-lit-mcp) is a companion tool
+for medical literature reviews, by the same author. It is an MCP server: you
+work with it from Claude Code, Claude Desktop, Codex, ChatGPT desktop or
+Hermes, and the agent takes a review question through
+**search → screening → fetch → wiki**. Along the way it:
 
-The plugin itself provides this. Obsidian has no agent interface of its own:
-while Obsidian is open, Simple Graph Builder runs a small
-[MCP](https://modelcontextprotocol.io) server on your computer at
-`http://127.0.0.1:27180/mcp`. Agents connect to it and call its tools. It is
-off by default and desktop only.
+- searches PubMed, PMC, OpenAlex, Semantic Scholar, Scopus and Europe PMC,
+- screens titles and abstracts, with every decision backed by a quote,
+- fetches the full text where it is openly available, and
+- writes a wiki: one page per article, one page per entity (conditions,
+  interventions, technologies, methods, …) with an evidence-linked synthesis,
+  and a knowledge graph of those entities and their relationships.
 
-```
-Claude Code / Codex ──HTTP──┐
-                            ├──► Simple Graph Builder (inside Obsidian) ──► your notes + knowledge graph
-Claude Desktop ──► bridge ──┘
-```
+A scheduled **bot** can keep a review up to date, adding a few new articles a
+day. Install it from [GitHub](https://github.com/junhewk/med-lit-mcp) or
+[PyPI](https://pypi.org/project/med-lit-mcp/) (`uvx med-lit-mcp setup`).
 
-Agents can already grep files. The server gives them what grep cannot:
-Obsidian's resolved links and backlinks, the entities extracted from your
-notes, the relations between them with the note each relation came from, and
-search that follows the graph. There are six read-only tools: `search`,
-`get_entity`, `get_note`, `neighbors`, `find_path` and `graph_overview`.
+Simple Graph Builder can now import such a project into your vault:
 
-Turn it on under **Settings → Agent access** and copy the command or config for
-your client. Tested with Claude Code 2.1 and Codex 0.158; Claude Desktop
-connects through a small bridge script the plugin provides. Agents cannot
-change your vault or spend your API credits, and notes you exclude from
-analysis are never served. See [Agent Access (MCP)](#agent-access-mcp).
+- **The pages stay together** in their own folder, named after the project
+  (`<project>/sources`, `<project>/entities`, `<project>/updates`), apart from
+  your notes and from the plugin's own entity notes.
+- **Links become Obsidian wikilinks.** med-lit writes relative Markdown links;
+  the import rewrites them to `[[<project>/entities/Empathy|Empathy]]`, so
+  backlinks, the graph view and renames work as they do for your own notes.
+- **Its knowledge graph joins yours.** med-lit's graph is merged into this
+  plugin's graph, with no LLM extraction and no API calls. An entity med-lit
+  found ("Large language models", acronym "LLM") becomes the same node as the
+  "LLM" in your own notes, and relationships keep med-lit's verbatim quotes as
+  evidence. med-lit's medical types are converted to this plugin's ten types by
+  med-lit's own table.
+- **Updating is the same command.** Import the project again after the bot has
+  run and only what changed comes in. Pages you edited in Obsidian are kept and
+  listed, never overwritten without your say-so.
 
-### Also in 0.7.0
+Run **Import or update med-lit project**, or use **Settings → Imported
+projects**. It needs med-lit-mcp 0.1.6 or later and the desktop app. See
+[Importing med-lit Projects](#importing-med-lit-projects).
 
-- **Advanced search replaces Smart Search.** The search window (**Search graph
-  and notes**, same command and hotkey) ranks notes by text match *and* by
-  closeness in the graph. A note about a matched entity shows up even when it
-  never uses your words, and each result says why it is there: the words it
-  matched and the entities that connect it. It makes no API calls and handles
-  Korean particles (`머신러닝은` finds `머신러닝`). The LLM-powered Smart Search
-  is removed; an agent connected over MCP does that job better.
-- **DeepSeek** is a new provider, defaulting to `deepseek-flash` (DeepSeek-V4.1-Flash).
-- **GPT-6 Luna** (`gpt-6-luna`) is the OpenAI default for new installs, and a
-  saved `gpt-5.6-luna` moves to it.
-- **Renamed notes keep their entities.** Renaming a note now moves the
-  provenance of its entities and relations along with it. Before, the graph
-  kept pointing at the old path.
-- **Fix:** a note named like an entity (say `Transformer.md` next to the entity
-  "Transformer") no longer captures that entity's new relationships, which
-  were then lost on save.
+### Previously, in 0.7.0
 
-See [Upgrading to 0.7.0](#upgrading-to-070).
-
-### Previously, in 0.6.1
-
-Analysis exclusions: keep folders and files out of analysis with paths or globs
-such as `skills/**`. See [Analysis Exclusions](#analysis-exclusions).
+**Agent access:** AI agents such as Claude Code, Codex and Claude Desktop can
+query your vault and knowledge graph through a local, read-only
+[MCP](https://modelcontextprotocol.io) server the plugin runs while Obsidian is
+open. **Advanced search** ranks notes by text match and closeness in the graph,
+with no API calls, and replaces Smart Search. Also new: DeepSeek, GPT-6 Luna,
+and entities that follow renamed notes. See [Agent Access (MCP)](#agent-access-mcp)
+and [Upgrading to 0.7.0](#upgrading-to-070).
 
 ## Why Lightweight Ontology?
 
@@ -79,6 +75,7 @@ This design provides **structured entity classification with expressive relation
 
 - **Lightweight Ontology Model**: Simple but expressive - 10 fixed entity types + free-form relationship verbs with detail annotations
 - **Hybrid Entity Resolution**: Multi-stage deduplication pipeline combining fast lookups with embedding similarity and LLM verification (inspired by KGGen [3])
+- **med-lit Import**: Bring a [med-lit-mcp](https://github.com/junhewk/med-lit-mcp) literature review (articles, wiki pages and its knowledge graph) into your vault, merged into your graph and kept up to date by re-importing
 - **Agent Access (MCP)**: Let Claude Code, Claude Desktop or Codex search your vault and knowledge graph through a local, token-protected, read-only MCP server
 - **Advanced Search**: Notes and entities ranked by text match plus graph proximity (Personalized PageRank, as in HippoRAG [6]), with an explanation for every result and no API calls
 - **Configurable Analysis Exclusions**: Skip files and folders using paths or globs, with optional support for Obsidian’s own exclusion list
@@ -126,6 +123,7 @@ This approach resolves most entities via fast hash lookups, reserving expensive 
 | `Rebuild note layer` | Recreate note nodes and their links from existing data (no API calls) |
 | `Write graph links into notes` | Apply the graph to your vault as Obsidian links (no API calls) |
 | `Remove graph links from notes` | Take the link property back out of every note |
+| `Import or update med-lit project` | Import a med-lit-mcp review into the vault, or update one imported before (no API calls) |
 | `Clear all graph data` | Reset the entire graph |
 
 ## Data Model
@@ -337,9 +335,109 @@ visible note is served, and its description may reflect every note it was
 extracted from. The server listens on 127.0.0.1 only, refuses requests from
 web pages, and cannot change your vault.
 
+### Imported Projects
+- **Import med-lit project**: opens the import window (desktop only)
+- One row per imported project, with:
+  - **Update**: import a newer snapshot of it
+  - **Rebuild graph**: restore its entities and relationships from the copy kept in the plugin folder, for example after **Clear graph data**. Needs no source folder and works on mobile
+  - **Remove**: take it out of the graph, and either keep its pages or move the ones you have not edited to the trash
+
+See [Importing med-lit Projects](#importing-med-lit-projects).
+
 ### Data Management
 - View graph statistics (nodes by entity type, total relationships)
 - Clear all graph data
+
+## Importing med-lit Projects
+
+[med-lit-mcp](https://github.com/junhewk/med-lit-mcp) (see
+[What's new in 0.7.1](#whats-new-in-071)) keeps each review in a project folder,
+`~/med-lit/<review name>/` by default:
+
+```
+<review>/
+├── sources/        one page per included article
+├── entities/       one page per entity, with its synthesis
+├── updates/        a report for each bot run
+├── index.md, log.md
+└── .med-lit/       med-lit's own data, including sgb-export.json
+```
+
+Since 0.1.6, med-lit also writes `.med-lit/sgb-export.json` whenever it writes
+the pages. The file is a snapshot of the review's knowledge graph in a
+documented format (`med-lit-sgb/1`). This plugin imports from that file and
+never opens med-lit's database. The pages and the graph therefore always come
+from the same moment. A med-lit run that crashed leaves the previous export in
+place, and the import says when the last run did not finish.
+
+### Importing
+
+1. Run **Import or update med-lit project** (or **Settings → Imported projects → Import…**).
+2. Enter the project folder's path, e.g. `/Users/you/med-lit/My review`. If the
+   bot runs on another machine, copy or sync the folder to this one first.
+3. **Read project** shows what will happen before anything is written:
+   - how many pages are new, updated or unchanged,
+   - which ones you edited,
+   - the folder they go into (on a first import you can rename it).
+4. **Import**.
+
+Optionally, if [entity resolution](#entity-resolution-opt-in) is on, the import
+can also match entities to your graph by embedding similarity. That costs
+embedding (and possibly verification) calls for entities it has not seen before.
+Without it, entities are matched by exact name and by the aliases med-lit
+recorded, at no cost.
+
+### What ends up where
+
+| | |
+|---|---|
+| Pages | `<project>/…`, with links rewritten as full-path wikilinks |
+| Entities | One graph node per med-lit entity, typed by med-lit's own conversion (`sgb_type`: CONDITION → CONCEPT, INTERVENTION → METHOD, TECHNOLOGY → TOOL, …). An entity that already exists in your graph is joined, not duplicated: it keeps its own name and type and gains med-lit's name as an alias |
+| Sources | An entity's sources are the article pages that mention it. Agents connected over MCP get its wiki page as its entity note |
+| Relationships | med-lit's relationships, with every supporting quote. If your own notes already assert the same relationship, the quotes are added to it |
+| Your notes | Untouched. The plugin's [entity notes](#vault-write-back-opt-in) link to med-lit's wiki page for entities only the import knows, instead of creating a second page for them |
+
+Imported pages are never sent to the LLM. **Analyze entire vault** and
+auto-analysis skip them, because their graph came with them. They are also
+left out of `related:` write-back, which would make every page look edited.
+Search and connected agents see them like any other note.
+
+### Updating
+
+When the bot (or you) has added to the review, import the same project again.
+It is recognized by med-lit's project id, so the folder can be a fresh copy at a
+different path. The import then decides for each page:
+
+| The page in your vault | med-lit's version | What happens |
+|---|---|---|
+| As last imported | Changed | Updated |
+| As last imported | Gone (article withdrawn, entity merged) | Moved to the trash |
+| Edited by you | Unchanged | Kept |
+| Edited by you | Changed | **Kept, and listed**; **Use med-lit's version** replaces it |
+| Edited by you | Gone | Kept, and no longer tracked |
+| Deleted by you | Any | Not brought back (unless you ask) |
+| Moved or renamed by you | Any | Updated where it now is |
+| (new) | New | Added |
+
+The graph follows the same snapshot:
+
+- New articles and entities are added.
+- Entities and relationships med-lit dropped are removed. Anything your own
+  notes also support stays.
+- Earlier entity matches are reused, so an update makes no API calls. This also
+  respects any merge you made by hand.
+- When med-lit merged two entities that your graph still keeps apart, the
+  import suggests the merge rather than doing it.
+
+Importing an older snapshot than the last one asks for confirmation first.
+
+### Removing
+
+**Settings → Imported projects → Remove** takes the project out of the graph:
+
+- its entities, relationships and aliases go;
+- anything your notes also support keeps that support;
+- its pages are either kept, or moved to the trash if you have not edited them.
 
 ## Supported Models
 
@@ -360,6 +458,12 @@ puts the schema in the prompt and still validates every reply against it. At
 the default *Minimal* reasoning effort, DeepSeek's thinking is switched off.
 At higher levels it stays on, and the output budget is raised to 32k tokens,
 because DeepSeek counts thinking against it.
+
+## Upgrading to 0.7.1
+
+Nothing changes for an existing vault. Importing a med-lit project adds an
+`imports` entry to `data.json` and a copy of the project's graph to
+`.obsidian/plugins/simple-graph-builder/med-lit/`.
 
 ## Upgrading to 0.7.0
 
@@ -481,6 +585,7 @@ Consider using Ollama for cost-free operation, or batch analyze during off-peak 
 - No data is stored externally; all graph data stays in your vault
 - Consider using Ollama for fully local, private processing
 - Embeddings are stored locally in binary format (`embeddings.bin`)
+- **Importing a med-lit project** reads its folder on your computer and copies its pages into the vault. It makes no API calls, unless you choose embedding-based matching
 - **Agent Access** (off by default) serves your notes to AI agents you connect. They see notes, not your API keys or settings, and never your excluded notes. What an agent does with what it reads (for example, sending it to its own model provider) is governed by that agent
 
 ### If you version-control your vault
