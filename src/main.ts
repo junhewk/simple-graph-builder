@@ -17,6 +17,8 @@ import { QueryEngine } from './query/engine';
 import { ObsidianVaultSource } from './query/obsidian-source';
 import { loadHashes, renameNoteHash, saveHashes } from './graph/hashes';
 import { McpController } from './mcp/controller';
+import { ImportRegistry } from './import/registry';
+import { ImportModal } from './ui/import-modal';
 
 export default class SimpleGraphBuilderPlugin extends Plugin {
 	settings: Settings;
@@ -28,6 +30,8 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	mcp: McpController;
 	/** Exclusion settings the query index was built under. */
 	private indexedExclusions = '';
+	/** med-lit projects imported into the vault, and the files each one owns. */
+	imports: ImportRegistry;
 	/** Marks vault writes the plugin made, so they don't look like user edits. */
 	writeGuard = new WriteGuard();
 	private statusBarItem: HTMLElement | null = null;
@@ -54,6 +58,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		await this.loadSettings();
 		this.graphCache = new GraphCache(this);
 		await this.graphCache.ensureLoaded();
+		this.imports = new ImportRegistry(this.graphCache.getImports());
 		this.querySource = new ObsidianVaultSource(this);
 		this.queryEngine = new QueryEngine(this.graphCache, this.querySource);
 		this.indexedExclusions = exclusionKey(this.settings);
@@ -121,6 +126,12 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			id: 'rebuild-note-layer',
 			name: 'Rebuild note layer',
 			callback: () => this.repairNoteLayer(true),
+		});
+
+		this.addCommand({
+			id: 'import-med-lit-project',
+			name: 'Import or update med-lit project',
+			callback: () => new ImportModal(this.app, this).open(),
 		});
 
 		this.addCommand({
@@ -223,6 +234,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	/** Move provenance and the analysis hash to a renamed note's new path. */
 	private async followRename(oldPath: string, newPath: string): Promise<void> {
 		const moved = this.graphCache.renameSourceNote(oldPath, newPath);
+		if (this.imports.renamePath(oldPath, newPath)) this.graphCache.setImports(this.imports.toRecord());
 		const hashes = await loadHashes(this);
 		if (hashes.hashes.some(h => h.path === oldPath)) {
 			await saveHashes(this, renameNoteHash(hashes, oldPath, newPath));

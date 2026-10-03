@@ -192,6 +192,11 @@ export async function removeCurrentNoteFromGraph(plugin: SimpleGraphBuilderPlugi
 
 	const file = activeView.file;
 
+	if (plugin.imports?.isImported(file.path)) {
+		new Notice('This page belongs to an imported med-lit project. Remove the import in settings instead.');
+		return;
+	}
+
 	// Entities this note was the last source for lose their entity note too, so
 	// removing a note from the graph also removes what it put in the vault.
 	const orphaned = plugin.graphCache

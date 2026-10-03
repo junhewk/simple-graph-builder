@@ -17,6 +17,7 @@ import type SimpleGraphBuilderPlugin from '../main';
 import { OntologyNode, Settings, isNoteNode, normalizeKey } from '../types';
 import { fileNameCandidates, entityNotePath, normalizeFolder } from './filenames';
 import { MANAGED_START, MANAGED_END, RenderedRelationship, renderManagedBlock, replaceManagedBlock } from './render';
+import { isImportOnly, medLitPage } from '../import/node-props';
 
 /** Frontmatter key holding the node id. Authoritative: filenames are lossy. */
 export const ID_KEY = 'sgb-id';
@@ -85,8 +86,8 @@ export function getEntityNoteFile(plugin: SimpleGraphBuilderPlugin, node: Ontolo
 	return frontmatterOf(plugin, file)?.[ID_KEY] === node.id ? file : null;
 }
 
-/** Create the entity folder, including any missing parents. */
-async function ensureFolder(plugin: SimpleGraphBuilderPlugin, folder: string): Promise<void> {
+/** Create a folder, including any missing parents. */
+export async function ensureFolder(plugin: SimpleGraphBuilderPlugin, folder: string): Promise<void> {
 	if (!folder) return;
 	const segments = folder.split('/');
 	let current = '';
@@ -177,7 +178,8 @@ function relationshipsOf(plugin: SimpleGraphBuilderPlugin, node: OntologyNode): 
 		const target = plugin.graphCache.getNodeById(edge.target);
 		if (!target || isNoteNode(target)) continue;
 
-		const targetPath = storedPath(target);
+		// An entity only an import knows has no entity note; its wiki page is one.
+		const targetPath = storedPath(target) ?? medLitPage(target);
 		if (!targetPath) continue;
 
 		const key = `${edge.relationship}|${target.id}`;
@@ -236,7 +238,12 @@ export async function upsertEntityNotes(
 ): Promise<{ created: number; updated: number }> {
 	if (!plugin.settings.enableEntityNotes) return { created: 0, updated: 0 };
 
-	const entities = nodes.filter(n => !isNoteNode(n));
+	// Entities that only imported pages mention already have a page: the
+	// project's wiki page. A second note in the entity folder would duplicate it.
+	const needsNote = (node: OntologyNode) =>
+		!isNoteNode(node) && !(plugin.imports && isImportOnly(node, p => plugin.imports.isImported(p)) && medLitPage(node));
+
+	const entities = nodes.filter(needsNote);
 	if (entities.length === 0) return { created: 0, updated: 0 };
 
 	const claimed = claimedPaths(plugin);
@@ -244,7 +251,7 @@ export async function upsertEntityNotes(
 		assignPath(plugin, node, claimed);
 		for (const edge of plugin.graphCache.getEdgesBySource(node.id)) {
 			const target = plugin.graphCache.getNodeById(edge.target);
-			if (target && !isNoteNode(target)) assignPath(plugin, target, claimed);
+			if (target && needsNote(target)) assignPath(plugin, target, claimed);
 		}
 	}
 

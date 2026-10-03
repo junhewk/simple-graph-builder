@@ -3,6 +3,7 @@ import type { GraphCache } from './cache';
 import type { App, TFile } from 'obsidian';
 import { getResolvedLinks, getResolvedLinksFromCache } from './links';
 import { EntityResolver } from './resolver';
+import { edgeMedLit } from '../import/node-props';
 
 /**
  * Generate a unique node ID from entity type and name.
@@ -252,28 +253,37 @@ export async function mergeExtractionIntoCacheWithResolution(
 
 /**
  * Remove a note's contribution from the graph.
+ *
+ * An edge whose evidence is this note goes, unless an imported project also
+ * vouches for it: then its evidence moves to one of that project's articles.
  */
 export function removeNoteFromCache(cache: GraphCache, notePath: string): { nodesRemoved: number; edgesRemoved: number } {
 	let nodesRemoved = 0;
 	let edgesRemoved = 0;
 
 	// Use index to find edges from this note
-	const edgesToRemove = cache.getEdgesBySourceNote(notePath);
+	const edgesToRemove = [...cache.getEdgesBySourceNote(notePath)];
 	for (const edge of edgesToRemove) {
+		const fallback = Object.values(edgeMedLit(edge))
+			.flatMap(p => p.evidence ?? [])
+			.find(e => e.note !== notePath);
+		if (fallback) {
+			cache.editEdge(edge, e => { e.sourceNote = fallback.note; });
+			continue;
+		}
 		cache.removeEdge(edge.id);
 		edgesRemoved++;
 	}
 
 	// Use index to find nodes from this note
-	const nodesToCheck = cache.getNodesBySourceNote(notePath);
+	const nodesToCheck = [...cache.getNodesBySourceNote(notePath)];
 	for (const node of nodesToCheck) {
-		node.sourceNotes = node.sourceNotes.filter(p => p !== notePath);
-
-		if (node.sourceNotes.length === 0) {
+		if (node.sourceNotes.length === 1 && node.sourceNotes[0] === notePath) {
 			cache.removeNode(node.id);
 			nodesRemoved++;
 		} else {
-			cache.updateNode(node);
+			// editNode, not updateNode: the index entry for this path has to go too.
+			cache.editNode(node, n => { n.sourceNotes = n.sourceNotes.filter(p => p !== notePath); });
 		}
 	}
 

@@ -63,6 +63,9 @@ export async function writeRelatedProperty(
 	const settings = plugin.settings;
 	if (!settings.enableRelatedWriteback) return false;
 	if (isEntityNotePath(settings, file.path)) return false;
+	// Imported pages are med-lit's; a property written here would read as a
+	// local edit and block the next update of the page.
+	if (plugin.imports?.isImported(file.path)) return false;
 
 	const key = settings.relatedPropertyName || 'related';
 	const links = computeRelatedLinks(plugin, file.path);

@@ -7,6 +7,7 @@
  * Personalized PageRank so notes connected to what matched rank too. Every
  * result says why it matched.
  */
+import { medLitPage } from '../import/node-props';
 import { normalizeKey, normalizeUnicode } from '../types';
 import { matchEntityName, calculateMatchScore } from './match';
 import { personalizedPageRank } from './ppr';
@@ -330,9 +331,8 @@ export class QueryEngine {
 		relations.sort((a, b) =>
 			a.direction.localeCompare(b.direction) || a.verb.localeCompare(b.verb) || a.other.name.localeCompare(b.other.name));
 		const sourceNotes = snap.notesByEntity.get(node.id) ?? [];
-		const entityNote = typeof node.properties.entityNotePath === 'string'
-			? normalizeUnicode(node.properties.entityNotePath)
-			: undefined;
+		const notePath = typeof node.properties.entityNotePath === 'string' ? node.properties.entityNotePath : medLitPage(node);
+		const entityNote = notePath ? normalizeUnicode(notePath) : undefined;
 
 		return {
 			...toRef(node),

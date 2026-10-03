@@ -65,7 +65,9 @@ function analyzedFiles(plugin: SimpleGraphBuilderPlugin): TFile[] {
 	const files: TFile[] = [];
 	for (const path of paths) {
 		const file = plugin.app.vault.getAbstractFileByPath(path);
-		if (file instanceof TFile && !isEntityNotePath(plugin.settings, file.path)) files.push(file);
+		if (!(file instanceof TFile) || isEntityNotePath(plugin.settings, file.path)) continue;
+		if (plugin.imports?.isImported(file.path)) continue;
+		files.push(file);
 	}
 	return files;
 }

@@ -1,4 +1,5 @@
 import { EffortLevel } from './extraction/providers/effort';
+import type { ImportManifest } from './import/types';
 
 // ============================================
 // Schema Version
@@ -525,6 +526,7 @@ export interface PluginData {
 	hashes: HashData;
 	resolutionCache?: ResolutionCache;   // Persistent token → node ID mappings
 	embeddingIndex?: EmbeddingIndex;     // Metadata for embeddings.bin
+	imports?: Record<string, ImportManifest>; // med-lit projects imported into the vault, by project id
 }
 
 /**

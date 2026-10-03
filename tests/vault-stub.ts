@@ -134,6 +134,39 @@ export class FakeVault {
 		return this.bodies.get(file.path) ?? '';
 	}
 
+	async read(file: TFile): Promise<string> {
+		return this.bodies.get(file.path) ?? '';
+	}
+
+	async rename(file: TFile, newPath: string): Promise<void> {
+		if (this.files.has(newPath)) throw new Error('Destination file already exists');
+		const body = this.bodies.get(file.path) ?? '';
+		const fm = this.frontmatter.get(file.path);
+		this.files.delete(file.path);
+		this.bodies.delete(file.path);
+		this.frontmatter.delete(file.path);
+		file.path = newPath;
+		file.name = newPath.slice(newPath.lastIndexOf('/') + 1);
+		file.basename = file.name.replace(/\.md$/i, '');
+		this.files.set(newPath, file);
+		this.bodies.set(newPath, body);
+		if (fm) this.frontmatter.set(newPath, fm);
+	}
+
+	/** The plugin-folder side of the vault: what vault.adapter reads and writes. */
+	adapterFiles = new Map<string, string>();
+	adapter = {
+		exists: async (path: string) => this.adapterFiles.has(path) || [...this.adapterFiles.keys()].some(k => k.startsWith(`${path}/`)),
+		mkdir: async (_path: string) => undefined,
+		write: async (path: string, data: string) => { this.adapterFiles.set(path, data); },
+		read: async (path: string) => {
+			const data = this.adapterFiles.get(path);
+			if (data === undefined) throw new Error(`ENOENT ${path}`);
+			return data;
+		},
+		remove: async (path: string) => { this.adapterFiles.delete(path); },
+	};
+
 	async process(file: TFile, fn: (data: string) => string): Promise<string> {
 		const next = fn(this.bodies.get(file.path) ?? '');
 		this.bodies.set(file.path, next);
@@ -181,6 +214,12 @@ export function fakeSyncPlugin(settings: Partial<Settings> = {}, initialData?: R
 				getFileCache: (file: TFile) => ({ frontmatter: vault.frontmatter.get(file.path) }),
 				getFirstLinkpathDest: () => null,
 				resolvedLinks: {} as Record<string, Record<string, number>>,
+				// Link indexing is instant here: 'resolved' fires on the next tick.
+				on: (name: string, fn: () => void) => {
+					if (name === 'resolved') setTimeout(fn, 0);
+					return { name };
+				},
+				offref: () => undefined,
 			},
 		},
 	};

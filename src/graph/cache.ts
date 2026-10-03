@@ -3,6 +3,8 @@ import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION
 import { DEFAULT_SETTINGS, DEFAULT_EMBEDDING_DIMENSIONS, getEmbeddingDimensions } from '../settings';
 import { loadEmbeddingsBinary, saveEmbeddingsBinary, cosineSimilarity } from '../extraction/llm-client';
 import type SimpleGraphBuilderPlugin from '../main';
+import type { ImportManifest } from '../import/types';
+import { edgeMedLit, nodeMedLit } from '../import/node-props';
 
 const SAVE_DEBOUNCE_MS = 1000;
 
@@ -101,6 +103,11 @@ export class GraphCache {
 	private embeddingsDirty = false;
 	private embeddingIndex: EmbeddingIndex | null = null;
 
+	// med-lit import manifests. Saved through this cache's flush so the one
+	// load-modify-save of data.json cannot race a second writer.
+	private imports: Record<string, ImportManifest> = {};
+	private importsDirty = false;
+
 	constructor(plugin: SimpleGraphBuilderPlugin) {
 		this.plugin = plugin;
 	}
@@ -157,6 +164,8 @@ export class GraphCache {
 
 		// Load embedding index (embeddings are loaded lazily)
 		this.embeddingIndex = data?.embeddingIndex || null;
+
+		this.imports = data?.imports ?? {};
 
 		// Fold NFD/NFC duplicates together. Runs after the embedding index is in
 		// place so its node ids can be remapped alongside everything else.
@@ -690,6 +699,64 @@ export class GraphCache {
 		return true;
 	}
 
+	/**
+	 * Take an alias back off a node. Only removes it from this node, and only
+	 * the index entry this node owns.
+	 */
+	removeAliasFromNode(nodeId: string, alias: string): boolean {
+		const node = this.nodeById.get(nodeId);
+		if (!node || !Array.isArray(node.properties.aliases)) return false;
+
+		const key = normalizeKey(alias);
+		const kept = node.properties.aliases.filter(a => normalizeKey(a) !== key);
+		if (kept.length === node.properties.aliases.length) return false;
+
+		this.editNode(node, n => {
+			if (kept.length > 0) n.properties.aliases = kept;
+			else delete n.properties.aliases;
+		});
+		return true;
+	}
+
+	/**
+	 * Change a node in place and keep every index right.
+	 *
+	 * updateNode() re-indexes from the node's *current* fields, so a caller that
+	 * has already shrunk `sourceNotes` leaves the removed paths pointing at the
+	 * node. Here the old entries come out before the change goes in.
+	 */
+	editNode(node: OntologyNode, change: (node: OntologyNode) => void): void {
+		const live = this.nodeById.get(node.id);
+		if (!live) return;
+		this.unindexNode(live);
+		change(live);
+		live.updatedAt = Date.now();
+		this.indexNode(live);
+		if (!isNoteNode(live)) this.markDirty();
+	}
+
+	/** The same for an edge: its evidence note is an index key. */
+	editEdge(edge: OntologyEdge, change: (edge: OntologyEdge) => void): void {
+		const live = this.edgeById.get(edge.id);
+		if (!live) return;
+		this.unindexEdge(live);
+		change(live);
+		this.indexEdge(live);
+		if (!this.isDerivedEdge(live)) this.markDirty();
+	}
+
+	// --- med-lit imports ---
+
+	getImports(): Record<string, ImportManifest> {
+		return this.imports;
+	}
+
+	setImports(imports: Record<string, ImportManifest>): void {
+		this.imports = imports;
+		this.importsDirty = true;
+		this.scheduleSave();
+	}
+
 	getAllNodes(): OntologyNode[] {
 		return [...this.nodes];
 	}
@@ -798,6 +865,28 @@ export class GraphCache {
 			if (typeof entityNotePath === 'string' && normalizeUnicode(entityNotePath) === from) {
 				node.properties.entityNotePath = to;
 				nodes++;
+			}
+			// An imported entity's wiki page moves with the file, like an entity note.
+			for (const provenance of Object.values(nodeMedLit(node))) {
+				if (!Array.isArray(provenance.pages)) continue;
+				const pages = provenance.pages.map(p => (normalizeUnicode(p) === from ? to : p));
+				if (pages.some((p, i) => p !== provenance.pages[i])) {
+					provenance.pages = pages;
+					nodes++;
+				}
+			}
+		}
+
+		// Imported relationships keep every article that supports them.
+		for (const edge of this.edges) {
+			for (const provenance of Object.values(edgeMedLit(edge))) {
+				if (!Array.isArray(provenance.evidence)) continue;
+				for (const item of provenance.evidence) {
+					if (normalizeUnicode(item.note) === from) {
+						item.note = to;
+						edges++;
+					}
+				}
 			}
 		}
 
@@ -1206,7 +1295,7 @@ export class GraphCache {
 			await this.saveEmbeddings();
 		}
 
-		const needsSave = this.dirty || this.resolutionCacheDirty || this.embeddingIndex;
+		const needsSave = this.dirty || this.resolutionCacheDirty || this.importsDirty || this.embeddingIndex;
 		if (!needsSave) return;
 
 		const data = ((await this.plugin.loadData()) as PluginData | null) ?? {
@@ -1240,9 +1329,12 @@ export class GraphCache {
 			data.embeddingIndex = this.embeddingIndex;
 		}
 
+		if (this.importsDirty) data.imports = this.imports;
+
 		await this.plugin.saveData(data);
 		this.dirty = false;
 		this.resolutionCacheDirty = false;
+		this.importsDirty = false;
 	}
 
 	/**

@@ -10,6 +10,9 @@ import { getEmbeddings, settingsToEmbeddingOptions } from '../extraction/llm-cli
 import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from '../sync/batch';
 import { normalizeFolder } from '../sync/filenames';
 import { ConfirmModal } from './confirm-modal';
+import { ImportModal, RemoveImportModal } from './import-modal';
+import { rebuildImportGraph } from '../import/controller';
+import { canReadExternalFolders } from '../import/reader';
 import { parseExcludedPatterns, supportsNativeExclusions } from '../analysis/exclusions';
 import type { McpStatus } from '../mcp/controller';
 
@@ -284,6 +287,57 @@ export class SettingsTab extends PluginSettingTab {
 				}),
 			},
 		];
+	}
+
+	/**
+	 * med-lit projects: one row per import, plus the way in. Shared by both
+	 * settings renderers.
+	 */
+	private getImportSettings(): DeclarativeSettingDefinition[] {
+		const desktop = canReadExternalFolders();
+		const items: DeclarativeSettingDefinition[] = [{
+			name: 'Import med-lit project',
+			desc: desktop
+				? 'Bring a med-lit-mcp project (articles, wiki pages and its knowledge graph) into this vault, or update one imported before.'
+				: 'Importing reads a folder outside the vault, which needs the desktop app.',
+			aliases: ['med-lit', 'Import', 'Literature review'],
+			render: setting => setting.addButton(button => button
+				.setButtonText('Import...')
+				.setDisabled(!desktop)
+				.onClick(() => new ImportModal(this.app, this.plugin).open())),
+		}];
+
+		for (const manifest of this.plugin.imports?.all() ?? []) {
+			const files = Object.keys(manifest.files).length;
+			const when = new Date(manifest.importedAt).toLocaleString();
+			items.push({
+				name: manifest.name,
+				desc: `${files} pages in "${manifest.vaultFolder}". Last imported ${when}` +
+					(manifest.marker.lastUpdate ? ` (bot update ${manifest.marker.lastUpdate})` : '') + '.',
+				render: setting => setting
+					.addButton(button => button
+						.setButtonText('Update')
+						.setDisabled(!desktop)
+						.onClick(() => new ImportModal(this.app, this.plugin, manifest).open()))
+					.addButton(button => button
+						.setButtonText('Rebuild graph')
+						.setTooltip('Re-derive this project\'s entities and relationships from the stored copy of its graph')
+						.onClick(async () => {
+							try {
+								const result = await rebuildImportGraph(this.plugin, manifest.projectId);
+								new Notice(`Rebuilt ${manifest.name}: ${result.graph.nodesCreated} entities and ${result.graph.edgesCreated} relationships restored.`);
+							} catch (error) {
+								new Notice(error instanceof Error ? error.message : String(error));
+							}
+							this.refreshSettings();
+						}))
+					.addButton(button => button
+						.setButtonText('Remove')
+						.setWarning()
+						.onClick(() => new RemoveImportModal(this.app, this.plugin, manifest, () => this.refreshSettings()).open())),
+			});
+		}
+		return items;
 	}
 
 	// A port typed digit by digit must not restart the server per keystroke.
@@ -825,6 +879,11 @@ export class SettingsTab extends PluginSettingTab {
 						}),
 					},
 				],
+			},
+			{
+				type: 'group',
+				heading: 'Imported projects',
+				items: this.getImportSettings(),
 			},
 			{
 				type: 'group',
@@ -1439,6 +1498,12 @@ export class SettingsTab extends PluginSettingTab {
 					}
 				});
 			});
+
+		new Setting(containerEl).setName('Imported projects').setHeading();
+		for (const definition of this.getImportSettings()) {
+			const setting = new Setting(containerEl).setName(definition.name).setDesc(definition.desc ?? '');
+			definition.render?.(setting);
+		}
 
 		// Data Management section
 		new Setting(containerEl).setName('Data management').setHeading();

@@ -604,3 +604,8 @@
 	gap: 8px;
 	margin-top: 16px;
 }
+
+/* med-lit import */
+.sgb-import-error {
+	color: var(--text-error);
+}

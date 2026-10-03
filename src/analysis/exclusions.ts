@@ -2,6 +2,18 @@ import { Notice } from 'obsidian';
 import type { App, TFile } from 'obsidian';
 import type SimpleGraphBuilderPlugin from '../main';
 import { isPluginManagedNote } from '../sync';
+import { isMedLitGenerated } from '../import/node-props';
+
+/**
+ * True for a page a med-lit import owns, or any page med-lit generated. The
+ * second test holds even when the manifest does not (another device, a page
+ * copied in by hand): extracting from med-lit's output would feed the graph a
+ * paraphrase of what the import already brought in.
+ */
+export function isImportedNote(plugin: SimpleGraphBuilderPlugin, file: TFile): boolean {
+	if (plugin.imports?.isImported(file.path)) return true;
+	return isMedLitGenerated(plugin.app.metadataCache.getFileCache(file)?.frontmatter);
+}
 
 export const NATIVE_EXCLUSION_ERROR = 'Obsidian excluded files could not be checked. Turn off “Respect Obsidian excluded files” in Simple Graph Builder settings to resume analysis.';
 
@@ -92,6 +104,9 @@ export function userExclusion(plugin: SimpleGraphBuilderPlugin, path: string): {
 export function getAnalysisEligibility(plugin: SimpleGraphBuilderPlugin, file: TFile): AnalysisEligibility {
 	if (isPluginManagedNote(plugin, file)) {
 		return { status: 'excluded', reason: 'This is a plugin-managed entity note' };
+	}
+	if (isImportedNote(plugin, file)) {
+		return { status: 'excluded', reason: 'This page was imported from med-lit; its graph came with it' };
 	}
 	const user = userExclusion(plugin, file.path);
 	if (user.status !== 'ok') return user;
