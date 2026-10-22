@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.8.0: explore the graph
 
 **Explore the graph, not just look at it.** The graph view becomes a working
 tool for reading your notes through the graph:

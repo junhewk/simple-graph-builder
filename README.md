@@ -8,7 +8,7 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
-## What's new: explore the graph
+## What's new in 0.8.0: explore the graph
 
 The graph view becomes a tool for reading your notes through the graph, not
 just a picture of it:
