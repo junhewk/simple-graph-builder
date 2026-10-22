@@ -51,6 +51,13 @@ export interface SearchOptions {
 	seed?: string;
 	/** Fetch snippets for the returned notes. */
 	snippets?: boolean;
+	/**
+	 * Also return up to this many entities and this many notes that the graph
+	 * walk reached without matching the query's text, ranked among themselves.
+	 * In the main lists they compete with text matches and rarely survive the
+	 * limit; see SearchResponse.reached.
+	 */
+	reached?: number;
 }
 
 export interface EntityRef {
@@ -91,6 +98,8 @@ export interface SearchResponse {
 	entities: EntityHit[];
 	/** Present while the note index is still being built. */
 	indexing?: { indexed: number; total: number };
+	/** Present when SearchOptions.reached was set. Scores are relative within each list. */
+	reached?: { entities: EntityHit[]; notes: NoteHit[] };
 }
 
 export interface Relation {

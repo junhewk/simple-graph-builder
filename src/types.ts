@@ -1,5 +1,6 @@
 import { EffortLevel } from './extraction/providers/effort';
 import type { ImportManifest } from './import/types';
+import type { GraphDisplaySettings } from './graph/display';
 
 // ============================================
 // Schema Version
@@ -411,6 +412,7 @@ export interface Settings {
 	openGraphInMain: boolean;    // Open graph view in main window instead of sidebar
 	graphMinDegree: number;      // Minimum connections to show node in graph (default: 0)
 	graphShowNotes: boolean;     // Show NOTE nodes and their edges in the graph (default: true)
+	graphDisplay: GraphDisplaySettings; // Graph view appearance and forces; read through normalizeGraphDisplay
 	// Embedding-based entity resolution (opt-in)
 	enableEmbeddings: boolean;            // default: false - embeddings are opt-in to avoid API costs
 	embeddingProvider: EmbeddingProvider; // default: 'openai'

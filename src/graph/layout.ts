@@ -41,6 +41,11 @@ export interface LayoutNode {
 export interface LayoutEdge {
 	source: string;
 	target: string;
+	/**
+	 * FA2 attraction multiplier, default 1. FA2 settles each edge where linear
+	 * attraction balances 1/d repulsion, so its length goes as 1/sqrt(weight).
+	 */
+	weight?: number;
 }
 
 export interface RefineOptions {
@@ -152,7 +157,7 @@ export function findComponents(nodes: LayoutNode[], edges: LayoutEdge[]): number
  * small golden-angle spiral -- deterministic, and small enough not to disturb
  * the seed's global shape.
  */
-function separateCoincident(positions: Array<{ x: number; y: number }>): void {
+export function separateCoincident(positions: Array<{ x: number; y: number }>): void {
 	const seen = new Map<string, number>();
 	const GOLDEN_ANGLE = 2.399963229728653;
 	for (const p of positions) {
@@ -418,7 +423,7 @@ export async function refineLayout(
 		});
 		for (const e of edges) {
 			if (graph.hasNode(e.source) && graph.hasNode(e.target)) {
-				graph.addEdge(e.source, e.target);
+				graph.addEdge(e.source, e.target, { weight: e.weight ?? 1 });
 			}
 		}
 
@@ -436,6 +441,7 @@ export async function refineLayout(
 		while (remaining > 0) {
 			if (shouldStop()) return false;
 			const slice = Math.min(o.ticksPerSlice, remaining);
+			// getEdgeWeight defaults to the 'weight' attribute set above
 			forceAtlas2.assign(graph, { iterations: slice, settings });
 			remaining -= slice;
 			if (remaining > 0) {

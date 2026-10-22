@@ -307,6 +307,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		const { workspace } = this.app;
 
 		let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(GRAPH_VIEW_TYPE)[0] ?? null;
+		const existing = leaf !== null;
 		if (!leaf) {
 			leaf = this.settings.openGraphInMain
 				? workspace.getLeaf(true)
@@ -319,8 +320,10 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 
 		if (leaf) {
 			await workspace.revealLeaf(leaf);
+			// A new view rendered itself on open; refreshing it again here
+			// laid the whole graph out twice on every first open
 			const view = leaf.view;
-			if (view instanceof GraphView) {
+			if (existing && view instanceof GraphView) {
 				await view.refresh();
 			}
 		}

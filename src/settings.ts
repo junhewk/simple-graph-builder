@@ -1,5 +1,6 @@
 import { Settings } from './types';
 import { DEFAULT_EFFORT } from './extraction/providers/effort';
+import { DEFAULT_GRAPH_DISPLAY } from './graph/display';
 
 /**
  * Bumped whenever a migration step is added. See src/settings-migration.ts.
@@ -40,6 +41,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	openGraphInMain: false,
 	graphMinDegree: 0,
 	graphShowNotes: true,
+	graphDisplay: DEFAULT_GRAPH_DISPLAY,
 	// Embedding-based resolution (opt-in)
 	enableEmbeddings: false,
 	embeddingProvider: 'openai',

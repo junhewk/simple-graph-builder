@@ -31,6 +31,7 @@ export class ItemView { constructor(_leaf?: unknown) { /* stub */ } }
 export class Modal { constructor(_app?: unknown) { /* stub */ } }
 export class Setting { constructor(_el?: unknown) { /* stub */ } }
 export class WorkspaceLeaf {}
+export function setIcon(_el: unknown, _icon: string) { /* stub */ }
 export class MarkdownView {}
 export class PluginSettingTab {
   app: any;

@@ -216,7 +216,7 @@ class SearchModal extends Modal {
 	}
 }
 
-function describeWhy(hit: NoteHit): string {
+export function describeWhy(hit: NoteHit): string {
 	const parts: string[] = [];
 	if (hit.matchedWords.length) parts.push(`Matched: ${hit.matchedWords.join(', ')}`);
 	if (hit.connections.length) parts.push(`Via: ${hit.connections.slice(0, 3).map(describeConnection).join('; ')}`);

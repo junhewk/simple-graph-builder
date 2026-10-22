@@ -24,10 +24,12 @@ import type {
 	IndexState,
 	NeighborHit,
 	NoteDetails,
+	NoteHit,
 	NotFound,
 	Overview,
 	PathStep,
 	Relation,
+	SearchMode,
 	SearchOptions,
 	SearchResponse,
 	VaultSource,
@@ -304,7 +306,104 @@ export class QueryEngine {
 			response.entities = hits.slice(0, limit);
 		}
 
+		if (options.reached && seeds.size) {
+			response.reached = this.reachedHits(snap, rank, seeds, matched, lexNorm, {
+				k: clamp(options.reached, 1, 50),
+				mode,
+				prefix,
+				typeFilter,
+			});
+			if (options.snippets !== false) {
+				await Promise.all(response.reached.notes.map(async hit => {
+					const content = await this.source.readContent(hit.path);
+					if (content) hit.snippet = makeSnippet(content, words);
+				}));
+			}
+		}
+
 		return response;
+	}
+
+	/**
+	 * What the walk found beyond the text matches.
+	 *
+	 * The main lists rank everything on 0.6 x text + 0.4 x walk, so a node
+	 * with no text match scores at most 0.4 and loses every slot to the
+	 * matches once there are more of them than the limit -- on a large graph,
+	 * nearly always. Worse, walk scores there are normalized by the top node,
+	 * which is always a seed: restart mass piles up on the seeds, so a node
+	 * one step out often lands under MIN_NOTE_SCORE outright.
+	 *
+	 * Here the seeds and text matches are excluded and the rest are ranked
+	 * against each other by walk score over degree. A random walk's mass on an
+	 * undirected graph settles in proportion to degree whatever the seeds, so
+	 * raw score puts the same hubs on top of every query; score over degree is
+	 * how much more a node is reached than its connectivity alone predicts
+	 * (the measure local community detection sweeps by). A hub every walk
+	 * passes through is not what the user didn't know to look for.
+	 */
+	private reachedHits(
+		snap: GraphSnapshot,
+		rank: Float64Array,
+		seeds: Map<number, number>,
+		matched: Map<string, { score: number; match: EntityHit['match'] }>,
+		lexical: Map<string, number>,
+		opts: { k: number; mode: SearchMode; prefix: string; typeFilter: Set<string> | null },
+	): { entities: EntityHit[]; notes: NoteHit[] } {
+		const E = snap.entityCount;
+		const out: { entities: EntityHit[]; notes: NoteHit[] } = { entities: [], notes: [] };
+
+		// Over every node, not the top of the raw ranking: a specific node one
+		// step from a seed can sit far down a ranking that hubs lead
+		const strength = snap.csr.strength;
+		const lift = new Float64Array(rank.length);
+		for (let i = 0; i < rank.length; i++) {
+			if (rank[i] > 0 && !seeds.has(i)) lift[i] = rank[i] / Math.max(strength[i], 1);
+		}
+
+		if (opts.mode !== 'notes') {
+			const scored: { i: number; score: number }[] = [];
+			for (const i of topIndices(lift, 0, E, rank.length)) {
+				if (scored.length >= opts.k) break;
+				const node = snap.entities[i];
+				if (matched.has(node.id)) continue;
+				if (opts.typeFilter && !opts.typeFilter.has(node.entityType)) continue;
+				scored.push({ i, score: lift[i] });
+			}
+			const max = scored[0]?.score ?? 0;
+			out.entities = scored.map(({ i, score }) => {
+				const node = snap.entities[i];
+				return {
+					...toRef(node),
+					score: round(max ? score / max : 0),
+					match: 'graph' as const,
+					description: descriptionOf(node.properties.description),
+					noteCount: snap.noteCount(node.id),
+				};
+			});
+		}
+
+		if (opts.mode !== 'entities') {
+			const matchedIds = new Set(matched.keys());
+			const picked: { path: string; score: number }[] = [];
+			for (const i of topIndices(lift, E, rank.length, rank.length)) {
+				if (picked.length >= opts.k) break;
+				const path = snap.notePaths[i - E];
+				if (lexical.has(path)) continue;
+				if (opts.prefix && !path.startsWith(opts.prefix)) continue;
+				picked.push({ path, score: lift[i] });
+			}
+			const max = picked[0]?.score ?? 0;
+			out.notes = picked.map(({ path, score }) => ({
+				path,
+				title: noteTitle(path),
+				score: round(max ? score / max : 0),
+				matchedWords: [],
+				connections: connectionsFor(snap, path, matchedIds),
+			}));
+		}
+
+		return out;
 	}
 
 	private resolveSeed(snap: GraphSnapshot, seed: string): number | undefined {
