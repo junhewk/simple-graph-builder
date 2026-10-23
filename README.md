@@ -8,6 +8,17 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
+## What's new in 0.8.1
+
+- **Vault analysis says what it will send.** **Analyze entire vault** first
+  counts the new and changed notes, then asks with those numbers before anything
+  goes to your provider.
+- **Auto-analyze on save is easier to find**, at the top of the Analysis
+  settings.
+- **A shorter settings page.** On Obsidian 1.13 and later, advanced sections
+  open on pages of their own, and rows are one line high.
+- A long node inspector no longer covers the search box in the graph view.
+
 ## What's new in 0.8.0: explore the graph
 
 The graph view becomes a tool for reading your notes through the graph, not
@@ -139,7 +150,7 @@ If [entity resolution](https://github.com/junhewk/simple-graph-builder/blob/mast
 ## Privacy
 
 - Your notes are sent to the configured LLM provider for entity extraction. Use a local server for fully local processing
-- **Analyze entire vault** enumerates markdown file paths only after you explicitly confirm the action, then reads changed notes one at a time through Obsidian's vault API
+- **Analyze entire vault** enumerates markdown file paths only when you start it. It reads eligible notes on your computer to count the new and changed ones, and sends nothing until you confirm those numbers
 - Analyzing the current note and auto-analysis read only the individual note being processed
 - No data is stored externally; all graph data stays in your vault ([where](https://github.com/junhewk/simple-graph-builder/blob/master/docs/DATA_MODEL.md#where-the-data-lives))
 - **Importing a med-lit project** reads its folder on your computer and copies its pages into the vault. It makes no API calls, unless you choose embedding-based matching

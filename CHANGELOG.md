@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.8.1: analysis you can size up first
+
+- **Vault analysis says what it will send.** **Start analysis** first counts the
+  new and changed notes on your computer, then asks with those numbers, and the
+  unchanged, too-short and excluded notes it will skip. Nothing is sent before
+  you confirm, progress counts only the notes being sent, and when everything
+  is up to date it says so instead of asking.
+- **Auto-analyze on save is easier to find.** It now heads the **Analysis**
+  section, next to **Analyze entire vault**.
+- **A shorter settings page.** On Obsidian 1.13 and later, excluded files, agent
+  access, vault write-back, entity resolution and imported projects each open
+  on a page of their own, with their state (on or off, or a count) shown on the
+  row, as Obsidian's own settings do. Rows are shorter too: descriptions fit on
+  one line, the custom model ID box appears only once you choose *Custom…*, and
+  graph statistics no longer add a blank paragraph.
+- **A long node inspector no longer covers the search box** in the graph view;
+  the inspector scrolls instead.
+
 ## 0.8.0: explore the graph
 
 **Explore the graph, not just look at it.** The graph view becomes a working
