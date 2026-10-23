@@ -601,6 +601,11 @@
 }
 
 /* Confirm Modal */
+.sgb-confirm-message {
+	/* Messages separate their points with line breaks */
+	white-space: pre-line;
+}
+
 .modal-button-container {
 	display: flex;
 	justify-content: flex-end;
@@ -694,17 +699,20 @@
 	font-variant-numeric: tabular-nums;
 }
 
-/* Search */
+/* Search. It keeps its height and the inspector below takes what is left,
+   scrolling its own body: shrinking both let a long inspector squeeze the
+   search box below its content, which then spilled under the inspector. */
 .sgb-graph-search {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
 	min-height: 0;
-	flex: 0 1 auto;
+	flex: 0 0 auto;
 	max-height: 50%;
 }
 
 .sgb-graph-search-bar {
+	flex: none;
 	display: flex;
 	align-items: center;
 	gap: 4px;

@@ -5,7 +5,7 @@ import { MODEL_OPTIONS, EMBEDDING_MODEL_OPTIONS } from '../settings';
 import { getAdapter } from '../extraction/providers/index';
 import { EFFORT_LABELS, EFFORT_LEVELS, EffortLevel } from '../extraction/providers/effort';
 import { clearHashes } from '../graph/hashes';
-import { analyzeEntireVault, isAnalyzingVault, cancelVaultAnalysis } from '../commands/analyze';
+import { analyzeEntireVault, isAnalyzingVault, cancelVaultAnalysis, planVaultAnalysis, VaultAnalysisPlan } from '../commands/analyze';
 import { getEmbeddings, settingsToEmbeddingOptions } from '../extraction/llm-client';
 import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from '../sync/batch';
 import { normalizeFolder } from '../sync/filenames';
@@ -42,11 +42,21 @@ interface DeclarativeSettingDefinition {
 interface DeclarativeSettingGroup {
 	type: 'group';
 	heading: string;
-	items: DeclarativeSettingDefinition[];
+	items: (DeclarativeSettingDefinition | DeclarativeSettingPage)[];
 	visible?: () => boolean;
 }
 
-type DeclarativeSettingItem = DeclarativeSettingDefinition | DeclarativeSettingGroup;
+/** A row that opens its items on a page of their own, as Obsidian's own tabs do. */
+interface DeclarativeSettingPage {
+	type: 'page';
+	name: string;
+	desc?: string;
+	displayValue?: () => string;
+	items: DeclarativeSettingItem[];
+	visible?: () => boolean;
+}
+
+type DeclarativeSettingItem = DeclarativeSettingDefinition | DeclarativeSettingGroup | DeclarativeSettingPage;
 
 interface ModelSettingOptions {
 	name: string;
@@ -124,14 +134,12 @@ export class SettingsTab extends PluginSettingTab {
 				dropdown.onChange(async (value) => {
 					if (value === CUSTOM) {
 						// Wait for the text field rather than storing the sentinel.
-						if (textInput) {
-							textInput.inputEl.disabled = false;
-							textInput.inputEl.focus();
-						}
+						textInput?.inputEl.show();
+						textInput?.inputEl.focus();
 						return;
 					}
 					textInput?.setValue('');
-					if (textInput) textInput.inputEl.disabled = true;
+					textInput?.inputEl.hide();
 					await opts.set(value);
 					refreshWarning();
 				});
@@ -152,7 +160,8 @@ export class SettingsTab extends PluginSettingTab {
 						}
 					});
 
-				text.inputEl.disabled = !isCustom;
+				// Shown only while "Custom…" is chosen, keeping the row one line high
+				text.inputEl.toggle(isCustom);
 				text.inputEl.addClass('sgb-setting-input-wide');
 			});
 
@@ -186,14 +195,12 @@ export class SettingsTab extends PluginSettingTab {
 				dropdown.setValue(knownIds.includes(current) ? current : custom);
 				dropdown.onChange(async (value) => {
 					if (value === custom) {
-						if (customInput) {
-							customInput.inputEl.disabled = false;
-							customInput.inputEl.focus();
-						}
+						customInput?.inputEl.show();
+						customInput?.inputEl.focus();
 						return;
 					}
 					customInput?.setValue('');
-					if (customInput) customInput.inputEl.disabled = true;
+					customInput?.inputEl.hide();
 					this.plugin.settings.embeddingModel = value;
 					await this.plugin.saveSettings();
 				});
@@ -211,7 +218,7 @@ export class SettingsTab extends PluginSettingTab {
 						this.plugin.settings.embeddingModel = trimmed;
 						await this.plugin.saveSettings();
 					});
-				text.inputEl.disabled = !isCustom;
+				text.inputEl.toggle(isCustom);
 				text.inputEl.addClass('sgb-setting-input-wide');
 			});
 	}
@@ -252,7 +259,7 @@ export class SettingsTab extends PluginSettingTab {
 
 		await this.plugin.saveSettings();
 		if ([
-			'apiProvider', 'localApiStyle', 'enableEmbeddings', 'embeddingProvider',
+			'apiProvider', 'localApiStyle', 'enableEmbeddings', 'enableEntityNotes', 'embeddingProvider',
 			'embeddingLocalApiStyle', 'resolutionThresholdHigh', 'resolutionThresholdLow',
 		].includes(key)) {
 			this.refreshSettings();
@@ -264,7 +271,7 @@ export class SettingsTab extends PluginSettingTab {
 		return [
 			{
 				name: 'Excluded files and folders',
-				desc: 'One vault-relative path or glob per line: skills/**, templates/*.md, **/SKILL.md. Applies to all analysis, including the current note. Existing graph data is kept.',
+				desc: 'One vault-relative path or glob per line, such as skills/** or **/SKILL.md.',
 				aliases: ['Exclusions', 'Ignore patterns'],
 				render: setting => setting.addTextArea(text => {
 					text.setPlaceholder('skills/**\ntemplates/*.md\n**/SKILL.md')
@@ -276,8 +283,9 @@ export class SettingsTab extends PluginSettingTab {
 			},
 			{
 				name: 'Respect Obsidian excluded files',
-				desc: 'Also honor Files and links → Excluded files, using Obsidian’s own matching rules. Off by default.' +
-					(supportsNativeExclusions(this.app) ? '' : ' Unavailable in this Obsidian version; turn this off to resume analysis.'),
+				desc: supportsNativeExclusions(this.app)
+					? 'Also skip what Files and links → Excluded files lists.'
+					: 'Unavailable in this Obsidian version; turn this off to resume analysis.',
 				render: setting => setting.addToggle(toggle => {
 					toggle.setValue(this.plugin.settings.respectObsidianExcludedFiles)
 						.setDisabled(!supportsNativeExclusions(this.app) && !this.plugin.settings.respectObsidianExcludedFiles)
@@ -300,7 +308,7 @@ export class SettingsTab extends PluginSettingTab {
 		const items: DeclarativeSettingDefinition[] = [{
 			name: 'Import med-lit project',
 			desc: desktop
-				? 'Bring a med-lit-mcp project (articles, wiki pages and its knowledge graph) into this vault, or update one imported before.'
+				? 'Bring in a med-lit-mcp project, or update one imported before.'
 				: 'Importing reads a folder outside the vault, which needs the desktop app.',
 			aliases: ['med-lit', 'Import', 'Literature review'],
 			render: setting => setting.addButton(button => button
@@ -314,8 +322,7 @@ export class SettingsTab extends PluginSettingTab {
 			const when = new Date(manifest.importedAt).toLocaleString();
 			items.push({
 				name: manifest.name,
-				desc: `${files} pages in "${manifest.vaultFolder}". Last imported ${when}` +
-					(manifest.marker.lastUpdate ? ` (bot update ${manifest.marker.lastUpdate})` : '') + '.',
+				desc: `${files} pages in "${manifest.vaultFolder}", imported ${when}.`,
 				render: setting => setting
 					.addButton(button => button
 						.setButtonText('Update')
@@ -360,15 +367,12 @@ export class SettingsTab extends PluginSettingTab {
 				() => new Notice(`Could not copy ${what.toLowerCase()}.`)
 			);
 		};
-		const masked = (text: string) => text.split(mcp.token()).join('<token>');
 
 		return [
 			{
 				name: 'Enable agent access',
 				desc: mcp.supported
-					? 'Let AI agents such as Claude Code, Claude Desktop and Codex search this vault and its knowledge graph, read-only. ' +
-						'A server on this computer (127.0.0.1) answers only requests carrying your token, and never serves excluded notes. ' +
-						'Entity descriptions may reflect any note an entity was extracted from.'
+					? 'Let AI agents search this vault and its graph, read-only, through a local server.'
 					: 'Agent access runs a local server, so it is available on desktop only.',
 				aliases: ['MCP', 'Claude Code', 'Codex', 'Claude Desktop'],
 				render: (setting: Setting) => {
@@ -395,7 +399,7 @@ export class SettingsTab extends PluginSettingTab {
 			},
 			{
 				name: 'Port',
-				desc: 'Local port for the server. Change it if another vault or app already uses it; then copy the connection settings again.',
+				desc: 'Change it if another app uses it, then copy the connection settings again.',
 				visible: enabled,
 				render: (setting: Setting) => {
 					setting.addText(text => {
@@ -412,8 +416,8 @@ export class SettingsTab extends PluginSettingTab {
 			{
 				name: 'Access token',
 				desc: mcp.tokenIsLocal
-					? 'Stored on this device only, not in the vault, so it is not synced. Regenerating it disconnects every configured agent.'
-					: 'Stored in this plugin\'s data.json. Regenerating it disconnects every configured agent.',
+					? 'Kept on this device, not synced. Regenerating disconnects every agent.'
+					: 'Kept in this plugin\'s data.json. Regenerating disconnects every agent.',
 				visible: enabled,
 				render: (setting: Setting) => {
 					setting.addButton(button => button.setButtonText('Copy').onClick(() => copy(mcp.token(), 'Token')));
@@ -430,7 +434,6 @@ export class SettingsTab extends PluginSettingTab {
 				desc: 'Run the copied command once in a terminal.',
 				visible: enabled,
 				render: (setting: Setting) => {
-					setting.setDesc(`Run this once in a terminal: ${masked(mcp.snippets().claudeCode)}`);
 					setting.addButton(button => button.setButtonText('Copy command').setCta().onClick(() => copy(mcp.snippets().claudeCode, 'Command')));
 				},
 			},
@@ -444,7 +447,7 @@ export class SettingsTab extends PluginSettingTab {
 			},
 			{
 				name: 'Claude Desktop',
-				desc: 'Merge the copied config into claude_desktop_config.json (Claude Desktop → Settings → Developer → Edit config), then restart Claude Desktop. It runs a small bridge script from this plugin\'s folder and needs Node.js.',
+				desc: 'Merge into claude_desktop_config.json, then restart Claude Desktop. Needs Node.js.',
 				visible: enabled,
 				render: (setting: Setting) => {
 					const config = mcp.snippets().claudeDesktop;
@@ -457,7 +460,7 @@ export class SettingsTab extends PluginSettingTab {
 			},
 			{
 				name: 'Node.js executable',
-				desc: 'Used by the Claude Desktop config. If Claude Desktop cannot find node, enter its full path (run "which node" in a terminal).',
+				desc: 'Full path to node, if Claude Desktop cannot find it (run "which node").',
 				visible: enabled,
 				render: (setting: Setting) => {
 					setting.addText(text => {
@@ -469,6 +472,66 @@ export class SettingsTab extends PluginSettingTab {
 				},
 			},
 		];
+	}
+
+	/**
+	 * Vault analysis: count new and changed notes locally, then ask before
+	 * sending any of them. Shared by both settings renderers.
+	 */
+	private configureVaultAnalysisButton(setting: Setting, onChange: () => void): void {
+		setting.addButton(button => {
+			const updateButton = () => {
+				if (isAnalyzingVault()) button.setButtonText('Cancel').setWarning();
+				else button.setButtonText('Start analysis').removeCta().setClass('mod-cta');
+			};
+			updateButton();
+			button.onClick(() => {
+				if (isAnalyzingVault()) {
+					cancelVaultAnalysis();
+					new Notice('Cancelling vault analysis...');
+					// The button updates once the current note finishes
+					window.setTimeout(updateButton, 1000);
+					return;
+				}
+				button.setDisabled(true).setButtonText('Checking notes...');
+				void planVaultAnalysis(this.plugin)
+					.then(plan => this.confirmVaultAnalysis(plan, async () => {
+						const run = analyzeEntireVault(this.plugin, undefined, plan);
+						updateButton();
+						onChange();
+						await run;
+						updateButton();
+						onChange();
+					}))
+					.catch(error => new Notice(`Could not check the vault: ${error instanceof Error ? error.message : String(error)}`))
+					.finally(() => {
+						button.setDisabled(false);
+						updateButton();
+					});
+			});
+		});
+	}
+
+	private confirmVaultAnalysis(plan: VaultAnalysisPlan, run: () => Promise<void>): void {
+		if (plan.unavailable) {
+			new Notice(plan.unavailable);
+			return;
+		}
+		const skipped = [
+			plan.unchanged && count(plan.unchanged, 'unchanged note'),
+			plan.tooShort && `${count(plan.tooShort, 'note')} too short to analyze`,
+			plan.excluded && count(plan.excluded, 'excluded note'),
+		].filter(Boolean).join(', ');
+		if (!plan.files.length) {
+			new Notice(`Nothing to analyze: every note is up to date.${skipped ? `\nSkipped: ${skipped}.` : ''}`);
+			return;
+		}
+		const message = `Analyze ${count(plan.files.length, 'note')}?\n\n` +
+			`New: ${plan.newNotes.toLocaleString()}\nChanged since last analysis: ${plan.changedNotes.toLocaleString()}\n` +
+			(skipped ? `Skipped: ${skipped}\n` : '') +
+			'\nThese notes are sent to your configured provider in chunks. You can cancel at any time.' +
+			(this.plugin.settings.autoAnalyzeOnSave ? '' : '\n\nTo keep new notes analyzed as you write, turn on Auto-analyze on save.');
+		new ConfirmModal(this.app, message, run).open();
 	}
 
 	/** Reasoning-effort picker. */
@@ -582,6 +645,18 @@ export class SettingsTab extends PluginSettingTab {
 				heading: 'Analysis',
 				items: [
 					{
+						name: 'Auto-analyze on save',
+						desc: 'Keep new and edited notes in the graph as you write.',
+						aliases: ['Auto-analysis', 'Analyze on save'],
+						control: { type: 'toggle', key: 'autoAnalyzeOnSave' },
+					},
+					{
+						name: 'Analyze entire vault',
+						desc: 'Counts new and changed notes, then asks before sending them.',
+						aliases: ['Batch analysis', 'Vault analysis', 'Vault enumeration'],
+						render: setting => this.configureVaultAnalysisButton(setting, () => this.refreshSettings()),
+					},
+					{
 						name: 'Extraction mode',
 						desc: 'Controls how thorough entity extraction is.',
 						control: {
@@ -598,17 +673,15 @@ export class SettingsTab extends PluginSettingTab {
 						control: { type: 'dropdown', key: 'extractionEffort', options: effortOptions },
 					},
 					{
-						name: 'Auto-analyze on save',
-						desc: 'Automatically analyze notes when you save them.',
-						control: { type: 'toggle', key: 'autoAnalyzeOnSave' },
+						type: 'page',
+						name: 'Excluded files',
+						desc: 'Notes and folders that are never analyzed.',
+						displayValue: () => this.plugin.settings.excludedPatterns.length
+							? count(this.plugin.settings.excludedPatterns.length, 'pattern')
+							: 'None',
+						items: this.getExclusionSettings(),
 					},
-					...this.getExclusionSettings(),
 				],
-			},
-			{
-				type: 'group',
-				heading: 'Agent access',
-				items: this.getAgentAccessSettings(),
 			},
 			{
 				type: 'group',
@@ -636,256 +709,243 @@ export class SettingsTab extends PluginSettingTab {
 			},
 			{
 				type: 'group',
-				heading: 'Vault write-back',
+				heading: 'Advanced',
 				items: [
 					{
-						name: 'Create entity notes',
-						desc: 'Write one note per entity, with its aliases, type and relationships, so the graph ' +
-							'also appears in Obsidian’s own graph view, backlinks and properties. The plugin edits ' +
-							'only those notes and the link property below; your prose is never touched.',
-						aliases: ['Write-back', 'Entity notes', 'Obsidian links'],
-						control: { type: 'toggle', key: 'enableEntityNotes' },
+						type: 'page',
+						name: 'Agent access',
+						desc: 'Let AI agents such as Claude Code and Codex search this vault, read-only.',
+						displayValue: () => (this.plugin.settings.mcpEnabled && this.plugin.mcp.supported ? 'On' : 'Off'),
+						items: this.getAgentAccessSettings(),
 					},
 					{
-						name: 'Entity folder',
-						desc: 'Where entity notes live. Notes in this folder are never analyzed.',
-						visible: () => this.plugin.settings.enableEntityNotes,
-						render: setting => setting.addText(text => text
-							.setPlaceholder('Entities')
-							.setValue(this.plugin.settings.entityFolder)
-							.onChange(async value => {
-								// normalizeFolder, not trim: "/" survives a trim but names
-								// the vault root, which would scatter entity notes among the
-								// user's own notes and leave them analyzable.
-								this.plugin.settings.entityFolder = normalizeFolder(value) || 'Entities';
-								await this.plugin.saveSettings();
-							})),
-					},
-					{
-						name: 'List relationships in entity notes',
-						desc: 'Link each entity to the ones it connects to, so entity-to-entity edges appear in the built-in graph.',
-						visible: () => this.plugin.settings.enableEntityNotes,
-						control: { type: 'toggle', key: 'writeRelationshipsSection' },
-					},
-					{
-						name: 'Link notes to their entities',
-						desc: 'Add a frontmatter property to each analyzed note listing the entities found in it.',
-						visible: () => this.plugin.settings.enableEntityNotes,
-						control: { type: 'toggle', key: 'enableRelatedWriteback' },
-					},
-					{
-						name: 'Property name',
-						desc: 'The frontmatter property the plugin owns. It is replaced on every analysis.',
-						visible: () => this.plugin.settings.enableEntityNotes && this.plugin.settings.enableRelatedWriteback,
-						render: setting => setting.addText(text => text
-							.setPlaceholder('related')
-							.setValue(this.plugin.settings.relatedPropertyName)
-							.onChange(async value => {
-								this.plugin.settings.relatedPropertyName = value.trim().replace(/:/g, '') || 'related';
-								await this.plugin.saveSettings();
-							})),
-					},
-					{
-						name: 'Write links for the whole vault',
-						desc: 'Apply the current graph to every analyzed note at once. Makes no API calls.',
-						aliases: ['Write links', 'Vault write-back'],
-						visible: () => this.plugin.settings.enableEntityNotes,
-						render: setting => setting.addButton(button => {
-							const updateButton = () => {
-								if (isWritebackRunning()) button.setButtonText('Cancel').setWarning();
-								else button.setButtonText('Write links').removeCta().setClass('mod-cta');
-							};
-							updateButton();
-							button.onClick(() => {
-								if (isWritebackRunning()) {
-									cancelWriteback();
-									new Notice('Cancelling...');
-									return;
-								}
-								const entities = this.plugin.graphCache.getAllNodes()
-									.filter(node => node.entityType !== 'NOTE').length;
-								const message = `Write links for ${entities} entities into your vault?\n\n` +
-									`This creates or updates notes in "${this.plugin.settings.entityFolder}"` +
-									(this.plugin.settings.enableRelatedWriteback
-										? `, and adds a "${this.plugin.settings.relatedPropertyName}" property to each analyzed note.`
-										: '.');
-								void new ConfirmModal(this.app, message, async () => {
-									this.refreshSettings();
-									await writeLinksForVault(this.plugin);
-									this.refreshSettings();
-								}).open();
-							});
-						}),
-					},
-					{
-						name: 'Remove written links',
-						desc: 'Take the plugin’s entity links back out of every note. Links you wrote yourself are kept, and entity notes are left in place.',
-						visible: () => this.plugin.settings.enableEntityNotes,
-						render: setting => setting.addButton(button => button
-							.setButtonText('Remove links')
-							.setWarning()
-							.onClick(() => {
-								const message = `Remove the plugin’s entity links from the ` +
-									`"${this.plugin.settings.relatedPropertyName}" property of every note?\n\n` +
-									'Links you wrote yourself are kept, and your prose is not touched.';
-								void new ConfirmModal(this.app, message, async () => {
-									await removeWrittenLinks(this.plugin);
-								}).open();
-							})),
-					},
-				],
-			},
-			{
-				type: 'group',
-				heading: 'Entity resolution (advanced)',
-				items: [
-					{
-						name: 'Enable embedding-based resolution',
-						desc: 'Use embeddings to find and merge similar entities.',
-						control: { type: 'toggle', key: 'enableEmbeddings' },
-					},
-					{
-						name: 'Embedding provider',
-						desc: 'Select the provider for embeddings.',
-						visible: () => this.plugin.settings.enableEmbeddings,
-						control: {
-							type: 'dropdown', key: 'embeddingProvider',
-							options: { openai: 'OpenAI', gemini: 'Gemini', ollama: 'Ollama (local)' },
-						},
-					},
-					{
-						name: 'Embedding API key',
-						desc: 'Leave blank to use the selected provider’s main API key.',
-						visible: () => this.plugin.settings.enableEmbeddings &&
-							this.plugin.settings.embeddingProvider !== 'ollama',
-						render: (setting: Setting) => {
-							setting.addText(text => {
-								text.setPlaceholder('Leave blank to use main key')
-									.setValue(this.plugin.settings.embeddingApiKey)
-									.onChange(async value => {
-										this.plugin.settings.embeddingApiKey = value;
-										await this.plugin.saveSettings();
-									});
-								text.inputEl.type = 'password';
-							});
-						},
-					},
-					{
-						name: 'Embedding server API',
-						desc: 'Which API the embedding server speaks.',
-						visible: () => this.plugin.settings.enableEmbeddings &&
-							this.plugin.settings.embeddingProvider === 'ollama',
-						control: {
-							type: 'dropdown', key: 'embeddingLocalApiStyle',
-							options: {
-								ollama: 'Ollama (/api/embed)',
-								openai: 'OpenAI-compatible (/v1/embeddings)',
+						type: 'page',
+						name: 'Vault write-back',
+						desc: 'Mirror the graph into your vault as entity notes and links.',
+						displayValue: () => (this.plugin.settings.enableEntityNotes ? 'On' : 'Off'),
+						items: [
+							{
+								name: 'Create entity notes',
+								desc: 'One note per entity, so the graph shows in Obsidian’s graph and backlinks. Your prose is never touched.',
+								aliases: ['Write-back', 'Entity notes', 'Obsidian links'],
+								control: { type: 'toggle', key: 'enableEntityNotes' },
 							},
+							{
+								name: 'Entity folder',
+								desc: 'Where entity notes live. Notes in this folder are never analyzed.',
+								visible: () => this.plugin.settings.enableEntityNotes,
+								render: setting => setting.addText(text => text
+									.setPlaceholder('Entities')
+									.setValue(this.plugin.settings.entityFolder)
+									.onChange(async value => {
+										// normalizeFolder, not trim: "/" survives a trim but names
+										// the vault root, which would scatter entity notes among the
+										// user's own notes and leave them analyzable.
+										this.plugin.settings.entityFolder = normalizeFolder(value) || 'Entities';
+										await this.plugin.saveSettings();
+									})),
+							},
+							{
+								name: 'List relationships in entity notes',
+								desc: 'Link each entity note to the entities it connects to.',
+								visible: () => this.plugin.settings.enableEntityNotes,
+								control: { type: 'toggle', key: 'writeRelationshipsSection' },
+							},
+							{
+								name: 'Link notes to their entities',
+								desc: 'Add a property listing the entities found in each analyzed note.',
+								visible: () => this.plugin.settings.enableEntityNotes,
+								control: { type: 'toggle', key: 'enableRelatedWriteback' },
+							},
+							{
+								name: 'Property name',
+								desc: 'The property the plugin owns and rewrites on every analysis.',
+								visible: () => this.plugin.settings.enableEntityNotes && this.plugin.settings.enableRelatedWriteback,
+								render: setting => setting.addText(text => text
+									.setPlaceholder('related')
+									.setValue(this.plugin.settings.relatedPropertyName)
+									.onChange(async value => {
+										this.plugin.settings.relatedPropertyName = value.trim().replace(/:/g, '') || 'related';
+										await this.plugin.saveSettings();
+									})),
+							},
+							{
+								name: 'Write links for the whole vault',
+								desc: 'Apply the current graph to every analyzed note at once. Makes no API calls.',
+								aliases: ['Write links', 'Vault write-back'],
+								visible: () => this.plugin.settings.enableEntityNotes,
+								render: setting => setting.addButton(button => {
+									const updateButton = () => {
+										if (isWritebackRunning()) button.setButtonText('Cancel').setWarning();
+										else button.setButtonText('Write links').removeCta().setClass('mod-cta');
+									};
+									updateButton();
+									button.onClick(() => {
+										if (isWritebackRunning()) {
+											cancelWriteback();
+											new Notice('Cancelling...');
+											return;
+										}
+										const entities = this.plugin.graphCache.getAllNodes()
+											.filter(node => node.entityType !== 'NOTE').length;
+										const message = `Write links for ${entities} entities into your vault?\n\n` +
+											`This creates or updates notes in "${this.plugin.settings.entityFolder}"` +
+											(this.plugin.settings.enableRelatedWriteback
+												? `, and adds a "${this.plugin.settings.relatedPropertyName}" property to each analyzed note.`
+												: '.');
+										void new ConfirmModal(this.app, message, async () => {
+											this.refreshSettings();
+											await writeLinksForVault(this.plugin);
+											this.refreshSettings();
+										}).open();
+									});
+								}),
+							},
+							{
+								name: 'Remove written links',
+								desc: 'Take the plugin’s links out of every note. Your own links are kept.',
+								visible: () => this.plugin.settings.enableEntityNotes,
+								render: setting => setting.addButton(button => button
+									.setButtonText('Remove links')
+									.setWarning()
+									.onClick(() => {
+										const message = `Remove the plugin’s entity links from the ` +
+											`"${this.plugin.settings.relatedPropertyName}" property of every note?\n\n` +
+											'Links you wrote yourself are kept, and your prose is not touched.';
+										void new ConfirmModal(this.app, message, async () => {
+											await removeWrittenLinks(this.plugin);
+										}).open();
+									})),
+							},
+						],
+					},
+					{
+						type: 'page',
+						name: 'Entity resolution',
+						desc: 'Merge entities with similar meanings, using embeddings.',
+						displayValue: () => (this.plugin.settings.enableEmbeddings ? 'On' : 'Off'),
+						items: [
+							{
+								name: 'Enable embedding-based resolution',
+								desc: 'Use embeddings to find and merge similar entities.',
+								control: { type: 'toggle', key: 'enableEmbeddings' },
+							},
+							{
+								name: 'Embedding provider',
+								desc: 'Select the provider for embeddings.',
+								visible: () => this.plugin.settings.enableEmbeddings,
+								control: {
+									type: 'dropdown', key: 'embeddingProvider',
+									options: { openai: 'OpenAI', gemini: 'Gemini', ollama: 'Ollama (local)' },
+								},
+							},
+							{
+								name: 'Embedding API key',
+								desc: 'Leave blank to use the selected provider’s main API key.',
+								visible: () => this.plugin.settings.enableEmbeddings &&
+									this.plugin.settings.embeddingProvider !== 'ollama',
+								render: (setting: Setting) => {
+									setting.addText(text => {
+										text.setPlaceholder('Leave blank to use main key')
+											.setValue(this.plugin.settings.embeddingApiKey)
+											.onChange(async value => {
+												this.plugin.settings.embeddingApiKey = value;
+												await this.plugin.saveSettings();
+											});
+										text.inputEl.type = 'password';
+									});
+								},
+							},
+							{
+								name: 'Embedding server API',
+								desc: 'Which API the embedding server speaks.',
+								visible: () => this.plugin.settings.enableEmbeddings &&
+									this.plugin.settings.embeddingProvider === 'ollama',
+								control: {
+									type: 'dropdown', key: 'embeddingLocalApiStyle',
+									options: {
+										ollama: 'Ollama (/api/embed)',
+										openai: 'OpenAI-compatible (/v1/embeddings)',
+									},
+								},
+							},
+							{
+								name: 'Embedding server host',
+								desc: 'Leave blank to reuse the chat provider’s host.',
+								visible: () => this.plugin.settings.enableEmbeddings &&
+									this.plugin.settings.embeddingProvider === 'ollama',
+								control: { type: 'text', key: 'embeddingHost', placeholder: 'http://localhost:11434' },
+							},
+							{
+								name: 'Embedding model',
+								desc: 'Changing model requires recomputing stored embeddings.',
+								visible: () => this.plugin.settings.enableEmbeddings,
+								render: setting => this.configureEmbeddingModelSetting(setting),
+							},
+							{
+								name: 'Auto-merge threshold',
+								desc: 'Similarity above this threshold automatically merges entities.',
+								visible: () => this.plugin.settings.enableEmbeddings,
+								control: {
+									type: 'slider', key: 'resolutionThresholdHigh', min: 0.85, max: 0.99, step: 0.01,
+									displayFormat: value => value.toFixed(2),
+								},
+							},
+							{
+								name: 'Verification threshold',
+								desc: 'Similarity above this but below auto-merge uses model verification.',
+								visible: () => this.plugin.settings.enableEmbeddings,
+								control: {
+									type: 'slider', key: 'resolutionThresholdLow', min: 0.70, max: 0.90, step: 0.01,
+									displayFormat: value => value.toFixed(2),
+								},
+							},
+							{
+								name: 'Enable verification',
+								desc: 'Use the model to verify ambiguous entity matches.',
+								visible: () => this.plugin.settings.enableEmbeddings,
+								control: { type: 'toggle', key: 'enableLLMVerification' },
+							},
+							{
+								name: 'Compute embeddings for existing nodes',
+								desc: 'Generate missing embeddings, or recompute all when none are missing.',
+								visible: () => this.plugin.settings.enableEmbeddings,
+								render: setting => {
+									const embeddings = this.plugin.graphCache.getEmbeddingsCount();
+									const nodes = this.plugin.graphCache.getStats().nodes;
+									const missing = nodes - embeddings;
+									setting.setDesc(`${embeddings}/${nodes} nodes have embeddings.${missing > 0 ? ` ${missing} missing.` : ''}`)
+										.addButton(button => button
+											.setButtonText(missing > 0 ? 'Compute missing' : 'Recompute all')
+											.onClick(() => this.computeEmbeddings(missing > 0)));
+								},
+							},
+							{
+								name: 'Clear resolution cache',
+								desc: 'Clear cached entity-resolution decisions.',
+								visible: () => this.plugin.settings.enableEmbeddings,
+								render: setting => setting
+									.setDesc(`${this.plugin.graphCache.getResolutionCacheSize()} cached resolutions.`)
+									.addButton(button => button.setButtonText('Clear cache').setWarning().onClick(async () => {
+										this.plugin.graphCache.clearResolutionCache();
+										await this.plugin.graphCache.flush();
+										new Notice('Resolution cache cleared');
+										this.refreshSettings();
+									})),
+							},
+						],
+					},
+					{
+						type: 'page',
+						name: 'Imported projects',
+						desc: 'med-lit projects imported into this vault.',
+						displayValue: () => {
+							const imports = this.plugin.imports?.all().length ?? 0;
+							return imports ? count(imports, 'project') : 'None';
 						},
-					},
-					{
-						name: 'Embedding server host',
-						desc: 'Leave blank to reuse the chat provider’s host.',
-						visible: () => this.plugin.settings.enableEmbeddings &&
-							this.plugin.settings.embeddingProvider === 'ollama',
-						control: { type: 'text', key: 'embeddingHost', placeholder: 'http://localhost:11434' },
-					},
-					{
-						name: 'Embedding model',
-						desc: 'Changing model requires recomputing stored embeddings.',
-						visible: () => this.plugin.settings.enableEmbeddings,
-						render: setting => this.configureEmbeddingModelSetting(setting),
-					},
-					{
-						name: 'Auto-merge threshold',
-						desc: 'Similarity above this threshold automatically merges entities.',
-						visible: () => this.plugin.settings.enableEmbeddings,
-						control: {
-							type: 'slider', key: 'resolutionThresholdHigh', min: 0.85, max: 0.99, step: 0.01,
-							displayFormat: value => value.toFixed(2),
-						},
-					},
-					{
-						name: 'Verification threshold',
-						desc: 'Similarity above this but below auto-merge uses model verification.',
-						visible: () => this.plugin.settings.enableEmbeddings,
-						control: {
-							type: 'slider', key: 'resolutionThresholdLow', min: 0.70, max: 0.90, step: 0.01,
-							displayFormat: value => value.toFixed(2),
-						},
-					},
-					{
-						name: 'Enable verification',
-						desc: 'Use the model to verify ambiguous entity matches.',
-						visible: () => this.plugin.settings.enableEmbeddings,
-						control: { type: 'toggle', key: 'enableLLMVerification' },
-					},
-					{
-						name: 'Compute embeddings for existing nodes',
-						desc: 'Generate missing embeddings, or recompute all when none are missing.',
-						visible: () => this.plugin.settings.enableEmbeddings,
-						render: setting => {
-							const embeddings = this.plugin.graphCache.getEmbeddingsCount();
-							const nodes = this.plugin.graphCache.getStats().nodes;
-							const missing = nodes - embeddings;
-							setting.setDesc(`${embeddings}/${nodes} nodes have embeddings.${missing > 0 ? ` ${missing} missing.` : ''}`)
-								.addButton(button => button
-									.setButtonText(missing > 0 ? 'Compute missing' : 'Recompute all')
-									.onClick(() => this.computeEmbeddings(missing > 0)));
-						},
-					},
-					{
-						name: 'Clear resolution cache',
-						desc: 'Clear cached entity-resolution decisions.',
-						visible: () => this.plugin.settings.enableEmbeddings,
-						render: setting => setting
-							.setDesc(`${this.plugin.graphCache.getResolutionCacheSize()} cached resolutions.`)
-							.addButton(button => button.setButtonText('Clear cache').setWarning().onClick(async () => {
-								this.plugin.graphCache.clearResolutionCache();
-								await this.plugin.graphCache.flush();
-								new Notice('Resolution cache cleared');
-								this.refreshSettings();
-							})),
+						items: this.getImportSettings(),
 					},
 				],
-			},
-			{
-				type: 'group',
-				heading: 'Vault analysis',
-				items: [
-					{
-						name: 'Analyze entire vault',
-						desc: 'After confirmation, analyze eligible markdown notes. Excluded and unchanged notes are skipped.',
-						aliases: ['Batch analysis', 'Vault enumeration'],
-						render: setting => setting.addButton(button => {
-							const updateButton = () => {
-								if (isAnalyzingVault()) button.setButtonText('Cancel').setWarning();
-								else button.setButtonText('Start analysis').removeCta().setClass('mod-cta');
-							};
-							updateButton();
-							button.onClick(() => {
-								if (isAnalyzingVault()) {
-									cancelVaultAnalysis();
-									new Notice('Cancelling vault analysis...');
-									return;
-								}
-								const message = 'Analyze eligible markdown notes in your vault?\n\n' +
-									'The plugin will enumerate markdown file paths after confirmation, skip excluded notes, and send changed eligible notes to your configured provider in chunks.\n\n' +
-									'You can cancel at any time.';
-								void new ConfirmModal(this.app, message, async () => {
-									this.refreshSettings();
-									await analyzeEntireVault(this.plugin);
-									this.refreshSettings();
-								}).open();
-							});
-						}),
-					},
-				],
-			},
-			{
-				type: 'group',
-				heading: 'Imported projects',
-				items: this.getImportSettings(),
 			},
 			{
 				type: 'group',
@@ -893,8 +953,7 @@ export class SettingsTab extends PluginSettingTab {
 				items: [
 					{
 						name: 'Graph statistics',
-						desc: 'Current node and connection totals.',
-						render: setting => this.renderGraphStats(setting.descEl),
+						render: setting => setting.setDesc(this.describeGraphStats()),
 					},
 					{
 						name: 'Clear graph data',
@@ -1111,6 +1170,19 @@ export class SettingsTab extends PluginSettingTab {
 		// Analysis section
 		new Setting(containerEl).setName('Analysis').setHeading();
 
+		// Auto-analysis toggle
+		new Setting(containerEl)
+			.setName('Auto-analyze on save')
+			.setDesc('Analyze a note each time you save it, so new and edited notes join the graph without another vault analysis. Requires an API key.')
+			.addToggle(toggle => {
+				toggle
+					.setValue(this.plugin.settings.autoAnalyzeOnSave)
+					.onChange(async (value) => {
+						this.plugin.settings.autoAnalyzeOnSave = value;
+						await this.plugin.saveSettings();
+					});
+			});
+
 		// Extraction mode
 		new Setting(containerEl)
 			.setName('Extraction mode')
@@ -1135,19 +1207,6 @@ export class SettingsTab extends PluginSettingTab {
 				await this.plugin.saveSettings();
 			},
 		});
-
-		// Auto-analysis toggle
-		new Setting(containerEl)
-			.setName('Auto-analyze on save')
-			.setDesc('Automatically analyze notes when you save them. Requires API key to be configured.')
-			.addToggle(toggle => {
-				toggle
-					.setValue(this.plugin.settings.autoAnalyzeOnSave)
-					.onChange(async (value) => {
-						this.plugin.settings.autoAnalyzeOnSave = value;
-						await this.plugin.saveSettings();
-					});
-			});
 
 		for (const definition of this.getExclusionSettings()) {
 			const setting = new Setting(containerEl).setName(definition.name).setDesc(definition.desc ?? '');
@@ -1466,40 +1525,10 @@ export class SettingsTab extends PluginSettingTab {
 
 		const vaultButtonContainer = containerEl.createDiv({ cls: 'vault-analysis-buttons' });
 
-		new Setting(vaultButtonContainer)
+		const vaultSetting = new Setting(vaultButtonContainer)
 			.setName('Analyze entire vault')
-			.setDesc('Enumerates markdown file paths only after you confirm the analysis.')
-			.addButton(button => {
-				const updateButtonState = () => {
-					if (isAnalyzingVault()) {
-						button.setButtonText('Cancel').setWarning();
-					} else {
-						button.setButtonText('Start analysis').removeCta().setClass('mod-cta');
-					}
-				};
-
-				updateButtonState();
-
-				button.onClick(() => {
-					if (isAnalyzingVault()) {
-						cancelVaultAnalysis();
-						new Notice('Cancelling vault analysis...');
-						// Button will update after analysis stops
-						window.setTimeout(updateButtonState, 1000);
-					} else {
-						const message = 'Analyze eligible markdown notes in your vault?\n\n' +
-							'The plugin will enumerate markdown file paths after confirmation, skip excluded notes, and send changed eligible notes to your configured provider in chunks.\n\n' +
-							`You can cancel at any time.`;
-
-						void new ConfirmModal(this.app, message, async () => {
-							updateButtonState();
-							await analyzeEntireVault(this.plugin);
-							updateButtonState();
-							this.renderGraphStats(statsEl);
-						}).open();
-					}
-				});
-			});
+			.setDesc('Counts the new and changed notes first, then asks before sending them to your provider.');
+		this.configureVaultAnalysisButton(vaultSetting, () => this.renderGraphStats(statsEl));
 
 		new Setting(containerEl).setName('Imported projects').setHeading();
 		for (const definition of this.getImportSettings()) {
@@ -1703,24 +1732,21 @@ export class SettingsTab extends PluginSettingTab {
 
 	private renderGraphStats(container: HTMLElement): void {
 		container.empty();
+		container.createEl('p', { cls: 'setting-item-description', text: this.describeGraphStats() });
+	}
+
+	private describeGraphStats(): string {
 		const stats = this.plugin.graphCache.getStats();
+		if (stats.nodes === 0) return 'No graph data yet. Analyze some notes to build your knowledge graph.';
 
-		const statsText = container.createEl('p', { cls: 'setting-item-description' });
-		if (stats.nodes === 0) {
-			statsText.setText('No graph data yet. Analyze some notes to build your knowledge graph.');
-		} else {
-			// Build label breakdown
-			const labelCounts = Object.entries(stats.labels)
-				.sort((a, b) => b[1] - a[1])
-				.slice(0, 5)
-				.map(([label, count]) => `${count} ${label}`)
-				.join(', ');
-
-			statsText.setText(
-				`Graph contains: ${stats.nodes} nodes, ${stats.edges} connections` +
-				(labelCounts ? ` (${labelCounts})` : '')
-			);
-		}
+		// Build label breakdown
+		const labelCounts = Object.entries(stats.labels)
+			.sort((a, b) => b[1] - a[1])
+			.slice(0, 5)
+			.map(([label, count]) => `${count} ${label}`)
+			.join(', ');
+		return `Graph contains: ${stats.nodes} nodes, ${stats.edges} connections` +
+			(labelCounts ? ` (${labelCounts})` : '');
 	}
 
 	private updateProviderSettings() {
@@ -1793,6 +1819,11 @@ export class SettingsTab extends PluginSettingTab {
 			new Notice(`Failed to compute embeddings: ${(error as Error).message}`);
 		}
 	}
+}
+
+/** "1 note", "1,204 notes". */
+function count(n: number, noun: string): string {
+	return `${n.toLocaleString()} ${noun}${n === 1 ? '' : 's'}`;
 }
 
 function describeMcpStatus(status: McpStatus): string {

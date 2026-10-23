@@ -73,9 +73,11 @@ interface HostReply {
  */
 function fa2Host(libraryWorker: () => void): void {
 	type Listener = (event: { data: unknown }) => void;
+	// Function-valued properties, not methods: both are detached and swapped
+	// below, and postMessage is called back with the scope bound explicitly.
 	interface Scope {
-		addEventListener(type: string, listener: Listener): void;
-		postMessage(message: unknown, transfer?: unknown[]): void;
+		addEventListener: (type: string, listener: Listener) => void;
+		postMessage: (this: Scope, message: unknown, transfer?: unknown[]) => void;
 	}
 	const scope = self as unknown as Scope;
 	const addEventListener = scope.addEventListener;
@@ -116,7 +118,7 @@ function fa2Host(libraryWorker: () => void): void {
 }
 
 function createWorker(): Worker {
-	const source = `(${fa2Host.toString()})(${(fa2WorkerBody as () => void).toString()});`;
+	const source = `(${fa2Host.toString()})(${fa2WorkerBody.toString()});`;
 	const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
 	try {
 		return new Worker(url);

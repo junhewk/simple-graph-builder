@@ -4,6 +4,11 @@ Everything under **Settings → Simple Graph Builder**. The graph view's own
 display and force settings are set in the view itself; see
 [Graph View](GRAPH_VIEW.md#display-and-forces).
 
+On Obsidian 1.13 and later, **Excluded files** and the sections under
+**Advanced** (agent access, vault write-back, entity resolution and imported
+projects) each open on a page of their own, with their current state shown on
+the row, as Obsidian's own settings do.
+
 ## API Configuration
 - **API Provider**: Choose between Claude, OpenAI, Gemini, DeepSeek, or Ollama (local)
 - **API Key**: Stored per provider, so switching providers never sends one provider's key to another. Not needed for a local server unless it was started with `--api-key`.
@@ -11,18 +16,18 @@ display and force settings are set in the view itself; see
 - **Model**: Select or enter a custom model name
 
 ## Analysis Settings
+- **Auto-analyze on save**: Analyze a note each time you save it (2-second debounce), so new and edited notes join the graph without another vault analysis
+- **Analyze entire vault**: First counts, on your computer, which eligible notes are new and which changed since their last analysis, and shows those numbers with the unchanged, too-short and excluded notes it will skip. Nothing is sent until you confirm, and then only the new and changed notes are, with progress tracking and cancellation support
 - **Extraction Mode**: Control extraction depth
   - *Standard*: Max 15 entities per chunk (fast, low cost)
   - *Thorough*: No limits per chunk (comprehensive extraction)
 - **Reasoning effort**: How much the model thinks before extracting — *Auto*, *Minimal*, *Low*, *Medium*, *High*, or *Max*. Defaults to *Minimal*: notes are processed in many parallel chunks, so higher levels raise cost and latency noticeably. Models that don't support the setting (such as `claude-haiku-4-5`) are flagged in settings and simply ignore it.
 - **Chunked Processing**: Long notes are automatically split into ~500 token chunks and processed in parallel (max 3 concurrent)
-- **Auto-analyze on save**: Automatically analyze notes when you save them (2-second debounce)
-- **Analyze entire vault**: Batch analyze all notes with progress tracking and cancellation support
 
 ## Analysis Exclusions
 
-Under **Analysis**, add one vault-relative path or pattern per line to **Excluded
-files and folders**. Exclusions apply to **Analyze current note**, **Analyze entire
+Under **Analysis → Excluded files**, add one vault-relative path or pattern per
+line to **Excluded files and folders**. Exclusions apply to **Analyze current note**, **Analyze entire
 vault**, and **Auto-analyze on save**, before note content is read or sent to a
 provider. Vault analysis reports excluded notes separately from unchanged or
 short notes.

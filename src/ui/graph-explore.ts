@@ -140,7 +140,7 @@ export class GraphSearchBar {
 		if (rows.length === 0) return;
 		parent.createDiv({ cls: 'sgb-graph-panel-subheading', text: `${title} (${rows.length})` });
 		for (const row of rows.slice(0, MAX_ROWS)) {
-			renderNodeRow(parent, row, () => this.callbacks.onPick(row), this.callbacks.onOpenNote);
+			renderNodeRow(parent, row, () => this.callbacks.onPick(row), path => this.callbacks.onOpenNote(path));
 		}
 		if (rows.length > MAX_ROWS) {
 			parent.createDiv({
@@ -352,7 +352,7 @@ export class GraphInspector {
 					text: step.via.direction === 'out' ? `↓ ${step.via.verb}` : `↑ ${step.via.verb}`,
 				});
 			}
-			renderNodeRow(list, step.node, () => this.callbacks.onNavigate(step.node), this.callbacks.onOpenNote);
+			renderNodeRow(list, step.node, () => this.callbacks.onNavigate(step.node), path => this.callbacks.onOpenNote(path));
 		}
 	}
 
@@ -381,7 +381,7 @@ export class GraphInspector {
 				text: direction === 'out' ? `→ ${verb}` : `← ${verb}`,
 			});
 			for (const relation of group.slice(0, limit - shown)) {
-				const row = renderNodeRow(parent, relation.other, () => this.callbacks.onNavigate(relation.other), this.callbacks.onOpenNote);
+				const row = renderNodeRow(parent, relation.other, () => this.callbacks.onNavigate(relation.other), path => this.callbacks.onOpenNote(path));
 				if (relation.detail) row.createDiv({ cls: 'sgb-graph-node-reason', text: relation.detail });
 				shown++;
 			}

@@ -15,7 +15,7 @@ export class ConfirmModal extends Modal {
 
 	onOpen(): void {
 		const { contentEl } = this;
-		contentEl.createEl('p', { text: this.message });
+		contentEl.createEl('p', { text: this.message, cls: 'sgb-confirm-message' });
 
 		const buttonContainer = contentEl.createDiv({ cls: 'modal-button-container' });
 		buttonContainer.createEl('button', { text: 'Cancel' })

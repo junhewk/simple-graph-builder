@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import './graph-harness';
 import { fakeSyncPlugin } from './vault-stub';
 import { allBodies, resetBodies, setScripted, notices } from './obsidian-stub';
-import { analyzeFile, analyzeCurrentNote, analyzeEntireVault, autoAnalyzeFile, isAnalyzingVault, cancelVaultAnalysis } from '../src/commands/analyze';
+import { analyzeFile, analyzeCurrentNote, analyzeEntireVault, autoAnalyzeFile, isAnalyzingVault, cancelVaultAnalysis, planVaultAnalysis } from '../src/commands/analyze';
 import { computeNoteHashes } from '../src/graph/hashes';
 import { HashData } from '../src/types';
 
@@ -90,6 +90,37 @@ async function main() {
 		assert.deepEqual(reads, ['short.md', 'unchanged.md', 'new.md']);
 		assert.deepEqual(progress, [[1, 3, 'short'], [2, 3, 'unchanged'], [3, 3, 'new']]);
 		assert.ok(notices.some(n => n.includes('Excluded: 2')));
+	}
+
+	// The plan counts new and changed notes without reading excluded ones or
+	// calling the provider, and the run then sends only what it counted.
+	{
+		const { plugin, vault, reads } = await fixture({ excludedPatterns: ['skills/**'] });
+		vault.seed('skills/config.md', body);
+		vault.seed('short.md', 'short');
+		vault.seed('unchanged.md', body);
+		vault.seed('changed.md', body);
+		vault.seed('new.md', body);
+		await plugin.saveData({ hashes: { hashes: [
+			{ path: 'unchanged.md', hash: computeNoteHashes(body).body, analyzedAt: 1 },
+			{ path: 'changed.md', hash: 'old-hash', analyzedAt: 1 },
+		] } });
+		const planned: string[] = [];
+		plugin.app.vault.cachedRead = async file => { planned.push(file.path); return vault.bodies.get(file.path) ?? ''; };
+		const plan = await planVaultAnalysis(plugin);
+		assert.deepEqual(plan.files.map(file => file.path), ['changed.md', 'new.md']);
+		assert.deepEqual(
+			[plan.newNotes, plan.changedNotes, plan.unchanged, plan.tooShort, plan.excluded],
+			[1, 1, 1, 1, 1]
+		);
+		assert.ok(!planned.includes('skills/config.md'));
+		assert.equal(allBodies.length, 0);
+
+		const progress: [number, number, string][] = [];
+		const result = await analyzeEntireVault(plugin, (current, total, file) => progress.push([current, total, file]), plan);
+		assert.deepEqual(reads, ['changed.md', 'new.md']);
+		assert.deepEqual(progress, [[1, 2, 'changed'], [2, 2, 'new']]);
+		assert.deepEqual([result.analyzed, result.skipped, result.excluded], [2, 2, 1]);
 	}
 
 	// Settings and renamed paths are evaluated when a queued note starts.

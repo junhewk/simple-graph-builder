@@ -1,6 +1,6 @@
 import { Notice, MarkdownView, TFile } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
-import { loadHashes, saveHashes, computeNoteHashes, hasNoteChangedByHashes, upgradeLegacyHash, updateNoteHash, removeNoteHash, clearHashes } from '../graph/hashes';
+import { loadHashes, saveHashes, computeNoteHashes, hasNoteChangedByHashes, upgradeLegacyHash, updateNoteHash, removeNoteHash, clearHashes, getNoteHash } from '../graph/hashes';
 import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeNoteLayerIntoCache, removeNoteFromCache } from '../graph/merge';
 import { stripFrontmatter } from '../sync/note-content';
 import { syncNoteWriteback, deleteEntityNote, clearRelatedProperty } from '../sync';
@@ -344,13 +344,61 @@ export function cancelVaultAnalysis(): void {
 	vaultAnalysisState.isCancelled = true;
 }
 
+/** What a vault analysis would send, worked out locally before asking. */
+export interface VaultAnalysisPlan {
+	/** Eligible notes that are new or changed since their last analysis. */
+	files: TFile[];
+	newNotes: number;
+	changedNotes: number;
+	unchanged: number;
+	tooShort: number;
+	excluded: number;
+	/** Set when exclusions cannot be checked; nothing should run. */
+	unavailable?: string;
+}
+
 /**
- * Analyze all markdown files in the vault.
+ * Count the notes a vault analysis would send, without calling the provider.
+ *
+ * Runs only when the user starts a vault analysis, so the vault is still never
+ * enumerated just by opening settings. Excluded notes are never read. The
+ * result is an estimate: each note is checked again when its turn comes.
+ */
+export async function planVaultAnalysis(plugin: SimpleGraphBuilderPlugin): Promise<VaultAnalysisPlan> {
+	const plan: VaultAnalysisPlan = { files: [], newNotes: 0, changedNotes: 0, unchanged: 0, tooShort: 0, excluded: 0 };
+	const hashes = await loadHashes(plugin);
+	for (const file of plugin.app.vault.getMarkdownFiles()) {
+		const eligibility = getAnalysisEligibility(plugin, file);
+		if (eligibility.status === 'unavailable') return { ...plan, files: [], unavailable: eligibility.reason };
+		if (eligibility.status === 'excluded') {
+			plan.excluded++;
+			continue;
+		}
+		const content = await plugin.app.vault.cachedRead(file);
+		if (stripFrontmatter(content).body.trim().length < 50) {
+			plan.tooShort++;
+			continue;
+		}
+		const isNew = !getNoteHash(hashes, file.path);
+		if (!isNew && !hasNoteChangedByHashes(hashes, file.path, computeNoteHashes(content))) {
+			plan.unchanged++;
+			continue;
+		}
+		if (isNew) plan.newNotes++;
+		else plan.changedNotes++;
+		plan.files.push(file);
+	}
+	return plan;
+}
+
+/**
+ * Analyze all markdown files in the vault, or only those of a plan.
  * Shows progress and handles rate limiting.
  */
 export async function analyzeEntireVault(
 	plugin: SimpleGraphBuilderPlugin,
-	onProgress?: (current: number, total: number, currentFile: string) => void
+	onProgress?: (current: number, total: number, currentFile: string) => void,
+	plan?: VaultAnalysisPlan
 ): Promise<{ analyzed: number; skipped: number; excluded: number; errors: number; nodesAdded: number; nodesMerged: number; relationshipsAdded: number }> {
 	const totals = { analyzed: 0, skipped: 0, excluded: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	if (vaultAnalysisState.isRunning) {
@@ -365,15 +413,22 @@ export async function analyzeEntireVault(
 		// Enumeration remains user-triggered, after the settings confirmation.
 		// Preflight every candidate before reading any note content.
 		const files: TFile[] = [];
-		for (const file of plugin.app.vault.getMarkdownFiles()) {
-			const eligibility = getAnalysisEligibility(plugin, file);
-			if (eligibility.status === 'unavailable') {
-				new Notice(eligibility.reason);
-				totals.errors++;
-				return totals;
+		if (plan) {
+			// Notes the plan already set aside count toward the summary.
+			files.push(...plan.files);
+			totals.skipped = plan.unchanged + plan.tooShort;
+			totals.excluded = plan.excluded;
+		} else {
+			for (const file of plugin.app.vault.getMarkdownFiles()) {
+				const eligibility = getAnalysisEligibility(plugin, file);
+				if (eligibility.status === 'unavailable') {
+					new Notice(eligibility.reason);
+					totals.errors++;
+					return totals;
+				}
+				if (eligibility.status === 'excluded') totals.excluded++;
+				else files.push(file);
 			}
-			if (eligibility.status === 'excluded') totals.excluded++;
-			else files.push(file);
 		}
 		const total = files.length;
 		if (!total) {

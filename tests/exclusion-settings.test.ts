@@ -83,8 +83,11 @@ async function main() {
 			if (ui === 'legacy') tab.display();
 			else {
 				const group = tab.getSettingDefinitions().find(item => 'heading' in item && item.heading === 'Analysis');
-				assert.ok(group && 'items' in group);
-				for (const definition of group.items.filter(item => item.name.includes('Excluded') || item.name.includes('Respect Obsidian'))) {
+				assert.ok(group && 'heading' in group);
+				const page = group.items.find(item => 'type' in item && item.name === 'Excluded files');
+				assert.ok(page && 'type' in page);
+				for (const definition of page.items) {
+					if (!('render' in definition)) continue;
 					const setting = new Setting(undefined) as unknown as import('obsidian').Setting;
 					definition.render?.(setting.setName(definition.name));
 				}

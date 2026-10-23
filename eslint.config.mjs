@@ -27,6 +27,8 @@ export default [
       "@typescript-eslint/no-unsafe-assignment": "error",
       "@typescript-eslint/no-unsafe-member-access": "error",
       "@typescript-eslint/no-misused-promises": "error",
+      "@typescript-eslint/unbound-method": "error",
+      "@typescript-eslint/no-unnecessary-type-assertion": "error",
       "no-restricted-globals": ["error",
         ...["setTimeout", "clearTimeout", "setInterval", "clearInterval", "requestAnimationFrame", "cancelAnimationFrame"]
           .map(name => ({ name, message: `Use window.${name}() for popout window compatibility.` })),
