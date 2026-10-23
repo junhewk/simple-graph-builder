@@ -398,6 +398,20 @@ export class SettingsTab extends PluginSettingTab {
 				},
 			},
 			{
+				name: 'Let agents add to the graph',
+				desc: 'Agents analyze notes with their own model, no API key needed here, and add what they find. Reconnect them after changing this.',
+				aliases: ['Graph writes', 'Agent extraction'],
+				visible: enabled,
+				render: (setting: Setting) => {
+					setting.addToggle(toggle => {
+						toggle.setValue(this.plugin.settings.mcpGraphWrites).onChange(async value => {
+							this.plugin.settings.mcpGraphWrites = value;
+							await this.plugin.saveSettings();
+						});
+					});
+				},
+			},
+			{
 				name: 'Port',
 				desc: 'Change it if another app uses it, then copy the connection settings again.',
 				visible: enabled,
@@ -714,7 +728,7 @@ export class SettingsTab extends PluginSettingTab {
 					{
 						type: 'page',
 						name: 'Agent access',
-						desc: 'Let AI agents such as Claude Code and Codex search this vault, read-only.',
+						desc: 'Let AI agents such as Claude Code and Codex search this vault and its graph.',
 						displayValue: () => (this.plugin.settings.mcpEnabled && this.plugin.mcp.supported ? 'On' : 'Off'),
 						items: this.getAgentAccessSettings(),
 					},
@@ -978,6 +992,10 @@ export class SettingsTab extends PluginSettingTab {
 				type: 'group',
 				heading: 'Support',
 				items: [{
+					name: 'Show what\'s new after updates',
+					desc: 'After a feature update, show what changed, once.',
+					control: { type: 'toggle', key: 'showReleaseNotes' },
+				}, {
 					name: 'Buy me a coffee',
 					desc: 'Support development of Simple Graph Builder.',
 					render: setting => setting.addButton(button => button
@@ -1570,6 +1588,18 @@ export class SettingsTab extends PluginSettingTab {
 
 		// Support section
 		new Setting(containerEl).setName('Support').setHeading();
+
+		new Setting(containerEl)
+			.setName('Show what\'s new after updates')
+			.setDesc('After a feature update, show what changed, once.')
+			.addToggle(toggle => {
+				toggle
+					.setValue(this.plugin.settings.showReleaseNotes)
+					.onChange(async (value) => {
+						this.plugin.settings.showReleaseNotes = value;
+						await this.plugin.saveSettings();
+					});
+			});
 
 		new Setting(containerEl)
 			.setName('Buy me a coffee')

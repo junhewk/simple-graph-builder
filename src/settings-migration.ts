@@ -146,6 +146,10 @@ export function migrateSettings(settings: Settings, storedVersion: number): Migr
 		}
 	}
 
+	// v7 adds mcpGraphWrites (off) and the release-notes settings through
+	// DEFAULT_SETTINGS, like v4 and v5. An empty lastSeenVersion is how an
+	// install that predates release notes is recognized.
+
 	next.settingsVersion = CURRENT_SETTINGS_VERSION;
 
 	const changed = notes.length > 0 || storedVersion !== CURRENT_SETTINGS_VERSION;

@@ -103,3 +103,6 @@ See [Importing med-lit Projects](MED_LIT_IMPORT.md#managing-imported-projects).
 ## Data Management
 - View graph statistics (nodes by entity type, total relationships)
 - Clear all graph data
+
+## Support
+- **Show what's new after updates**: on by default. After a feature update (0.9.0, not 0.9.1), shows that release's changelog once. A fresh install shows nothing, and nothing is fetched: the notes are bundled with the plugin

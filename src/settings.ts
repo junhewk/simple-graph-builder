@@ -11,8 +11,10 @@ import { DEFAULT_GRAPH_DISPLAY } from './graph/display';
  * 5 = analysis exclusions (additive)
  * 6 = Smart Search removed (its keys deleted); gpt-5.6-luna -> gpt-6-luna;
  *     agent access settings (additive)
+ * 7 = agents adding extractions to the graph; release notes after updates
+ *     (both additive)
  */
-export const CURRENT_SETTINGS_VERSION = 6;
+export const CURRENT_SETTINGS_VERSION = 7;
 
 // The model catalog and the provider/model/key resolver now live with the
 // provider adapters. Re-exported here so existing importers keep working.
@@ -61,8 +63,11 @@ export const DEFAULT_SETTINGS: Settings = {
 	// Agent access (off by default)
 	mcpEnabled: false,
 	mcpPort: 27180,
+	mcpGraphWrites: false,
 	mcpNodePath: 'node',
 	mcpToken: '',
+	showReleaseNotes: true,
+	lastSeenVersion: '',
 	settingsVersion: CURRENT_SETTINGS_VERSION,
 };
 

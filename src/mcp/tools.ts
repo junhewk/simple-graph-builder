@@ -4,12 +4,20 @@
  * Agents already have grep; these give them what grep cannot: resolved
  * wikilinks and backlinks, extracted entities with typed relations and the
  * note each relation came from, and graph-aware ranking.
+ *
+ * With graph writes on, three more let the agent build the graph itself:
+ * find notes waiting for analysis, read one with the extraction rules, and
+ * submit what it extracted.
  */
 import type { QueryEngine } from '../query/engine';
 import type { NotFound } from '../query/types';
+import { EXTRACTION_ENTITY_TYPES } from '../types';
+import type { GraphWriter } from './graph-writer';
 import type { ToolDefinition, ToolRegistry, ToolResult } from './protocol';
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
+/** Adds to the graph and never removes; resubmitting the same result changes nothing. */
+const ADDITIVE = { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 
 const ENTITY_TYPES_PARAM = {
 	type: 'array',
@@ -125,7 +133,91 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
 	},
 ];
 
-export function createToolRegistry(engine: QueryEngine): ToolRegistry {
+export const WRITE_TOOL_DEFINITIONS: ToolDefinition[] = [
+	{
+		name: 'notes_to_analyze',
+		title: 'Notes waiting for analysis',
+		description:
+			'Notes that are new or changed since they were last added to the knowledge graph. Take each through ' +
+			'get_extraction_task and submit_extraction.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				limit: { type: 'integer', minimum: 1, maximum: 200, description: 'Notes to list (default 20).' },
+				folder: { type: 'string', description: 'Only notes under this vault folder.' },
+			},
+			additionalProperties: false,
+		},
+		annotations: READ_ONLY,
+	},
+	{
+		name: 'get_extraction_task',
+		title: 'Get a note to extract from',
+		description:
+			'A note\'s text, the rules for extracting entities and relationships from it, existing entity names to ' +
+			'reuse, and a hash to pass back to submit_extraction.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				note: { type: 'string', description: 'Vault-relative path, as notes_to_analyze lists it.' },
+				max_chars: { type: 'integer', minimum: 1000, maximum: 200000, description: 'Cap on returned text (default 40000).' },
+			},
+			required: ['note'],
+			additionalProperties: false,
+		},
+		annotations: READ_ONLY,
+	},
+	{
+		name: 'submit_extraction',
+		title: 'Add a note\'s entities to the graph',
+		description:
+			'Save the entities and relationships you extracted from a note into the knowledge graph. Refused if the ' +
+			'note changed after get_extraction_task. Items that break the rules are dropped and listed in the result.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				note: { type: 'string', description: 'The note, as get_extraction_task returned it.' },
+				hash: { type: 'string', description: 'The hash get_extraction_task returned.' },
+				entities: {
+					type: 'array',
+					items: {
+						type: 'object',
+						properties: {
+							name: { type: 'string', description: 'Canonical name, 1-4 words.' },
+							entity_type: { type: 'string', enum: [...EXTRACTION_ENTITY_TYPES] },
+							description: { type: 'string', description: 'One short sentence, or empty.' },
+						},
+						required: ['name', 'entity_type'],
+						additionalProperties: false,
+					},
+				},
+				relationships: {
+					type: 'array',
+					items: {
+						type: 'object',
+						properties: {
+							source: { type: 'string', description: 'Name of an entity in this submission.' },
+							target: { type: 'string', description: 'Name of an entity in this submission.' },
+							relationship: { type: 'string', description: 'Active verb, e.g. "develops".' },
+							description: { type: 'string', description: 'Brief context, or empty.' },
+						},
+						required: ['source', 'target', 'relationship'],
+						additionalProperties: false,
+					},
+				},
+			},
+			required: ['note', 'hash', 'entities', 'relationships'],
+			additionalProperties: false,
+		},
+		annotations: ADDITIVE,
+	},
+];
+
+/**
+ * The tools for an engine, plus the write tools while `writer` is enabled.
+ * Checked per request, so turning writes off takes effect at once.
+ */
+export function createToolRegistry(engine: QueryEngine, writer?: GraphWriter): ToolRegistry {
 	const handlers: Record<string, (args: Args) => Promise<unknown>> = {
 		search: async args => {
 			await ready(engine);
@@ -160,12 +252,25 @@ export function createToolRegistry(engine: QueryEngine): ToolRegistry {
 		graph_overview: async () => engine.overview(),
 	};
 
+	const writeHandlers: Record<string, (args: Args, writer: GraphWriter) => Promise<unknown>> = {
+		notes_to_analyze: async (args, w) => w.pending({ limit: args.int('limit'), folder: args.string('folder') }),
+		get_extraction_task: async (args, w) => w.task(args.string('note', true), { maxChars: args.int('max_chars') }),
+		submit_extraction: async (args, w) => w.submit(
+			args.string('note', true),
+			args.string('hash', true),
+			args.list('entities'),
+			args.list('relationships')
+		),
+	};
+
 	return {
-		list: () => TOOL_DEFINITIONS,
+		list: () => (writer?.enabled ? [...TOOL_DEFINITIONS, ...WRITE_TOOL_DEFINITIONS] : TOOL_DEFINITIONS),
 		call(name, rawArgs) {
 			const handler = Object.prototype.hasOwnProperty.call(handlers, name) ? handlers[name] : undefined;
-			if (!handler) return undefined;
-			return run(() => handler(new Args(rawArgs)));
+			if (handler) return run(() => handler(new Args(rawArgs)));
+			const write = Object.prototype.hasOwnProperty.call(writeHandlers, name) ? writeHandlers[name] : undefined;
+			if (write && writer?.enabled) return run(() => write(new Args(rawArgs), writer));
+			return undefined;
 		},
 	};
 }
@@ -240,6 +345,14 @@ class Args {
 			throw new ArgumentError(`"${key}" must be a list of strings.`);
 		}
 		return value as string[];
+	}
+
+	/** A required list; its items are checked by whoever uses them. */
+	list(key: string): unknown[] {
+		const value = this.raw[key];
+		if (value === undefined || value === null) throw new ArgumentError(`"${key}" is required.`);
+		if (!Array.isArray(value)) throw new ArgumentError(`"${key}" must be a list.`);
+		return value;
 	}
 
 	oneOf<T extends string>(key: string, allowed: readonly T[]): T | undefined {

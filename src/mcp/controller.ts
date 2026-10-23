@@ -7,6 +7,7 @@ import { FileSystemAdapter, Platform } from 'obsidian';
 import type SimpleGraphBuilderPlugin from '../main';
 import { BRIDGE_FILENAME, BRIDGE_SOURCE } from './bridge';
 import { claudeCodeCommand, claudeDesktopConfig, codexConfig, endpointUrl } from './client-config';
+import { GraphWriter } from './graph-writer';
 import { buildInstructions } from './instructions';
 import { McpDispatcher } from './protocol';
 import { HttpModule, McpHttpServer } from './server';
@@ -55,10 +56,14 @@ export class McpController {
 		const vaultName = this.plugin.app.vault.getName();
 		const dispatcher = new McpDispatcher(
 			{ name: 'simple-graph-builder', title: `Obsidian vault "${vaultName}"`, version: this.plugin.manifest.version },
-			createToolRegistry(engine),
+			createToolRegistry(engine, new GraphWriter(this.plugin, path => this.plugin.querySource.isVisible(path))),
 			() => {
 				const overview = engine.overview();
-				return buildInstructions(vaultName, { notes: overview.notes.total, entities: overview.entities });
+				return buildInstructions(
+					vaultName,
+					{ notes: overview.notes.total, entities: overview.entities },
+					this.plugin.settings.mcpGraphWrites
+				);
 			}
 		);
 		this.token(); // make sure one exists before anything can connect

@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+- **Build the graph with your agent's model, no API key needed.** With the new
+  **Let agents add to the graph** setting (under Agent access, off by default),
+  an agent such as Claude Code, Claude Desktop or Codex can analyze your notes
+  itself: it lists the notes waiting for analysis, reads each one with the same
+  rules the plugin gives its providers, and submits what it found. Results are
+  checked like a provider's, stale ones are refused, and excluded notes stay
+  out of reach. See [Building the graph with an agent](docs/AGENT_ACCESS.md#building-the-graph-with-an-agent).
+- **What's new, once per feature update.** After an update like this one, the
+  plugin shows these notes once. Fix releases are not announced, and a fresh
+  install shows nothing. Turn it off with **Show what's new after updates**,
+  under Support in settings.
+
 ## 0.8.1: analysis you can size up first
 
 - **Vault analysis says what it will send.** **Start analysis** first counts the

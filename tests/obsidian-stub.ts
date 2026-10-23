@@ -74,3 +74,5 @@ export class FileSystemAdapter {
   getBasePath() { return this.base; }
   getFullPath(path: string) { return `${this.base}/${path}`; }
 }
+export class Component { load() { /* stub */ } unload() { /* stub */ } }
+export const MarkdownRenderer = { render: async () => undefined };

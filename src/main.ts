@@ -17,6 +17,7 @@ import { QueryEngine } from './query/engine';
 import { ObsidianVaultSource } from './query/obsidian-source';
 import { loadHashes, renameNoteHash, saveHashes } from './graph/hashes';
 import { McpController } from './mcp/controller';
+import { showReleaseNotesIfUpdated } from './ui/release-notes-modal';
 import { ImportRegistry } from './import/registry';
 import { ImportModal } from './ui/import-modal';
 
@@ -25,11 +26,14 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	graphCache: GraphCache;
 	/** Search and lookup over graph + vault, shared by the search modal and MCP. */
 	queryEngine: QueryEngine;
-	private querySource: ObsidianVaultSource;
+	/** The vault side of the query engine; also decides which notes agents may see. */
+	querySource: ObsidianVaultSource;
 	/** Agent access: the local MCP server. */
 	mcp: McpController;
 	/** Exclusion settings the query index was built under. */
 	private indexedExclusions = '';
+	/** No settings were stored before this load: nothing to announce. */
+	private freshInstall = false;
 	/** med-lit projects imported into the vault, and the files each one owns. */
 	imports: ImportRegistry;
 	/** Marks vault writes the plugin made, so they don't look like user edits. */
@@ -196,6 +200,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			this.repairNoteLayer(false);
 			this.registerIndexEvents();
 			if (this.settings.mcpEnabled) void this.mcp.start();
+			void showReleaseNotesIfUpdated(this, this.freshInstall);
 		});
 	}
 
@@ -364,6 +369,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 
 	async loadSettings() {
 		const data = (await this.loadData()) as PluginData | null;
+		this.freshInstall = !data?.settings;
 
 		// Read the stored version before merging: Object.assign fills a missing
 		// settingsVersion in from DEFAULT_SETTINGS, which would make an

@@ -1,5 +1,6 @@
 import { Notice, MarkdownView, TFile } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
+import type { OntologyExtractionResult, ResolutionStats, Settings } from '../types';
 import { loadHashes, saveHashes, computeNoteHashes, hasNoteChangedByHashes, upgradeLegacyHash, updateNoteHash, removeNoteHash, clearHashes, getNoteHash } from '../graph/hashes';
 import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeNoteLayerIntoCache, removeNoteFromCache } from '../graph/merge';
 import { stripFrontmatter } from '../sync/note-content';
@@ -76,26 +77,12 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		// Hide loading notice
 		loadingNotice.hide();
 
-		// Merge results into graph cache with resolution if embeddings enabled
-		let nodesAdded: number;
-		let nodesMerged = 0;
-		let relationshipsAdded: number;
+		const { nodesAdded, nodesMerged, relationshipsAdded, linksAdded, resolutionStats: stats } =
+			await applyExtraction(plugin, file, content, result);
+
+		// Build resolution stats info
 		let resolutionInfo = '';
-
-		if (plugin.settings.enableEmbeddings) {
-			// Use advanced resolution with embeddings
-			const mergeResult = await mergeExtractionIntoCacheWithResolution(
-				plugin.graphCache,
-				file.path,
-				result,
-				plugin.settings
-			);
-			nodesAdded = mergeResult.nodesAdded;
-			nodesMerged = mergeResult.nodesMerged;
-			relationshipsAdded = mergeResult.relationshipsAdded;
-
-			// Build resolution stats info
-			const stats = mergeResult.resolutionStats;
+		if (stats) {
 			const resolvedParts: string[] = [];
 			if (stats.cached > 0) resolvedParts.push(`${stats.cached} cached`);
 			if (stats.exact > 0) resolvedParts.push(`${stats.exact} exact`);
@@ -105,25 +92,7 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 			if (resolvedParts.length > 0) {
 				resolutionInfo = `\nResolution: ${resolvedParts.join(', ')}`;
 			}
-		} else {
-			// Use basic merge without embeddings
-			const mergeResult = mergeExtractionIntoCache(
-				plugin.graphCache,
-				file.path,
-				result
-			);
-			nodesAdded = mergeResult.nodesAdded;
-			relationshipsAdded = mergeResult.relationshipsAdded;
 		}
-
-		// Build the note layer: a NOTE node, its `mentions` edges, and `links to`
-		// edges for its [[wikilinks]]
-		const linksAdded = mergeNoteLayerIntoCache(plugin.graphCache, plugin.app, file, content);
-
-		// Mirror the result into the vault as real links, when enabled. Ordering
-		// against the hash update does not matter: hashes cover the body only, so
-		// the frontmatter this writes is invisible to change detection.
-		await syncNoteWriteback(plugin, file);
 
 		// Update hash
 		const updatedHashes = updateNoteHash(hashes, file.path, noteHashes.body);
@@ -178,6 +147,50 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 			new Notice(`Analysis failed: ${err.message}`, 5000);
 		}
 	}
+}
+
+/**
+ * Merge one note's extraction into the graph: its entities and relationships,
+ * its note layer, and the vault write-back when that is on. Recording the
+ * note's hash is left to the caller, which knows where hashes are kept.
+ *
+ * Shared by the analyze commands and by results agents submit over MCP.
+ */
+export async function applyExtraction(
+	plugin: SimpleGraphBuilderPlugin,
+	file: TFile,
+	content: string,
+	result: OntologyExtractionResult,
+	settings: Settings = plugin.settings
+): Promise<{ nodesAdded: number; nodesMerged: number; relationshipsAdded: number; linksAdded: number; resolutionStats?: ResolutionStats }> {
+	let nodesAdded: number;
+	let nodesMerged = 0;
+	let relationshipsAdded: number;
+	let resolutionStats: ResolutionStats | undefined;
+
+	// Merge results into graph cache with resolution if embeddings enabled
+	if (settings.enableEmbeddings) {
+		const mergeResult = await mergeExtractionIntoCacheWithResolution(plugin.graphCache, file.path, result, settings);
+		nodesAdded = mergeResult.nodesAdded;
+		nodesMerged = mergeResult.nodesMerged;
+		relationshipsAdded = mergeResult.relationshipsAdded;
+		resolutionStats = mergeResult.resolutionStats;
+	} else {
+		const mergeResult = mergeExtractionIntoCache(plugin.graphCache, file.path, result);
+		nodesAdded = mergeResult.nodesAdded;
+		relationshipsAdded = mergeResult.relationshipsAdded;
+	}
+
+	// Build the note layer: a NOTE node, its `mentions` edges, and `links to`
+	// edges for its [[wikilinks]]
+	const linksAdded = mergeNoteLayerIntoCache(plugin.graphCache, plugin.app, file, content);
+
+	// Mirror the result into the vault as real links, when enabled. Ordering
+	// against the hash update does not matter: hashes cover the body only, so
+	// the frontmatter this writes is invisible to change detection.
+	await syncNoteWriteback(plugin, file);
+
+	return { nodesAdded, nodesMerged, relationshipsAdded, linksAdded, resolutionStats };
 }
 
 /**
@@ -284,44 +297,10 @@ export async function analyzeFile(
 		const mode = plugin.settings.extractionMode || 'standard';
 		const { result } = await extractOntologyChunked(extractionOptions, truncatedContent, existingNodeNames, mode);
 
-		// Merge results into graph cache with resolution if embeddings enabled
-		let nodesAdded: number;
-		let nodesMerged = 0;
-		let relationshipsAdded: number;
-
-		if (plugin.settings.enableEmbeddings) {
-			const mergeResult = await mergeExtractionIntoCacheWithResolution(
-				plugin.graphCache,
-				file.path,
-				result,
-				plugin.settings
-			);
-			nodesAdded = mergeResult.nodesAdded;
-			nodesMerged = mergeResult.nodesMerged;
-			relationshipsAdded = mergeResult.relationshipsAdded;
-		} else {
-			const mergeResult = mergeExtractionIntoCache(
-				plugin.graphCache,
-				file.path,
-				result
-			);
-			nodesAdded = mergeResult.nodesAdded;
-			relationshipsAdded = mergeResult.relationshipsAdded;
-		}
-
-		// Process internal links ([[wikilinks]])
-		mergeNoteLayerIntoCache(plugin.graphCache, plugin.app, file, content);
-
-		await syncNoteWriteback(plugin, file);
+		const { nodesAdded, nodesMerged, relationshipsAdded } = await applyExtraction(plugin, file, content, result);
 
 		// Update hash in the passed hashes object
-		const existingIndex = hashes.hashes.findIndex(h => h.path === file.path);
-		const hashRecord = { path: file.path, hash: noteHashes.body, analyzedAt: Date.now() };
-		if (existingIndex >= 0) {
-			hashes.hashes[existingIndex] = hashRecord;
-		} else {
-			hashes.hashes.push(hashRecord);
-		}
+		updateNoteHash(hashes, file.path, noteHashes.body);
 
 		return { success: true, skipped: false, nodesAdded, nodesMerged, relationshipsAdded };
 	} catch (error) {

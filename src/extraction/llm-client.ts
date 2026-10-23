@@ -722,10 +722,9 @@ function toStringId(value: unknown, fallback: string): string {
  * Parse entities from parsed JSON object.
  * Handles both new schema (entities) and legacy schema (nodes).
  */
-function parseEntities(parsed: Record<string, unknown>): RawExtractionNode[] {
+function parseEntities(parsed: Record<string, unknown>, dropped: DroppedItem[]): RawExtractionNode[] {
 	const rawEntities = (parsed.entities ?? []) as Record<string, unknown>[];
 	const nodes: RawExtractionNode[] = [];
-	const dropped: { index: number; violations: SchemaViolation[] }[] = [];
 	let idCounter = 1;
 
 	for (const [index, entity] of rawEntities.entries()) {
@@ -735,7 +734,7 @@ function parseEntities(parsed: Record<string, unknown>): RawExtractionNode[] {
 
 		const violations = validateAgainstSchema(candidate, ENTITY_ITEM_SCHEMA, `$.entities[${index}]`);
 		if (violations.length) {
-			dropped.push({ index, violations });
+			dropped.push({ kind: 'entities', index, violations });
 			continue;
 		}
 
@@ -752,7 +751,6 @@ function parseEntities(parsed: Record<string, unknown>): RawExtractionNode[] {
 		});
 	}
 
-	reportDropped('entities', dropped);
 	return nodes;
 }
 
@@ -783,8 +781,8 @@ function resolveId(
 		return id;
 	}
 
-	// Try to resolve as a name
-	return nameToId.get(normalizeKey(id)) || id;
+	// Try to resolve as a name; anything else names no extracted entity.
+	return nameToId.get(normalizeKey(id)) ?? '';
 }
 
 
@@ -795,11 +793,11 @@ function resolveId(
 function parseRelationships(
 	parsed: Record<string, unknown>,
 	nodes: RawExtractionNode[],
-	nameToId: Map<string, string>
+	nameToId: Map<string, string>,
+	dropped: DroppedItem[]
 ): RawExtractionRelationship[] {
 	const rawRelationships = (parsed.relationships ?? []) as Record<string, unknown>[];
 	const relationships: RawExtractionRelationship[] = [];
-	const dropped: { index: number; violations: SchemaViolation[] }[] = [];
 
 	for (const [index, rel] of rawRelationships.entries()) {
 		const violations = validateAgainstSchema(
@@ -808,7 +806,7 @@ function parseRelationships(
 			`$.relationships[${index}]`
 		);
 		if (violations.length) {
-			dropped.push({ index, violations });
+			dropped.push({ kind: 'relationships', index, violations });
 			continue;
 		}
 
@@ -817,9 +815,11 @@ function parseRelationships(
 		const sourceId = resolveId(rel.source, nodes, nameToId);
 		const targetId = resolveId(rel.target, nodes, nameToId);
 		if (!sourceId || !targetId) {
+			const missing = sourceId ? 'target' : 'source';
 			dropped.push({
+				kind: 'relationships',
 				index,
-				violations: [{ path: `$.relationships[${index}]`, message: 'endpoint is not a known entity' }],
+				violations: [{ path: `$.relationships[${index}].${missing}`, message: 'names no entity in this extraction' }],
 			});
 			continue;
 		}
@@ -837,7 +837,6 @@ function parseRelationships(
 		});
 	}
 
-	reportDropped('relationships', dropped);
 	return relationships;
 }
 
@@ -869,7 +868,28 @@ function parseOntologyResponse(response: string): OntologyExtractionResult {
 		);
 	}
 
-	const nodes = parseEntities(parsed);
+	const { result, dropped } = parseExtraction(parsed);
+	reportDropped(dropped);
+	return result;
+}
+
+/** An entity or relationship left out of a result, and why. */
+export interface DroppedItem {
+	kind: 'entities' | 'relationships';
+	index: number;
+	violations: SchemaViolation[];
+}
+
+/**
+ * Turn an extraction payload that passed validateEnvelope into a result.
+ *
+ * Shared by provider replies and by results an agent submits over MCP, so both
+ * go through the same checks. Items that break the schema are dropped and
+ * listed rather than failing the whole payload.
+ */
+export function parseExtraction(parsed: Record<string, unknown>): { result: OntologyExtractionResult; dropped: DroppedItem[] } {
+	const dropped: DroppedItem[] = [];
+	const nodes = parseEntities(parsed, dropped);
 
 	// Build name-to-id map for relationship resolution
 	const nameToId = new Map<string, string>();
@@ -877,9 +897,9 @@ function parseOntologyResponse(response: string): OntologyExtractionResult {
 		nameToId.set(normalizeKey(node.properties.name), node.id);
 	}
 
-	const relationships = parseRelationships(parsed, nodes, nameToId);
+	const relationships = parseRelationships(parsed, nodes, nameToId, dropped);
 
-	return { nodes, relationships };
+	return { result: { nodes, relationships }, dropped };
 }
 
 /**
@@ -888,7 +908,7 @@ function parseOntologyResponse(response: string): OntologyExtractionResult {
  * malformed items are reported and dropped by parseEntities /
  * parseRelationships instead, so one bad entity cannot discard a whole chunk.
  */
-function validateEnvelope(parsed: unknown): SchemaViolation[] {
+export function validateEnvelope(parsed: unknown): SchemaViolation[] {
 	return validateAgainstSchema(parsed, {
 		type: 'object',
 		required: ['entities', 'relationships'],
@@ -902,12 +922,15 @@ function validateEnvelope(parsed: unknown): SchemaViolation[] {
 /**
  * Report dropped items once per chunk rather than once per item.
  */
-function reportDropped(kind: string, dropped: { index: number; violations: SchemaViolation[] }[]): void {
-	if (!dropped.length) return;
-	const detail = dropped
-		.map((d) => `[${d.index}] ${d.violations.map((v) => `${v.path}: ${v.message}`).join(', ')}`)
-		.join(' | ');
-	console.warn(
-		`[simple-graph-builder] Dropped ${dropped.length} ${kind} that violated the extraction schema: ${detail}`
-	);
+function reportDropped(dropped: DroppedItem[]): void {
+	for (const kind of ['entities', 'relationships'] as const) {
+		const ofKind = dropped.filter((d) => d.kind === kind);
+		if (!ofKind.length) continue;
+		const detail = ofKind
+			.map((d) => `[${d.index}] ${d.violations.map((v) => `${v.path}: ${v.message}`).join(', ')}`)
+			.join(' | ');
+		console.warn(
+			`[simple-graph-builder] Dropped ${ofKind.length} ${kind} that violated the extraction schema: ${detail}`
+		);
+	}
 }

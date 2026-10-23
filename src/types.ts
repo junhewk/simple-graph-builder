@@ -434,6 +434,8 @@ export interface Settings {
 	// Agent access (MCP). Desktop only, off by default: a local HTTP server.
 	mcpEnabled: boolean;
 	mcpPort: number;                 // default: 27180
+	/** Let agents add their own extractions to the graph. Off by default: the only MCP tools that write. */
+	mcpGraphWrites: boolean;
 	/** Node executable for the Claude Desktop bridge; GUI apps on macOS often lack the shell PATH. */
 	mcpNodePath: string;
 	/**
@@ -442,6 +444,10 @@ export interface Settings {
 	 * the vault's config folder.
 	 */
 	mcpToken: string;
+	// What's new after updates
+	showReleaseNotes: boolean;
+	/** The version that last ran here; empty on installs that predate release notes. */
+	lastSeenVersion: string;
 	// Migration bookkeeping. Bump when a migration step is added; see
 	// src/settings-migration.ts.
 	settingsVersion: number;

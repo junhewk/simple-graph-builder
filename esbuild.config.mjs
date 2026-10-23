@@ -39,6 +39,8 @@ const context = await esbuild.context({
 	logLevel: "info",
 	sourcemap: prod ? false : "inline",
 	treeShaking: true,
+	// The changelog is bundled for the "what's new" window shown after updates.
+	loader: { ".md": "text" },
 	outfile: "main.js",
 	minify: prod,
 });

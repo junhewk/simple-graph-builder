@@ -60,6 +60,7 @@ for (const file of files) {
 				'--platform=node',
 				'--format=cjs',
 				`--alias:obsidian=${join(here, stub)}`,
+				'--loader:.md=text',
 				`--outfile=${bundle}`,
 				'--log-level=error',
 			],

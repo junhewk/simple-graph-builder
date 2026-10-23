@@ -51,7 +51,7 @@ Traditional knowledge graphs often require complex schemas with dozens of entity
 - **Notes in the graph**: Each analyzed note becomes a node linked to the entities it mentions and the notes it wikilinks
 - **Interactive graph view**: Search the graph in place, inspect and walk its relationships, focus on a neighborhood, find paths, and adjust appearance, forces and clusters live. Fast on graphs of thousands of nodes
 - **Advanced search**: Notes and entities ranked by text match plus graph proximity (Personalized PageRank, as in HippoRAG [6]), with an explanation for every result and no API calls
-- **Agent access (MCP)**: Let Claude Code, Claude Desktop or Codex search your vault and knowledge graph through a local, token-protected, read-only MCP server
+- **Agent access (MCP)**: Let Claude Code, Claude Desktop or Codex search your vault and knowledge graph through a local, token-protected MCP server, and optionally build the graph with their own model instead of an API key
 - **med-lit import**: Bring a [med-lit-mcp](https://github.com/junhewk/med-lit-mcp) literature review (articles, wiki pages and its knowledge graph) into your vault, merged into your graph and kept up to date by re-importing
 - **Vault write-back** (opt-in): Mirror the graph into your vault as real Obsidian links, so it also appears in Obsidian's graph view, backlinks and properties
 - **Multiple LLM providers**: Claude, OpenAI, Gemini, DeepSeek, and local servers (Ollama, or anything OpenAI-compatible such as llama.cpp, LM Studio and vLLM), with reasoning-effort control
@@ -80,7 +80,7 @@ Traditional knowledge graphs often require complex schemas with dozens of entity
 
 ## Quick start
 
-1. Choose a provider and enter its API key in **Settings → Simple Graph Builder** (or point it at a local server)
+1. Choose a provider and enter its API key in **Settings → Simple Graph Builder** (or point it at a local server, or [let a connected agent do the analysis](https://github.com/junhewk/simple-graph-builder/blob/master/docs/AGENT_ACCESS.md#building-the-graph-with-an-agent))
 2. Open a note and run **Analyze current note**, or **Analyze entire vault** from settings
 3. Run **Open graph view**, and type in its search box to find your way in
 
@@ -137,6 +137,7 @@ because DeepSeek counts thinking against it.
 ## API costs
 
 Only note analysis calls an API. Search, the graph view and agent access make no API calls.
+When an agent analyzes notes for you, it uses its own model, billed however that agent is.
 
 - **Claude, OpenAI, Gemini, DeepSeek**: Each note analysis costs your provider's pricing
 - **Local servers**: Free (runs on your machine)
@@ -154,7 +155,7 @@ If [entity resolution](https://github.com/junhewk/simple-graph-builder/blob/mast
 - Analyzing the current note and auto-analysis read only the individual note being processed
 - No data is stored externally; all graph data stays in your vault ([where](https://github.com/junhewk/simple-graph-builder/blob/master/docs/DATA_MODEL.md#where-the-data-lives))
 - **Importing a med-lit project** reads its folder on your computer and copies its pages into the vault. It makes no API calls, unless you choose embedding-based matching
-- **Agent Access** (off by default) serves your notes to AI agents you connect. They see notes, not your API keys or settings, and never your excluded notes. What an agent does with what it reads (for example, sending it to its own model provider) is governed by that agent
+- **Agent Access** (off by default) serves your notes to AI agents you connect. They see notes, not your API keys or settings, and never your excluded notes. What an agent does with what it reads (for example, sending it to its own model provider) is governed by that agent. Agents can change the graph only if you turn on **Let agents add to the graph**, and never your notes' text
 
 ### If you version-control your vault
 
