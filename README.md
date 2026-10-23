@@ -8,36 +8,21 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
-## What's new in 0.8.1
+## What's new in 0.9.0: build the graph with your agent
 
-- **Vault analysis says what it will send.** **Analyze entire vault** first
-  counts the new and changed notes, then asks with those numbers before anything
-  goes to your provider.
-- **Auto-analyze on save is easier to find**, at the top of the Analysis
-  settings.
-- **A shorter settings page.** On Obsidian 1.13 and later, advanced sections
-  open on pages of their own, and rows are one line high.
-- A long node inspector no longer covers the search box in the graph view.
+- **No API key needed.** Turn on **Let agents add to the graph** under Agent
+  access, and an agent you already use, such as Claude Code, Claude Desktop or
+  Codex, analyzes your notes with its own model. Ask it to "analyze the notes in
+  my Projects folder": it lists the notes waiting for analysis, reads each one
+  with the same rules the plugin gives its providers, and adds what it found.
+- **Checked like any analysis.** Results go through the same checks as a
+  provider's reply, a result for a note that changed meanwhile is refused, and
+  excluded notes stay out of reach. Agents add to the graph, never to your
+  notes' text.
+- **What's new, once.** After a feature update, the plugin shows its release
+  notes once. Turn that off under Support in settings.
 
-## What's new in 0.8.0: explore the graph
-
-The graph view becomes a tool for reading your notes through the graph, not
-just a picture of it:
-
-- **Search inside the graph.** Matches light up on the map, and a separate list
-  shows what the graph reached *without* matching your words, with the
-  relationship that connects each one.
-- **Inspector, focus and paths.** Click a node for its relationships, its source
-  notes and the trail you took to it. Show one or two hops around it, or the
-  shortest connection to another node.
-- **Display, forces and clusters.** Adjust node and edge size, color and
-  opacity, filter by type, tune the layout's forces, and color or pull
-  together clusters found from the graph itself. Every change applies live.
-- **A layout that is fast and stays put.** The graph shows at once and settles
-  in the background. Positions are remembered, so the map keeps its shape
-  between sessions and after each analysis.
-
-See [Graph View](https://github.com/junhewk/simple-graph-builder/blob/master/docs/GRAPH_VIEW.md).
+See [Building the graph with an agent](https://github.com/junhewk/simple-graph-builder/blob/master/docs/AGENT_ACCESS.md#building-the-graph-with-an-agent).
 Earlier releases are in the [changelog](https://github.com/junhewk/simple-graph-builder/blob/master/CHANGELOG.md).
 
 ## Why a lightweight ontology?
