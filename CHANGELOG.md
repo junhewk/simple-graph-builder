@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.0: build the graph with your agent
 
 - **Build the graph with your agent's model, no API key needed.** With the new
   **Let agents add to the graph** setting (under Agent access, off by default),
