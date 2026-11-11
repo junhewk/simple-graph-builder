@@ -23,6 +23,17 @@
 
 See [Literature search](docs/LITERATURE_SEARCH.md).
 
+### Review fixes
+
+- Guard the literature action's language lookup with the Obsidian 1.8.7 API
+  version check. Obsidian 1.7.2 remains supported, using the English label.
+- Resolve the query-expression escape, article-URL control-character check and
+  cache iterator assertion warnings without changing their validation behavior.
+- Update the official Obsidian review rules and load their rule sets correctly.
+  Local lint and release CI now reject errors and warnings, including unsupported
+  APIs. Use the active document for graph themes and background write-back checks
+  so they also follow the focused popout window.
+
 ### Upgrading
 
 Existing notes, extraction settings, graph data and import formats are preserved.

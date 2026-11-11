@@ -50,6 +50,10 @@ async function main() {
 	for (const url of ['javascript:alert(1)', 'data:text/html,x', 'file:///etc/passwd', 'obsidian://new', 'https://user:pass@example.org', 'https://localhost/a', 'not a URL']) {
 		assert.equal(safeArticleUrl(url), undefined, url);
 	}
+	for (let code = 0; code <= 32; code++) {
+		assert.equal(safeArticleUrl(`https://example.org/a${String.fromCharCode(code)}b`), undefined, `reject raw ASCII control/space ${code}`);
+	}
+	assert.equal(safeArticleUrl('https://example.org/a%20b'), 'https://example.org/a%20b', 'encoded spaces remain valid');
 	const oaLink = { kind: 'open-access' as const, label: 'OA landing page', url: 'https://example.org/article' };
 	assert.deepEqual(preferredLink([pubmed, { ...oa, accessLinks: [oaLink] }]), oaLink);
 	const opened: string[] = [];

@@ -20,8 +20,11 @@ assert.equal(compileQuery(draft, 'pubmed').query, '("simulation"[tiab] OR "SBME"
 assert.equal(compileQuery(draft, 'openalex').query, '("simulation" OR "SBME") AND ("deliberate practice")');
 draft.groups = [{ expressions: ['의학교육'.normalize('NFD'), '의학교육'] }];
 assert.equal(compileQuery(draft, 'openalex').query, '("의학교육")', 'NFC is used without translation or bigram expansion');
-draft.groups[0].expressions = ['x" OR "y'];
-assert.throws(() => compileQuery(draft, 'pubmed'), /plain expressions/);
+for (const expression of ['x" OR "y', 'practice[tiab]', 'practice]', 'practice\\feedback', 'practice\nfeedback', 'practice\rfeedback']) {
+	draft.groups[0].expressions = [expression];
+	assert.throws(() => compileQuery(draft, 'pubmed'), /plain expressions/);
+	assert.throws(() => compileQuery(draft, 'openalex'), /plain expressions/);
+}
 draft.nativeOverrides.pubmed = '(asthma[MeSH Terms]) AND education[tiab]';
 assert.equal(compileQuery(draft, 'pubmed').scope, 'provider-native query');
 draft.groups = [];

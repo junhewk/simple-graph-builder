@@ -1,5 +1,8 @@
-import { getLanguage } from 'obsidian';
+import { getLanguage, requireApiVersion } from 'obsidian';
 
 export function findLiteratureLabel(): string {
-	return typeof getLanguage === 'function' && getLanguage().startsWith('ko') ? '다음 문헌 검색…' : 'Find more literature…';
+	if (requireApiVersion('1.8.7')) {
+		return getLanguage().startsWith('ko') ? '다음 문헌 검색…' : 'Find more literature…';
+	}
+	return 'Find more literature…';
 }

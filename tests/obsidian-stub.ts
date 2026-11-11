@@ -36,7 +36,21 @@ export class Modal { constructor(_app?: unknown) { /* stub */ } }
 export class Setting { constructor(_el?: unknown) { /* stub */ } }
 export class WorkspaceLeaf {}
 export function setIcon(_el: unknown, _icon: string) { /* stub */ }
-export function getLanguage() { return 'en'; }
+let appVersion = '1.15.0';
+let appLanguage = 'en';
+export function setObsidianLocale(version: string, language: string) { appVersion = version; appLanguage = language; }
+export function requireApiVersion(version: string) {
+  const current = appVersion.split('.').map(Number);
+  const required = version.split('.').map(Number);
+  for (let index = 0; index < 3; index++) {
+    if (current[index] !== required[index]) return current[index] > required[index];
+  }
+  return true;
+}
+export function getLanguage() {
+  if (!requireApiVersion('1.8.7')) throw new Error('getLanguage is unavailable before Obsidian 1.8.7');
+  return appLanguage;
+}
 export class MarkdownView {}
 export class PluginSettingTab {
   app: any;

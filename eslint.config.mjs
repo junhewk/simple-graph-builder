@@ -20,7 +20,8 @@ export default [
       },
     },
     rules: {
-      ...obsidian.configs.recommended.rules,
+      ...obsidian.ruleConfigs.recommended,
+      ...obsidian.ruleConfigs.recommendedTypeChecked,
       ...tseslint.configs.recommended.rules,
       // The Obsidian review bot also runs these; keep them local so lint
       // catches what the bot would.
@@ -29,6 +30,8 @@ export default [
       "@typescript-eslint/no-misused-promises": "error",
       "@typescript-eslint/unbound-method": "error",
       "@typescript-eslint/no-unnecessary-type-assertion": "error",
+      "no-useless-escape": "error",
+      "no-control-regex": "error",
       "no-restricted-globals": ["error",
         ...["setTimeout", "clearTimeout", "setInterval", "clearInterval", "requestAnimationFrame", "cancelAnimationFrame"]
           .map(name => ({ name, message: `Use window.${name}() for popout window compatibility.` })),

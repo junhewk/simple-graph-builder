@@ -38,7 +38,7 @@ export function identifierKeys(ids: PublicationIds): string[] {
 }
 
 export function safeArticleUrl(value: unknown): string | undefined {
-	if (typeof value !== 'string' || value.length > 2081 || /[\u0000-\u0020]/.test(value)) return undefined;
+	if (typeof value !== 'string' || value.length > 2081 || Array.from(value).some(char => char.charCodeAt(0) <= 32)) return undefined;
 	try {
 		const url = new URL(value);
 		if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || !url.hostname ||

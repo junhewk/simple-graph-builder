@@ -44,7 +44,7 @@ export function compileQuery(draft: LiteratureQueryDraft, source: LiteratureSour
 			});
 			if (expressions.length < 1 || expressions.length > 5) throw new Error('Each concept needs one to five alternative expressions.');
 			return '(' + expressions.map(expression => {
-				if (expression.length > 200 || /["\\\[\]\r\n]/.test(expression)) {
+				if (expression.length > 200 || /["\\[\]\r\n]/.test(expression)) {
 					throw new Error('Use plain expressions up to 200 characters, without quotes, brackets or backslashes. Use a source query edit for native syntax.');
 				}
 				return `"${expression}"${source === 'pubmed' ? '[tiab]' : ''}`;

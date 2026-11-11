@@ -96,7 +96,7 @@ const REACHED_LIMIT = 15;
  * entity-type colour on both backgrounds.
  */
 function themeColors(): { edge: string; label: string; highlight: string; accent: string } {
-	return document.body.hasClass('theme-dark')
+	return activeDocument.body.hasClass('theme-dark')
 		? { edge: '#cbd5e1', label: '#a8a8a8', highlight: '#ffffff', accent: '#fbbf24' }
 		: { edge: '#64748b', label: '#5c6370', highlight: '#1e1e1e', accent: '#d97706' };
 }
@@ -746,7 +746,7 @@ export class GraphView extends ItemView {
 		// WebGL is a plain canvas-renderer flag in cytoscape 3.31+. It falls back
 		// to 2D above zoom 7.99, which maxZoom below keeps out of reach, so it
 		// stays active at every zoom level the user can get to.
-		const dark = document.body.hasClass('theme-dark');
+		const dark = activeDocument.body.hasClass('theme-dark');
 		const rendererOptions = {
 			webgl: supportsWebgl(),
 			// The WebGL renderer reads this but cytoscape's bundled .d.ts doesn't

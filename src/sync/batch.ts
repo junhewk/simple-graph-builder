@@ -42,7 +42,7 @@ export interface WriteBackResult {
  * real async I/O, so the event loop still turns either way.
  */
 function yieldToUi(): Promise<void> {
-	if (typeof document !== 'undefined' && document.hidden) return Promise.resolve();
+	if (typeof activeDocument !== 'undefined' && activeDocument.hidden) return Promise.resolve();
 	return new Promise(resolve => window.setTimeout(resolve, 0));
 }
 

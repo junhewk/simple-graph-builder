@@ -62,8 +62,15 @@ abstracts and a second search started before the first finishes.
 Run `npm test`, `npm run build` and `npm run lint` before releasing. The release
 metadata must agree across `package.json`, `manifest.json`, `versions.json` and
 the first changelog section. Every pushed tag publishes through the workflow.
+Release CI runs lint as well as build and tests. Lint uses the official Obsidian
+rule-only recommended and type-checked presets, checks APIs against
+`manifest.json`'s `minAppVersion`, and rejects warnings. When updating the ESLint
+plugin, use `ruleConfigs` for these rule objects; `configs.recommended` is a flat
+configuration array and does not expose a `.rules` property.
+If an existing release tag is updated for a same-version review fix, the workflow
+validates and attests the new build before replacing its three release files.
 
-The 0.10.0 acceptance run on November 11, 2026 passed all 47 suites, production
+The 0.10.0 acceptance run on November 11, 2026 passed all 48 suites, production
 build and lint, and live PubMed/OpenAlex retrieval without keys. In Obsidian
 1.15.0 on macOS, both inspector traversal and the two-step path action retained
 `Simulation —provides→ Feedback ←uses— Deliberate practice`. An edited query

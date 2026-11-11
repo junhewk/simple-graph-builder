@@ -47,9 +47,9 @@ export class LiteratureService {
 			this.cache.set(key, { page, at });
 			// Bound both page count and actual records (a page may contain 50 records).
 			while (this.cache.size > 25 || [...this.cache.values()].reduce((count, entry) => count + entry.page.records.length, 0) > 500) {
-				const oldest = this.cache.keys().next().value as string | undefined;
-				if (oldest === undefined) break;
-				this.cache.delete(oldest);
+				const oldest = this.cache.keys().next();
+				if (oldest.done) break;
+				this.cache.delete(oldest.value);
 			}
 		}
 		return { page, cached: false, at: new Date(at).toISOString() };
