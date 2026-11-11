@@ -26,6 +26,9 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 See [Literature search](docs/LITERATURE_SEARCH.md).
 Earlier releases are in the [changelog](https://github.com/junhewk/simple-graph-builder/blob/master/CHANGELOG.md).
 
+Latest patch: [0.10.1](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.1)
+includes the Obsidian review fixes and adds strict lint checks to release CI.
+
 ## Why a lightweight ontology?
 
 Traditional knowledge graphs often require complex schemas with dozens of entity and relationship types, making them difficult to maintain and query. Simple Graph Builder uses **10 fixed entity types** (PERSON, ORGANIZATION, CONCEPT, PROJECT, TOOL, EVENT, PLACE, DOCUMENT, METHOD, TOPIC), **free-form relationship verbs** ("develops", "uses", "causes", "cites"), and a `detail` on each relationship for nuance without schema explosion. See the [data model](https://github.com/junhewk/simple-graph-builder/blob/master/docs/DATA_MODEL.md).
