@@ -3,6 +3,11 @@
 Search makes no API calls. The first search after Obsidian starts builds an
 index of your notes in memory, and later edits keep it up to date.
 
+This page describes local graph/note search. **Find more literature…** is a
+separate, explicit PubMed/OpenAlex retrieval action from the graph inspector or
+path view. It keeps the graph origin while you edit source-specific queries and
+review publications inside Obsidian. See [Literature search](LITERATURE_SEARCH.md).
+
 There are two ways in:
 
 - **Search graph and notes** (command): a list of notes and entities, for

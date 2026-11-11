@@ -13,8 +13,9 @@ import { DEFAULT_GRAPH_DISPLAY } from './graph/display';
  *     agent access settings (additive)
  * 7 = agents adding extractions to the graph; release notes after updates
  *     (both additive)
+ * 8 = literature search controls (additive; credentials stay outside settings)
  */
-export const CURRENT_SETTINGS_VERSION = 7;
+export const CURRENT_SETTINGS_VERSION = 8;
 
 // The model catalog and the provider/model/key resolver now live with the
 // provider adapters. Re-exported here so existing importers keep working.
@@ -24,6 +25,8 @@ export {
 } from './extraction/providers/models';
 
 export const DEFAULT_SETTINGS: Settings = {
+	literatureContactEmail: '',
+	literaturePageSize: 20,
 	apiProvider: 'claude',
 	apiKey: '',
 	apiKeys: {},

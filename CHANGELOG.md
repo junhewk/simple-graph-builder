@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.10.0: find the next literature from your graph
+
+- **Find more literature from a concept or path.** The graph inspector opens a
+  literature pane with your original graph query, visited concepts, relationship
+  directions and supporting source-note references. Imported evidence quotes
+  remain attached to their sources. Ordinary graphs work too.
+- **Build and edit the search.** Select aliases as OR alternatives within a
+  concept and add separately required concepts with AND. PubMed and OpenAlex
+  each show their own editable query, dates, result limits and search scope.
+- **Read results inside Obsidian.** Inspect citations, available abstracts,
+  source metadata differences, identifiers and reliable “Already in vault”
+  matches. Requests run only when you press Search or request another page;
+  one source failing leaves the other source's results available.
+- **Open an article externally.** Follow an available article landing page,
+  DOI or bibliographic record in your browser. Searching and opening articles
+  create no notes, download no files and make no graph changes.
+- **Independent of graph generation.** Literature retrieval is built into
+  Simple Graph Builder. It needs no model key, agent session, med-lit-mcp or
+  separate backend. Optional literature keys live in Obsidian secret storage,
+  or only in memory on older Obsidian versions.
+
+See [Literature search](docs/LITERATURE_SEARCH.md).
+
+### Upgrading
+
+Existing notes, extraction settings, graph data and import formats are preserved.
+New literature preferences use additive defaults. The graph schema and minimum
+supported Obsidian version remain unchanged.
+
 ## 0.9.0: build the graph with your agent
 
 - **Build the graph with your agent's model, no API key needed.** With the new

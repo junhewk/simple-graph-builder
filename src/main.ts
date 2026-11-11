@@ -20,6 +20,11 @@ import { McpController } from './mcp/controller';
 import { showReleaseNotesIfUpdated } from './ui/release-notes-modal';
 import { ImportRegistry } from './import/registry';
 import { ImportModal } from './ui/import-modal';
+import { LiteratureView, LITERATURE_VIEW_TYPE } from './ui/literature-view';
+import { LiteratureService } from './literature/service';
+import { LiteratureCredentialStore } from './literature/credentials';
+import { findLiteratureLabel } from './literature/labels';
+import type { LiteratureGraphContext } from './literature/types';
 
 export default class SimpleGraphBuilderPlugin extends Plugin {
 	settings: Settings;
@@ -36,6 +41,8 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	private freshInstall = false;
 	/** med-lit projects imported into the vault, and the files each one owns. */
 	imports: ImportRegistry;
+	literature: LiteratureService;
+	literatureCredentials: LiteratureCredentialStore;
 	/** Marks vault writes the plugin made, so they don't look like user edits. */
 	writeGuard = new WriteGuard();
 	private statusBarItem: HTMLElement | null = null;
@@ -67,6 +74,9 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		this.queryEngine = new QueryEngine(this.graphCache, this.querySource);
 		this.indexedExclusions = exclusionKey(this.settings);
 		this.mcp = new McpController(this);
+		this.literature = new LiteratureService();
+		this.literatureCredentials = new LiteratureCredentialStore(this.app);
+		this.registerView(LITERATURE_VIEW_TYPE, leaf => new LiteratureView(leaf, this));
 
 		// Register graph view
 		this.registerView(GRAPH_VIEW_TYPE, (leaf) => new GraphView(leaf, this));
@@ -106,6 +116,17 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			id: 'open-graph-view',
 			name: 'Open graph view',
 			callback: () => void this.activateGraphView(),
+		});
+
+		this.addCommand({
+			id: 'find-more-literature',
+			name: findLiteratureLabel(),
+			checkCallback: checking => {
+				const view = this.app.workspace.getActiveViewOfType(GraphView);
+				if (!view?.hasLiteratureSelection) return false;
+				if (!checking) view.findMoreLiterature();
+				return true;
+			},
 		});
 
 		this.addCommand({
@@ -362,9 +383,22 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	}
 
 	onunload(): void {
+		this.literature?.dispose();
+		this.literatureCredentials?.clearSession();
 		// Flush any pending graph changes
 		void this.graphCache.flush();
 		void this.mcp?.stop();
+	}
+
+	async activateLiteratureView(context: LiteratureGraphContext): Promise<void> {
+		const workspace = this.app.workspace;
+		let leaf = workspace.getLeavesOfType(LITERATURE_VIEW_TYPE)[0];
+		if (!leaf) {
+			leaf = workspace.getLeaf('tab');
+			await leaf.setViewState({ type: LITERATURE_VIEW_TYPE, active: true });
+		}
+		if (leaf.view instanceof LiteratureView) leaf.view.setContext(context);
+		await workspace.revealLeaf(leaf);
 	}
 
 	async loadSettings() {

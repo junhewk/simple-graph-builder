@@ -8,21 +8,22 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
-## What's new in 0.9.0: build the graph with your agent
+## What's new in 0.10.0: find the next literature
 
-- **No API key needed.** Turn on **Let agents add to the graph** under Agent
-  access, and an agent you already use, such as Claude Code, Claude Desktop or
-  Codex, analyzes your notes with its own model. Ask it to "analyze the notes in
-  my Projects folder": it lists the notes waiting for analysis, reads each one
-  with the same rules the plugin gives its providers, and adds what it found.
-- **Checked like any analysis.** Results go through the same checks as a
-  provider's reply, a result for a note that changed meanwhile is refused, and
-  excluded notes stay out of reach. Agents add to the graph, never to your
-  notes' text.
-- **What's new, once.** After a feature update, the plugin shows its release
-  notes once. Turn that off under Support in settings.
+- **Search from a concept or path.** Choose **Find more literature…** in the
+  graph inspector. Keep the route, relationship directions and supporting
+  source notes visible while developing the next search.
+- **Editable searches for PubMed and OpenAlex.** Choose aliases as OR
+  alternatives and separately required concepts with AND. Review each source's
+  actual query, dates and result limits before pressing Search.
+- **Results and abstracts inside Obsidian.** Inspect source metadata,
+  identifiers and reliable matches to articles already in your vault. Open an
+  article landing page in your external browser for access and downloading.
+- **Built into Simple Graph Builder.** This needs no model API key, agent
+  session, med-lit-mcp or separate backend. Searching creates no notes and makes
+  no graph changes.
 
-See [Building the graph with an agent](https://github.com/junhewk/simple-graph-builder/blob/master/docs/AGENT_ACCESS.md#building-the-graph-with-an-agent).
+See [Literature search](docs/LITERATURE_SEARCH.md).
 Earlier releases are in the [changelog](https://github.com/junhewk/simple-graph-builder/blob/master/CHANGELOG.md).
 
 ## Why a lightweight ontology?
@@ -36,6 +37,7 @@ Traditional knowledge graphs often require complex schemas with dozens of entity
 - **Notes in the graph**: Each analyzed note becomes a node linked to the entities it mentions and the notes it wikilinks
 - **Interactive graph view**: Search the graph in place, inspect and walk its relationships, focus on a neighborhood, find paths, and adjust appearance, forces and clusters live. Fast on graphs of thousands of nodes
 - **Advanced search**: Notes and entities ranked by text match plus graph proximity (Personalized PageRank, as in HippoRAG [6]), with an explanation for every result and no API calls
+- **Find more literature**: Develop editable PubMed/OpenAlex searches from explored concepts and paths, inspect citations and abstracts in Obsidian, and open articles externally
 - **Agent access (MCP)**: Let Claude Code, Claude Desktop or Codex search your vault and knowledge graph through a local, token-protected MCP server, and optionally build the graph with their own model instead of an API key
 - **med-lit import**: Bring a [med-lit-mcp](https://github.com/junhewk/med-lit-mcp) literature review (articles, wiki pages and its knowledge graph) into your vault, merged into your graph and kept up to date by re-importing
 - **Vault write-back** (opt-in): Mirror the graph into your vault as real Obsidian links, so it also appears in Obsidian's graph view, backlinks and properties
@@ -69,6 +71,10 @@ Traditional knowledge graphs often require complex schemas with dozens of entity
 2. Open a note and run **Analyze current note**, or **Analyze entire vault** from settings
 3. Run **Open graph view**, and type in its search box to find your way in
 
+With an already prepared graph, start at step 3. Explore a concept or path and
+choose **Find more literature…**; literature retrieval does not require model
+configuration or another graph analysis.
+
 ## Commands
 
 | Command | Description |
@@ -76,6 +82,7 @@ Traditional knowledge graphs often require complex schemas with dozens of entity
 | `Analyze current note` | Extract entities from the active note |
 | `Search graph and notes` | Advanced search over notes and entities (no API calls) |
 | `Open graph view` | Show the knowledge graph |
+| `Find more literature…` | Search PubMed/OpenAlex from the active graph selection; also available in the inspector and path view |
 | `Open note neighborhood panel` | Show the current note's connections in the sidebar |
 | `Remove current note from graph` | Remove the active note from the graph |
 | `Rebuild note layer` | Recreate note nodes and their links from existing data (no API calls) |
@@ -92,6 +99,7 @@ The ribbon icon offers **Analyze current note** and **Open graph view**. The sta
 |---|---|
 | [Graph View](https://github.com/junhewk/simple-graph-builder/blob/master/docs/GRAPH_VIEW.md) | Searching, inspecting and arranging the graph; display, forces, clusters and layout |
 | [Search](https://github.com/junhewk/simple-graph-builder/blob/master/docs/SEARCH.md) | The search command, and how results are ranked |
+| [Literature Search](docs/LITERATURE_SEARCH.md) | Graph origins, editable PubMed/OpenAlex queries, results, abstracts and external article links |
 | [Settings](https://github.com/junhewk/simple-graph-builder/blob/master/docs/SETTINGS.md) | Providers, analysis, exclusions, entity resolution, vault write-back |
 | [Agent Access (MCP)](https://github.com/junhewk/simple-graph-builder/blob/master/docs/AGENT_ACCESS.md) | Connecting Claude Code, Claude Desktop or Codex, the tools they get, and what they can see |
 | [Importing med-lit Projects](https://github.com/junhewk/simple-graph-builder/blob/master/docs/MED_LIT_IMPORT.md) | Importing, updating and removing literature reviews |
@@ -121,7 +129,10 @@ because DeepSeek counts thinking against it.
 
 ## API costs
 
-Only note analysis calls an API. Search, the graph view and agent access make no API calls.
+Local graph/note search, graph exploration and agent access make no provider API calls.
+**Find more literature** makes explicit PubMed/OpenAlex retrieval requests, under
+their current usage allowances; optional literature keys are configured separately.
+Note analysis calls the configured model API.
 When an agent analyzes notes for you, it uses its own model, billed however that agent is.
 
 - **Claude, OpenAI, Gemini, DeepSeek**: Each note analysis costs your provider's pricing
@@ -138,13 +149,14 @@ If [entity resolution](https://github.com/junhewk/simple-graph-builder/blob/mast
 - Your notes are sent to the configured LLM provider for entity extraction. Use a local server for fully local processing
 - **Analyze entire vault** enumerates markdown file paths only when you start it. It reads eligible notes on your computer to count the new and changed ones, and sends nothing until you confirm those numbers
 - Analyzing the current note and auto-analysis read only the individual note being processed
+- **Literature search** sends only submitted queries, filters and configured contact/authentication details to the selected sources. Routes, source passages, vault paths and the local research question stay in Obsidian. Citation results are cached temporarily in memory
 - No data is stored externally; all graph data stays in your vault ([where](https://github.com/junhewk/simple-graph-builder/blob/master/docs/DATA_MODEL.md#where-the-data-lives))
 - **Importing a med-lit project** reads its folder on your computer and copies its pages into the vault. It makes no API calls, unless you choose embedding-based matching
 - **Agent Access** (off by default) serves your notes to AI agents you connect. They see notes, not your API keys or settings, and never your excluded notes. What an agent does with what it reads (for example, sending it to its own model provider) is governed by that agent. Agents can change the graph only if you turn on **Let agents add to the graph**, and never your notes' text
 
 ### If you version-control your vault
 
-Obsidian stores plugin settings — **including your API keys** — in
+Obsidian stores plugin settings — **including extraction and embedding API keys** — in
 `.obsidian/plugins/simple-graph-builder/data.json`, together with the graph
 itself. If your vault is a git repository, add this to your `.gitignore`:
 
@@ -155,6 +167,10 @@ itself. If your vault is a git repository, add this to your `.gitignore`:
 Pushing that file to a public repository publishes your keys in plaintext, and
 deleting it later does not help — git keeps the history. If it has already been
 pushed, revoke the key at your provider's console and issue a new one.
+
+Literature keys use Obsidian secret storage where available and session memory
+on older versions. They are not written to `data.json` or included in a copied
+prepared vault.
 
 ## Technical background
 

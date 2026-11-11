@@ -1,0 +1,28 @@
+{
+  "meta": { "count": 3, "page": 1, "per_page": 2 },
+  "results": [
+    {
+      "id": "https://openalex.org/W10001",
+      "title": "Practice and feedback: alternate title",
+      "ids": { "openalex": "https://openalex.org/W10001", "doi": "https://doi.org/10.1234/example.1", "pmid": "https://pubmed.ncbi.nlm.nih.gov/10001/" },
+      "doi": "https://doi.org/10.1234/example.1",
+      "publication_year": 2024,
+      "type": "article",
+      "authorships": [{ "author": { "display_name": "Jun Kim" } }],
+      "primary_location": { "landing_page_url": "https://doi.org/10.1234/example.1", "source": { "display_name": "Example Journal" } },
+      "best_oa_location": { "is_oa": true, "landing_page_url": "https://example.org/article/10001", "pdf_url": "https://example.org/10001.pdf" },
+      "abstract_inverted_index": { "Practice": [0, 3], "needs": [1], "feedback.": [2], "continues.": [4] }
+    },
+    {
+      "id": "https://openalex.org/W10002",
+      "title": "An identifier-free Korean example: 의도적 연습",
+      "ids": {},
+      "publication_year": 2026,
+      "type": "review",
+      "authorships": [],
+      "primary_location": null,
+      "best_oa_location": { "is_oa": true, "landing_page_url": "javascript:alert(1)" },
+      "abstract_inverted_index": null
+    }
+  ]
+}

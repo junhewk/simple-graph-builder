@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE PubmedArticleSet SYSTEM "https://dtd.nlm.nih.gov/ncbi/pubmed/out/pubmed_250101.dtd">
+<!-- Synthetic saved example for deterministic tests; not a live search response. -->
+<PubmedArticleSet>
+  <PubmedArticle>
+    <MedlineCitation>
+      <PMID>10002</PMID>
+      <Article>
+        <ArticleTitle>A paper without an abstract</ArticleTitle>
+        <Journal><Title>Example Review</Title><JournalIssue><PubDate><MedlineDate>2024 Winter</MedlineDate></PubDate></JournalIssue></Journal>
+        <AuthorList><Author><CollectiveName>Example Group</CollectiveName></Author></AuthorList>
+        <PublicationTypeList/>
+      </Article>
+    </MedlineCitation>
+    <PubmedData><ArticleIdList><ArticleId IdType="pubmed">10002</ArticleId></ArticleIdList></PubmedData>
+  </PubmedArticle>
+  <PubmedArticle>
+    <MedlineCitation>
+      <PMID>10001</PMID>
+      <Article>
+        <ArticleTitle>Practice &amp; <i>feedback</i>: 의학교육</ArticleTitle>
+        <Journal><Title>Example Medical Education</Title><JournalIssue><PubDate><Year>2025</Year><Month>Jun</Month></PubDate></JournalIssue></Journal>
+        <AuthorList><Author><LastName>Kim</LastName><ForeName>Jun</ForeName></Author><Author><LastName>Lee</LastName><Initials>JH</Initials></Author></AuthorList>
+        <Abstract><AbstractText Label="BACKGROUND">A &lt;script&gt;literal&lt;/script&gt; string.</AbstractText><AbstractText Label="RESULTS">Feedback supports practice.</AbstractText></Abstract>
+        <PublicationTypeList><PublicationType>Journal Article</PublicationType><PublicationType>Review</PublicationType></PublicationTypeList>
+      </Article>
+    </MedlineCitation>
+    <PubmedData><ArticleIdList><ArticleId IdType="doi">10.1234/EXAMPLE.1</ArticleId><ArticleId IdType="pmc">PMC10001</ArticleId></ArticleIdList></PubmedData>
+  </PubmedArticle>
+  <PubmedArticle><MedlineCitation><PMID>10003</PMID><Article><ArticleTitle></ArticleTitle><AuthorList/><Abstract><AbstractText> </AbstractText></Abstract></Article></MedlineCitation></PubmedArticle>
+</PubmedArticleSet>

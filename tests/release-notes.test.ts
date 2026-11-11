@@ -3,6 +3,10 @@
  * that the bundled changelog has a section for the version being released.
  */
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import './graph-harness';
 import changelog from '../CHANGELOG.md';
 import manifest from '../manifest.json';
@@ -40,6 +44,17 @@ const sample = [
 ].join('\n');
 
 async function main() {
+	const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));
+	const versions = JSON.parse(readFileSync('versions.json', 'utf8'));
+	assert.equal(packageJson.version, manifest.version, 'package and manifest versions agree');
+	assert.equal(versions[manifest.version], manifest.minAppVersion, 'every release has a compatibility entry');
+	const versionDir = mkdtempSync(join(tmpdir(), 'sgb-version-test-'));
+	try {
+		writeFileSync(join(versionDir, 'manifest.json'), JSON.stringify({ version: '0.9.0', minAppVersion: '1.7.2' }));
+		writeFileSync(join(versionDir, 'versions.json'), JSON.stringify({ '0.9.0': '1.7.2' }));
+		execFileSync(process.execPath, [join(process.cwd(), 'version-bump.mjs')], { cwd: versionDir, env: { ...process.env, npm_package_version: '0.10.0' } });
+		assert.equal(JSON.parse(readFileSync(join(versionDir, 'versions.json'), 'utf8'))['0.10.0'], '1.7.2', 'a new release is recorded even if its minimum app version is unchanged');
+	} finally { rmSync(versionDir, { recursive: true, force: true }); }
 	// Parsing: released sections only, newest first, headings kept as written.
 	const sections = parseChangelog(sample);
 	assert.deepEqual(sections.map(s => s.version), ['0.9.1', '0.9.0', '0.8.1', '0.8.0', '0.7.2']);

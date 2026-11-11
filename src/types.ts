@@ -385,6 +385,9 @@ export type ExtractionMode = 'standard' | 'thorough';
 export type LocalApiStyle = 'ollama' | 'openai';
 
 export interface Settings {
+	/** Literature retrieval has its own controls and credentials, independent of extraction. */
+	literatureContactEmail: string;
+	literaturePageSize: number;
 	apiProvider: ApiProvider;
 	/**
 	 * Legacy single shared key, superseded by `apiKeys` but still honoured as a

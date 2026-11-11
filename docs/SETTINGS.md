@@ -4,6 +4,19 @@ Everything under **Settings → Simple Graph Builder**. The graph view's own
 display and force settings are set in the view itself; see
 [Graph View](GRAPH_VIEW.md#display-and-forces).
 
+## Literature search
+
+- **Contact email:** optional real contact address included with PubMed requests.
+- **PubMed API key / OpenAlex API key:** optional literature credentials, kept
+  separately from extraction keys. Uses Obsidian secret storage when supported,
+  otherwise session memory. No literature key is written into the graph/settings file.
+- **Literature results per page:** 10, 20 (default) or 50 per source, with a
+  100-record source cap. Additional pages require an explicit action.
+- **Clear literature cache:** clears the bounded ten-minute in-memory cache.
+
+These settings work independently of the selected model provider and agent
+access. See [Literature search](LITERATURE_SEARCH.md).
+
 On Obsidian 1.13 and later, **Excluded files** and the sections under
 **Advanced** (agent access, vault write-back, entity resolution and imported
 projects) each open on a page of their own, with their current state shown on

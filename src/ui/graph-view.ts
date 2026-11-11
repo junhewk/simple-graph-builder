@@ -1,9 +1,11 @@
-import { ItemView, WorkspaceLeaf, Notice, debounce } from 'obsidian';
+import { ItemView, WorkspaceLeaf, Notice, TFile, debounce } from 'obsidian';
 import cytoscape from 'cytoscape';
 import fcose from 'cytoscape-fcose';
 import SimpleGraphBuilderPlugin from '../main';
 import { describeWhy } from '../commands/search';
-import { getEntityTypeColor, normalizeKey } from '../types';
+import { getEntityTypeColor, normalizeKey, normalizeUnicode } from '../types';
+import { captureGraphContext, ExplorationTrail, relationshipEvidence } from '../literature/context';
+import { readVaultReferences } from '../literature/vault-index';
 import { refineLayout, spacingForNodeCount, LayoutNode, LayoutEdge } from '../graph/layout';
 import { LiveForces, LiveLayout } from '../graph/live-layout';
 import { Point, PositionStore, REUSE_KNOWN_FRACTION, placeNewNodes } from '../graph/positions';
@@ -426,6 +428,10 @@ export class GraphView extends ItemView {
 	/** Set by "Path to…": the next node picked becomes the path's goal. */
 	private pickingPath = false;
 	private path: { nodes: string[]; edges: string[] } | null = null;
+	private readonly explorationTrail = new ExplorationTrail();
+	private explorationQuery = '';
+	private lastTypedQuery = '';
+	private viewWasTruncated = false;
 
 	private styleFrame: number | null = null;
 	private readonly saveDisplay = debounce(() => {
@@ -507,7 +513,7 @@ export class GraphView extends ItemView {
 			onFit: () => this.fitToFocus(),
 		});
 		this.inspector = new GraphInspector(left, {
-			onNavigate: row => this.pick(row),
+			onNavigate: (row, edgeId) => this.pick(row, edgeId),
 			onOpenNote: path => void this.openNote(path),
 			onClose: () => this.deselect(),
 			onFocusHops: hops => this.setFocusHops(hops),
@@ -524,6 +530,7 @@ export class GraphView extends ItemView {
 				this.pickingPath = false;
 				this.renderInspector();
 			},
+			onFindLiterature: usePath => this.findMoreLiterature(usePath),
 		});
 		this.controls = new GraphControlsPanel(container, this.plugin.settings, this.display, {
 			onDisplayChange: key => this.onDisplayChange(key),
@@ -647,6 +654,7 @@ export class GraphView extends ItemView {
 				.slice(0, MAX_RENDER_EDGES);
 		}
 
+		this.viewWasTruncated = truncated.length > 0;
 		if (truncated.length > 0) {
 			new Notice(`Large graph: trimmed ${truncated.join(' and ')}`);
 		}
@@ -1382,13 +1390,13 @@ export class GraphView extends ItemView {
 	}
 
 	/** Jump to a node picked from a list, or close a path onto it. */
-	private pick(row: NodeRow): void {
+	private pick(row: NodeRow, edgeId?: string): void {
 		if (!row.id) return;
 		if (this.pickingPath && this.selectedNodeId && row.id !== this.selectedNodeId) {
 			this.showPathTo(row.id);
 			return;
 		}
-		this.selectNode(row.id, true);
+		this.selectNode(row.id, true, edgeId);
 	}
 
 	/**
@@ -1396,11 +1404,13 @@ export class GraphView extends ItemView {
 	 * to another extends the trail; returning to a node already on it cuts
 	 * the trail back to that point, like a browser's back stack.
 	 */
-	private selectNode(id: string, center: boolean): void {
+	private selectNode(id: string, center: boolean, edgeId?: string): void {
 		const cy = this.cy;
 		if (!cy) return;
 		const node = cy.getElementById(id);
 		if (node.empty()) return;
+		if (!this.explorationTrail.steps.length) this.explorationQuery = this.searchBar?.query.trim() || this.lastTypedQuery;
+		this.explorationTrail.visit(id, edgeId);
 
 		const previous = this.selectedNodeId;
 		if (previous && previous !== id) {
@@ -1429,6 +1439,8 @@ export class GraphView extends ItemView {
 		if (this.selectedNodeId === null && !this.pickingPath && !this.path) return;
 		this.selectedNodeId = null;
 		this.trail = [];
+		this.explorationTrail.clear();
+		this.explorationQuery = '';
 		this.focusHops = 0;
 		this.pickingPath = false;
 		this.path = null;
@@ -1604,10 +1616,12 @@ export class GraphView extends ItemView {
 			const { relationship, detail } = edgeData(edge);
 			const out = edge.source().id() === node.id();
 			return {
+				edgeId: edge.id(),
 				verb: relationship,
 				direction: out ? 'out' : 'in',
 				other: this.rowFor(out ? edge.target() : edge.source()),
 				detail,
+				evidence: this.edgeEvidence(edge.id()),
 			};
 		});
 
@@ -1618,8 +1632,11 @@ export class GraphView extends ItemView {
 				if (i > 0) {
 					const edge = cy.getElementById(this.path!.edges[i - 1]);
 					step.via = {
+						edgeId: edge.id(),
 						verb: edgeData(edge).relationship,
 						direction: edge.source().id() === this.path!.nodes[i - 1] ? 'out' : 'in',
+						detail: edgeData(edge).detail,
+						evidence: this.edgeEvidence(edge.id()),
 					};
 				}
 				return step;
@@ -1674,6 +1691,7 @@ export class GraphView extends ItemView {
 	private search(query: string): void {
 		const generation = ++this.searchGeneration;
 		const trimmed = query.trim();
+		this.lastTypedQuery = trimmed;
 		if (!trimmed) {
 			this.clearSearch();
 			return;
@@ -1881,6 +1899,8 @@ export class GraphView extends ItemView {
 	private resetExploration(): void {
 		this.selectedNodeId = null;
 		this.trail = [];
+		this.explorationTrail.clear();
+		this.explorationQuery = '';
 		this.focusHops = 0;
 		this.pickingPath = false;
 		this.path = null;
@@ -1904,6 +1924,7 @@ export class GraphView extends ItemView {
 		if (this.selectedNodeId && !exists(this.selectedNodeId)) {
 			this.selectedNodeId = null;
 			this.focusHops = 0;
+			this.explorationTrail.clear();
 		}
 		this.trail = this.selectedNodeId ? this.trail.filter(exists) : [];
 		this.pickingPath = false;
@@ -1920,9 +1941,45 @@ export class GraphView extends ItemView {
 	}
 
 	private async openNote(path: string): Promise<void> {
+		const file = this.app.vault.getAbstractFileByPath(path) ?? this.app.vault.getMarkdownFiles().find(file => normalizeUnicode(file.path) === normalizeUnicode(path));
+		if (!(file instanceof TFile)) { new Notice('This source note is no longer available.'); return; }
 		// From a main-area tab, opening in place would replace the graph itself
 		const inMainArea = this.leaf.getRoot() === this.app.workspace.rootSplit;
-		await this.app.workspace.openLinkText(path, '', inMainArea ? 'tab' : false);
+		await this.app.workspace.openLinkText(file.path, '', inMainArea ? 'tab' : false);
+	}
+
+	get hasLiteratureSelection(): boolean { return this.selectedNodeId !== null; }
+
+	findMoreLiterature(usePath = false): void {
+		const cy = this.cy;
+		if (!cy || !this.selectedNodeId) return;
+		const path = usePath && this.path && this.path.nodes.length > 1 ? this.path : null;
+		const steps = path ? path.nodes.map((nodeId, index) => ({ nodeId, edgeId: index ? path.edges[index - 1] : undefined })) : this.explorationTrail.steps;
+		const selectedNodeId = path ? path.nodes[path.nodes.length - 1] : this.selectedNodeId;
+		const start = cy.getElementById(steps[0]?.nodeId ?? selectedNodeId);
+		const goal = cy.getElementById(selectedNodeId);
+		let distance: number | undefined;
+		if (start.nonempty() && goal.nonempty() && start.visible() && goal.visible()) {
+			const result = cy.elements(':visible').aStar({ root: start, goal, directed: false });
+			if (result.found) distance = result.distance;
+		}
+		const references = readVaultReferences(this.plugin);
+		const context = captureGraphContext(this.plugin.graphCache, {
+			steps, selectedNodeId, originalSearch: this.explorationQuery || undefined,
+			discovery: path ? 'shortest-path' : this.searchRelated.has(selectedNodeId) ? 'propagation' : this.focusHops ? 'neighborhood' : 'selection',
+			neighborhood: this.focusHops === 1 || this.focusHops === 2 ? { anchorNodeId: this.selectedNodeId, hops: this.focusHops } : undefined,
+			distanceFromStart: distance,
+			scope: { includesNoteNodes: cy.nodes('[entityType = "NOTE"]:visible').length > 0,
+				filtered: !this.plugin.settings.graphShowNotes || this.plugin.settings.graphMinDegree > 0 || cy.nodes('.type-hidden').length > 0,
+				truncated: this.viewWasTruncated },
+			historyTruncated: !path && this.explorationTrail.truncated,
+		}, path => references.reference(path));
+		void this.plugin.activateLiteratureView(context);
+	}
+
+	private edgeEvidence(id: string): { path: string; quote?: string }[] {
+		const edge = this.plugin.graphCache.getEdgeById(id);
+		return edge ? relationshipEvidence(edge, path => ({ path, identifiers: {} })) : [];
 	}
 
 	onClose(): Promise<void> {

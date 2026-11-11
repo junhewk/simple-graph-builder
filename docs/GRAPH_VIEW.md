@@ -80,6 +80,13 @@ From the inspector:
 - **Search around** (or double-click a node) ranks the whole vault by how
   closely it connects to that node.
 - **Open note** opens a note node's note.
+- **Find more literature…** opens an editable PubMed/OpenAlex search in a
+  dedicated Obsidian pane. A displayed path has a separate action that retains
+  the path and selects its final concept. See [Literature search](LITERATURE_SEARCH.md).
+
+Relationships with recorded evidence have **Supporting sources** controls.
+Open the note to check an ordinary extraction's passage, or inspect a stored
+imported quote. A relationship detail is not automatically a verbatim quote.
 
 ## Display and forces
 

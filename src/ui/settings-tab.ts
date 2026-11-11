@@ -15,6 +15,7 @@ import { rebuildImportGraph } from '../import/controller';
 import { canReadExternalFolders } from '../import/reader';
 import { parseExcludedPatterns, supportsNativeExclusions } from '../analysis/exclusions';
 import type { McpStatus } from '../mcp/controller';
+import { LiteratureSource, SOURCE_NAMES } from '../literature/types';
 
 interface DeclarativeControl {
 	type: 'toggle' | 'dropdown' | 'text' | 'slider';
@@ -570,6 +571,47 @@ export class SettingsTab extends PluginSettingTab {
 	 * Searchable settings for Obsidian 1.13+. The imperative display() below is
 	 * retained for older supported Obsidian versions.
 	 */
+	private literatureSettings(): DeclarativeSettingDefinition[] {
+		return [{
+			name: 'Contact email',
+			desc: 'Contact address sent with PubMed requests. Recommended by NCBI for distributed software; no account or model provider is required.',
+			render: setting => setting.addText(text => text.setPlaceholder('Contact email (optional)')
+				.setValue(this.plugin.settings.literatureContactEmail).onChange(async value => {
+					this.plugin.settings.literatureContactEmail = value.trim();
+					await this.plugin.saveSettings();
+				})),
+		}, ...(['pubmed', 'openalex'] as LiteratureSource[]).map(source => ({
+			name: `${SOURCE_NAMES[source]} API key (optional)`,
+			desc: this.plugin.literatureCredentials?.persistent
+				? 'Stored in Obsidian secret storage on this device, outside the vault graph/settings. Leave blank to search without a key.'
+				: 'Kept only for this session on this Obsidian version. Leave blank to search without a key.',
+			render: (setting: Setting) => setting.addText(text => {
+				text.inputEl.type = 'password';
+				text.inputEl.autocomplete = 'off';
+				text.setValue(this.plugin.literatureCredentials?.get(source) ?? '').onChange(value => {
+					this.plugin.literatureCredentials?.set(source, value);
+				});
+			}),
+		})), {
+			name: 'Literature results per page',
+			desc: 'Each search is limited to 100 records per source. Additional pages load only when requested.',
+			render: setting => setting.addDropdown(dropdown => {
+				for (const count of [10, 20, 50]) dropdown.addOption(String(count), String(count));
+				dropdown.setValue(String(this.plugin.settings.literaturePageSize)).onChange(async value => {
+					this.plugin.settings.literaturePageSize = Number(value);
+					await this.plugin.saveSettings();
+				});
+			}),
+		}, {
+			name: 'Clear literature cache',
+			desc: 'Cached public citation results stay in memory for up to ten minutes. Searches never create notes or change the graph.',
+			render: setting => setting.addButton(button => button.setButtonText('Clear cache').onClick(() => {
+				this.plugin.literature?.clearCache();
+				new Notice('Literature search cache cleared.');
+			})),
+		}];
+	}
+
 	getSettingDefinitions(): DeclarativeSettingItem[] {
 		const providerLabels: Record<ApiProvider, string> = {
 			claude: 'Claude',
@@ -617,6 +659,7 @@ export class SettingsTab extends PluginSettingTab {
 		});
 
 		return [
+			{ type: 'group', heading: 'Literature search', items: this.literatureSettings() },
 			{
 				type: 'group',
 				heading: 'Provider',
@@ -1010,6 +1053,11 @@ export class SettingsTab extends PluginSettingTab {
 	display(): void {
 		const { containerEl } = this;
 		containerEl.empty();
+		new Setting(containerEl).setName('Literature search').setHeading();
+		for (const definition of this.literatureSettings()) {
+			const setting = new Setting(containerEl).setName(definition.name).setDesc(definition.desc ?? '');
+			definition.render?.(setting);
+		}
 
 		new Setting(containerEl).setName('Provider').setHeading();
 

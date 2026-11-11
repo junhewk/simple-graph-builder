@@ -150,6 +150,9 @@ export function migrateSettings(settings: Settings, storedVersion: number): Migr
 	// DEFAULT_SETTINGS, like v4 and v5. An empty lastSeenVersion is how an
 	// install that predates release notes is recognized.
 
+	// v8 adds literature controls only; credentials never enter data.json.
+	next.literatureContactEmail = typeof next.literatureContactEmail === 'string' ? next.literatureContactEmail.trim() : '';
+	next.literaturePageSize = [10, 20, 50].includes(next.literaturePageSize) ? next.literaturePageSize : 20;
 	next.settingsVersion = CURRENT_SETTINGS_VERSION;
 
 	const changed = notes.length > 0 || storedVersion !== CURRENT_SETTINGS_VERSION;

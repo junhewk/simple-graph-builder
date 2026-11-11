@@ -38,6 +38,41 @@ ANTHROPIC_API_KEY=... OPENAI_API_KEY=... GEMINI_API_KEY=... DEEPSEEK_API_KEY=...
 
 ## Before a release
 
+The literature suites (`npm test -- literature`) exercise Boolean grouping,
+provider wire requests, PubMed XML parsing, OpenAlex abstract reconstruction,
+identifier matching, conflicting provenance, paging, retries, partial failures,
+stale responses, cache bounds and the external URL action. Synthetic API examples
+live in `tests/fixtures/literature`. The XML DOM implementation is a development
+dependency only; production uses the platform's inert `DOMParser`.
+
+`npm run eval -- literature` is a separate live PubMed/OpenAlex smoke test. It
+does not call a model or write a vault. Optional environment variables are
+`SGB_LITERATURE_EMAIL`, `SGB_PUBMED_API_KEY` and `SGB_OPENALEX_API_KEY`.
+
+For the literature UI acceptance check, build and run
+`node scripts/make-literature-test-vault.mjs /tmp/sgb-literature-acceptance`.
+The target must be new or empty. Follow `Start.md` in the generated vault and
+compare note bytes, persisted graph records, hashes and import metadata after
+startup settles versus after searching and opening a publication. Obsidian can
+update its workspace state and the graph can save layout positions separately;
+neither is literature note/graph mutation. Check ordinary graphs and the
+existing imported-graph fixture, empty results, one failing source, missing
+abstracts and a second search started before the first finishes.
+
+Run `npm test`, `npm run build` and `npm run lint` before releasing. The release
+metadata must agree across `package.json`, `manifest.json`, `versions.json` and
+the first changelog section. Every pushed tag publishes through the workflow.
+
+The 0.10.0 acceptance run on November 11, 2026 passed all 47 suites, production
+build and lint, and live PubMed/OpenAlex retrieval without keys. In Obsidian
+1.15.0 on macOS, both inspector traversal and the two-step path action retained
+`Simulation —provides→ Feedback ←uses— Deliberate practice`. An edited query
+returned 20 records per source; an outside-vault publication displayed both
+abstract versions and opened its PMC page in the system browser. Before/after
+hashes and data comparisons confirmed all four fixture notes, persisted graph,
+hashes, imports, resolution cache and embedding metadata were unchanged. Mobile
+and other desktop platforms still need their own native acceptance run.
+
 `docs/TESTING-0.6.0.md` is the step-by-step check written for 0.6.0, the first
 release that wrote into notes. It uses a generated test vault:
 

@@ -78,3 +78,10 @@ Everything stays in your vault, in the plugin folder
 
 If your vault is in git, keep `data.json` out of it; see
 [Privacy](https://github.com/junhewk/simple-graph-builder#privacy).
+
+Literature searches use session-only graph-context snapshots and public
+citation results. Their in-memory cache lasts up to ten minutes, with no graph
+schema or import-format change. Optional literature keys use Obsidian secret
+storage when available, or session memory on older versions; they are not
+added to `data.json`. Searches and external article links create no notes,
+extractions or graph records. See [Literature search](LITERATURE_SEARCH.md).

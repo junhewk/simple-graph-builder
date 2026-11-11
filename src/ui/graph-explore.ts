@@ -1,4 +1,5 @@
 import { setIcon } from 'obsidian';
+import { findLiteratureLabel } from '../literature/labels';
 
 /** One node in a list the user can jump to. */
 export interface NodeRow {
@@ -191,17 +192,19 @@ function renderNodeRow(
 // ============================================
 
 export interface InspectorRelation {
+	edgeId: string;
 	verb: string;
 	/** 'out': this node is the subject; 'in': the other node is. */
 	direction: 'out' | 'in';
 	other: NodeRow;
 	detail?: string;
+	evidence?: { path: string; quote?: string }[];
 }
 
 export interface PathStep {
 	node: NodeRow;
 	/** Edge that led here from the previous step. */
-	via?: { verb: string; direction: 'out' | 'in' };
+	via?: { edgeId: string; verb: string; direction: 'out' | 'in'; detail?: string; evidence?: { path: string; quote?: string }[] };
 }
 
 export interface InspectorData {
@@ -219,13 +222,14 @@ export interface InspectorData {
 }
 
 export interface InspectorCallbacks {
-	onNavigate(row: NodeRow): void;
+	onNavigate(row: NodeRow, edgeId?: string): void;
 	onOpenNote(path: string): void;
 	onClose(): void;
 	onFocusHops(hops: number): void;
 	onSearchAround(): void;
 	onPathStart(): void;
 	onPathCancel(): void;
+	onFindLiterature(usePath: boolean): void;
 }
 
 /** Relations listed before "show all"; hubs can have hundreds. */
@@ -318,6 +322,8 @@ export class GraphInspector {
 		const around = actions.createEl('button', { text: 'Search around' });
 		around.setAttr('aria-label', 'Rank notes and entities by how closely they connect to this node');
 		around.addEventListener('click', () => this.callbacks.onSearchAround());
+		const literature = actions.createEl('button', { text: findLiteratureLabel() });
+		literature.addEventListener('click', () => this.callbacks.onFindLiterature(false));
 
 		if (data.pickingPath) {
 			const cancel = actions.createEl('button', { text: 'Cancel path', cls: 'mod-warning' });
@@ -344,6 +350,8 @@ export class GraphInspector {
 			parent.createDiv({ cls: 'sgb-graph-panel-empty', text: 'No connection between these nodes in the current view.' });
 			return;
 		}
+		const literature = parent.createEl('button', { text: `${findLiteratureLabel()} (${path.length - 1}-step path)` });
+		literature.addEventListener('click', () => this.callbacks.onFindLiterature(true));
 		const list = parent.createDiv({ cls: 'sgb-graph-path' });
 		for (const step of path) {
 			if (step.via) {
@@ -353,6 +361,8 @@ export class GraphInspector {
 				});
 			}
 			renderNodeRow(list, step.node, () => this.callbacks.onNavigate(step.node), path => this.callbacks.onOpenNote(path));
+			if (step.via?.detail) list.createDiv({ text: step.via.detail, cls: 'sgb-graph-node-reason' });
+			this.renderEvidence(list, step.via?.evidence);
 		}
 	}
 
@@ -381,8 +391,9 @@ export class GraphInspector {
 				text: direction === 'out' ? `→ ${verb}` : `← ${verb}`,
 			});
 			for (const relation of group.slice(0, limit - shown)) {
-				const row = renderNodeRow(parent, relation.other, () => this.callbacks.onNavigate(relation.other), path => this.callbacks.onOpenNote(path));
+				const row = renderNodeRow(parent, relation.other, () => this.callbacks.onNavigate(relation.other, relation.edgeId), path => this.callbacks.onOpenNote(path));
 				if (relation.detail) row.createDiv({ cls: 'sgb-graph-node-reason', text: relation.detail });
+				this.renderEvidence(row, relation.evidence);
 				shown++;
 			}
 		}
@@ -407,6 +418,19 @@ export class GraphInspector {
 				evt.preventDefault();
 				this.callbacks.onOpenNote(path);
 			});
+		}
+	}
+
+	private renderEvidence(parent: HTMLElement, evidence?: { path: string; quote?: string }[]): void {
+		if (!evidence?.length) return;
+		const details = parent.createEl('details', { cls: 'sgb-graph-evidence' });
+		details.addEventListener('click', event => event.stopPropagation());
+		details.createEl('summary', { text: `Supporting sources (${new Set(evidence.map(ref => ref.path)).size})` });
+		for (const ref of evidence) {
+			const link = details.createEl('button', { text: noteName(ref.path) });
+			link.setAttr('title', ref.path);
+			link.addEventListener('click', () => this.callbacks.onOpenNote(ref.path));
+			if (ref.quote) details.createEl('blockquote', { text: ref.quote });
 		}
 	}
 }
