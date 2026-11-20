@@ -60,8 +60,9 @@ existing imported-graph fixture, empty results, one failing source, missing
 abstracts and a second search started before the first finishes.
 
 Run `npm test`, `npm run build` and `npm run lint` before releasing. The release
-metadata must agree across `package.json`, `manifest.json`, `versions.json` and
-the first changelog section. Every pushed tag publishes through the workflow.
+metadata must agree across `package.json`, `package-lock.json`, `manifest.json`,
+`versions.json` and the first changelog section. Every pushed tag publishes
+through the workflow.
 Release CI runs lint as well as build and tests. Lint uses the official Obsidian
 rule-only recommended and type-checked presets, checks APIs against
 `manifest.json`'s `minAppVersion`, and rejects warnings. When updating the ESLint
@@ -69,6 +70,16 @@ plugin, use `ruleConfigs` for these rule objects; `configs.recommended` is a fla
 configuration array and does not expose a `.rules` property.
 If an existing release tag is updated for a same-version review fix, the workflow
 validates and attests the new build before replacing its three release files.
+
+The 0.10.2 UI check in Obsidian 1.15.1 on macOS verified direct entry with
+Enter, graph path suggestions with **Add AND condition**, and moving a selected
+OR alternative to its own AND group. Both previews updated before **Search**.
+After changing `Uncertainty sampling` to `Active learning` and searching again,
+PubMed reported 22 records and displayed the first 20. OpenAlex received the
+revised query and returned HTTP 429 on the search and retry. The first
+**Find more literature…** click after an Obsidian restart also populated the
+restored tab with the current graph origin. See the
+[worked example](LITERATURE_SEARCH.md#add-a-required-concept).
 
 The 0.10.0 acceptance run on November 11, 2026 passed all 48 suites, production
 build and lint, and live PubMed/OpenAlex retrieval without keys. In Obsidian

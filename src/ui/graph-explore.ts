@@ -288,7 +288,7 @@ export class GraphInspector {
 
 		body.createDiv({
 			cls: 'sgb-graph-node-type',
-			text: `${data.node.type} · ${data.degree} connection${data.degree === 1 ? '' : 's'}`,
+			text: `${data.node.type} (${data.degree} connection${data.degree === 1 ? '' : 's'})`,
 		});
 		if (data.description) body.createDiv({ cls: 'sgb-graph-inspector-description', text: data.description });
 

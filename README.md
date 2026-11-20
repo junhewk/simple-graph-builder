@@ -8,14 +8,27 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
-## What's new in 0.10.0: find the next literature
+## What's new in 0.10.2
+
+- **Add a required concept directly.** Type a search term in **Required concept**
+  or choose a graph path suggestion, then press **Add AND condition** or Enter.
+  The PubMed and OpenAlex previews update immediately.
+- **See how terms combine.** Groups show their search terms with **AND** between
+  them. Use **Add alternative (OR)** within a group. If a term is already selected
+  as an alternative, the required concept field identifies the group to edit.
+- **Open a restored tab from the graph.** **Find more literature…** applies the
+  current graph origin even when Obsidian restores the literature search tab.
+
+See the [0.10.2 release notes](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.2)
+and the [full changelog](CHANGELOG.md).
+
+## Find more literature from your graph
 
 - **Search from a concept or path.** Choose **Find more literature…** in the
   graph inspector. Keep the route, relationship directions and supporting
   source notes visible while developing the next search.
-- **Editable searches for PubMed and OpenAlex.** Choose aliases as OR
-  alternatives and separately required concepts with AND. Review each source's
-  actual query, dates and result limits before pressing Search.
+- **Editable searches for PubMed and OpenAlex.** Review each source's query,
+  dates and result limits, then press **Search** to submit the queries.
 - **Results and abstracts inside Obsidian.** Inspect source metadata,
   identifiers and reliable matches to articles already in your vault. Open an
   article landing page in your external browser for access and downloading.
@@ -23,11 +36,7 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
   session, med-lit-mcp or separate backend. Searching creates no notes and makes
   no graph changes.
 
-See [Literature search](docs/LITERATURE_SEARCH.md).
-Earlier releases are in the [changelog](https://github.com/junhewk/simple-graph-builder/blob/master/CHANGELOG.md).
-
-Latest patch: [0.10.1](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.1)
-includes the Obsidian review fixes and adds strict lint checks to release CI.
+For the full workflow, see [Literature search](docs/LITERATURE_SEARCH.md).
 
 ## Why a lightweight ontology?
 
@@ -74,9 +83,10 @@ Traditional knowledge graphs often require complex schemas with dozens of entity
 2. Open a note and run **Analyze current note**, or **Analyze entire vault** from settings
 3. Run **Open graph view**, and type in its search box to find your way in
 
-With an already prepared graph, start at step 3. Explore a concept or path and
-choose **Find more literature…**; literature retrieval does not require model
-configuration or another graph analysis.
+With an already prepared graph, start at step 3. For example, open
+**Find more literature…** from `Uncertainty sampling`, enter `Abstract screening`
+in **Required concept**, and press Enter. Review both query previews and press
+**Search**.
 
 ## Commands
 

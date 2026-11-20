@@ -10,10 +10,13 @@ import {
 	LiteratureSearchState, LiteratureSource, PublicationRecord, SOURCE_NAMES, SourceNoteRef,
 } from '../literature/types';
 import { readVaultReferences, VaultReferenceIndex } from '../literature/vault-index';
+import { normalizeKey } from '../types';
 
 export const LITERATURE_VIEW_TYPE = 'simple-graph-literature';
 
 interface QueryPreview { query: HTMLElement; effective: HTMLElement; error: HTMLElement }
+
+let conditionFeedbackId = 0;
 
 /** Session-only, read-only publication search. Workspace state never contains queries or credentials. */
 export class LiteratureView extends ItemView {
@@ -101,7 +104,7 @@ export class LiteratureView extends ItemView {
 		const name = (id: string) => context.nodes.find(node => node.id === id)?.name ?? id;
 		const discovery = { selection: 'Selected concept', neighborhood: 'Neighborhood exploration', propagation: 'Reached through graph propagation', 'shortest-path': 'Shortest path in the captured view' };
 		el.createDiv({ cls: 'sgb-literature-muted', text: discovery[context.discovery] +
-			(context.distanceFromStart !== undefined ? ` · ${context.distanceFromStart} hop(s) from the starting node in that view` : '') });
+			(context.distanceFromStart !== undefined ? `, ${context.distanceFromStart} hop(s) from the starting node in that view` : '') });
 		if (context.neighborhood) el.createDiv({ cls: 'sgb-literature-muted', text: `Explicit neighborhood control: up to ${context.neighborhood.hops} hop(s) around ${name(context.neighborhood.anchorNodeId)}.` });
 		if (context.scope.filtered || context.scope.truncated) el.createDiv({ cls: 'sgb-literature-muted', text: 'The captured graph view was filtered or limited; the route does not describe every possible connection.' });
 		if (context.scope.includesNoteNodes) el.createDiv({ cls: 'sgb-literature-muted', text: 'This view includes note nodes; mentions and note links count as graph steps.' });
@@ -136,7 +139,7 @@ export class LiteratureView extends ItemView {
 		button.addEventListener('click', () => void this.openNote(ref.path));
 		if (ref.quote) row.createEl('blockquote', { text: ref.quote });
 		const ids = identifierKeys(ref.identifiers);
-		if (ids.length) row.createDiv({ text: ids.join(' · '), cls: 'sgb-literature-muted' });
+		if (ids.length) row.createDiv({ text: ids.join(', '), cls: 'sgb-literature-muted' });
 	}
 
 	private updateOriginStatus(): void {
@@ -148,24 +151,24 @@ export class LiteratureView extends ItemView {
 	private renderControls(): void {
 		const el = this.controlsEl;
 		const draft = this.draft;
-		if (!el || !draft || !this.context) return;
+		const context = this.context;
+		if (!el || !draft || !context) return;
 		el.empty();
 		el.createDiv({ cls: 'sgb-literature-label', text: 'Search concepts' });
-		el.createDiv({ cls: 'sgb-literature-muted', text: 'Alternative expressions within a concept use OR. Separately required concepts use AND. Connected concepts are not automatically synonyms.' });
-		for (const [index, group] of draft.groups.entries()) this.renderGroup(el, group, index);
-		const addRow = el.createDiv({ cls: 'sgb-literature-inline' });
-		const picker = addRow.createEl('select', { attr: { 'aria-label': 'Concept to require' } });
-		picker.createEl('option', { text: 'New concept (type your own expressions)', value: '' });
-		for (const node of this.context.nodes) {
-			if (!draft.groups.some(group => group.conceptId === node.id)) picker.createEl('option', { text: node.name, value: node.id });
-		}
-		const add = addRow.createEl('button', { text: 'Add required concept (AND)' });
-		add.disabled = draft.groups.length >= 4;
-		add.addEventListener('click', () => {
-			const node = this.context?.nodes.find(n => n.id === picker.value);
-			draft.groups.push({ conceptId: node?.id, expressions: node ? [node.name] : [] });
-			this.renderControls();
-		});
+		const updateCondition = this.renderRequiredCondition(el, draft, context.nodes, () => renderGroups());
+		const groups = el.createDiv();
+		const updateConcepts = () => {
+			updateCondition();
+			this.updatePreviews();
+		};
+		const renderGroups = () => {
+			groups.empty();
+			for (const [index, group] of draft.groups.entries()) {
+				if (index > 0) groups.createDiv({ cls: 'sgb-literature-and', text: 'AND' });
+				this.renderGroup(groups, group, index, renderGroups, updateConcepts);
+			}
+			updateConcepts();
+		};
 		const sources = el.createDiv({ cls: 'sgb-literature-inline' });
 		for (const source of LITERATURE_SOURCES) {
 			const label = sources.createEl('label');
@@ -199,13 +202,93 @@ export class LiteratureView extends ItemView {
 		this.stopButton.addEventListener('click', () => this.session.stop());
 		this.dirtyEl = el.createDiv({ cls: 'sgb-literature-muted' });
 		el.createDiv({ cls: 'sgb-literature-muted', text: 'Only the displayed queries and filters are sent to the selected sources. Source passages, vault paths and the research question stay in Obsidian.' });
-		this.updatePreviews();
+		renderGroups();
 	}
 
-	private renderGroup(parent: HTMLElement, group: ConceptGroup, index: number): void {
+	private renderRequiredCondition(
+		parent: HTMLElement,
+		draft: LiteratureQueryDraft,
+		nodes: LiteratureGraphContext['nodes'],
+		onAdd: () => void,
+	): () => void {
+		const form = parent.createEl('form');
+		const row = form.createDiv({ cls: 'sgb-literature-inline sgb-literature-condition-row' });
+		const label = row.createEl('label', { cls: 'sgb-literature-condition-field' });
+		label.createSpan({ text: 'Required concept' });
+		const feedbackId = `sgb-literature-condition-feedback-${++conditionFeedbackId}`;
+		const input = label.createEl('input', { type: 'text', attr: {
+			placeholder: 'Enter a search term', autocomplete: 'off', 'aria-describedby': feedbackId,
+		} });
+		const add = row.createEl('button', { text: 'Add AND condition', attr: { type: 'submit' } });
+		const feedback = form.createDiv({ cls: 'sgb-literature-muted', attr: { id: feedbackId, role: 'status' } });
+		const suggestions = form.createDiv();
+		suggestions.createDiv({ cls: 'sgb-literature-muted', text: 'Graph path suggestions' });
+		const choices = suggestions.createDiv({ cls: 'sgb-literature-suggestions' });
+		const candidates = nodes.map(node => {
+			const button = choices.createEl('button', { text: node.name, attr: { type: 'button' } });
+			button.addEventListener('click', () => {
+				input.value = node.name;
+				update();
+				input.focus();
+			});
+			return { node, button, key: normalizeKey(node.name) };
+		});
+		const update = () => {
+			const key = normalizeKey(input.value);
+			const full = draft.groups.length >= 4;
+			const conflict = full ? '' : this.requiredConditionConflict(draft.groups, key);
+			const message = full ? 'You can use up to four required concepts.' : conflict;
+			if (feedback.textContent !== message) feedback.setText(message);
+			feedback.toggleClass('sgb-literature-error', Boolean(conflict));
+			input.setAttr('aria-invalid', String(Boolean(conflict)));
+			input.disabled = full;
+			add.disabled = full || !key || Boolean(conflict);
+			for (const candidate of candidates) {
+				candidate.button.hidden = full || !candidate.key.includes(key) ||
+					draft.groups.some(group => group.conceptId === candidate.node.id);
+			}
+			suggestions.hidden = candidates.every(candidate => candidate.button.hidden);
+		};
+		input.addEventListener('input', update);
+		form.addEventListener('submit', event => {
+			event.preventDefault();
+			update();
+			if (add.disabled) return;
+			const expression = input.value.trim();
+			const key = normalizeKey(expression);
+			const node = candidates.find(candidate => !candidate.button.hidden && candidate.key === key)?.node;
+			draft.groups.push({ conceptId: node?.id, expressions: [expression] });
+			input.value = '';
+			onAdd();
+			input.focus();
+		});
+		return update;
+	}
+
+	private requiredConditionConflict(groups: ConceptGroup[], key: string): string {
+		if (!key) return '';
+		for (const group of groups) {
+			const expression = group.expressions.find(term => normalizeKey(term) === key);
+			if (expression === undefined) continue;
+			const label = this.groupLabel(group);
+			if (group.expressions.every(term => normalizeKey(term) === key)) {
+				return `“${expression}” is already required in “${label}”.`;
+			}
+			return `Uncheck “${expression}” in “${label}” to add it as an AND condition.`;
+		}
+		return '';
+	}
+
+	private groupLabel(group: ConceptGroup): string {
+		return group.expressions[0] ?? this.context?.nodes.find(node => node.id === group.conceptId)?.name ?? 'Search concept';
+	}
+
+	private renderGroup(
+		parent: HTMLElement, group: ConceptGroup, index: number, renderGroups: () => void, updateConcepts: () => void,
+	): void {
 		const node = this.context?.nodes.find(n => n.id === group.conceptId);
 		const el = parent.createEl('fieldset', { cls: 'sgb-literature-group' });
-		el.createEl('legend', { text: `${index ? 'AND · ' : ''}${node?.name ?? `Concept ${index + 1}`} (alternatives: OR)` });
+		const legend = el.createEl('legend', { text: this.groupLabel(group) });
 		const expressions = [...new Set([...(node ? [node.name, ...node.aliases] : []), ...group.expressions])];
 		for (const expression of expressions) {
 			const label = el.createEl('label', { cls: 'sgb-literature-expression' });
@@ -214,21 +297,29 @@ export class LiteratureView extends ItemView {
 			label.createSpan({ text: expression });
 			input.addEventListener('change', () => {
 				group.expressions = input.checked ? [...group.expressions, expression] : group.expressions.filter(term => term !== expression);
-				this.updatePreviews();
+				legend.setText(this.groupLabel(group));
+				updateConcepts();
 			});
 		}
 		const row = el.createDiv({ cls: 'sgb-literature-inline' });
-		const input = row.createEl('input', { type: 'text', attr: { placeholder: 'Another expression for this concept', 'aria-label': 'Alternative expression' } });
-		const add = row.createEl('button', { text: 'Add OR term' });
+		const input = row.createEl('input', { type: 'text', attr: { placeholder: 'Enter an alternative', 'aria-label': 'Alternative expression' } });
+		const add = row.createEl('button', { text: 'Add alternative (OR)' });
 		const addTerm = () => {
 			if (!input.value.trim()) return;
 			group.expressions.push(input.value.trim());
-			this.renderControls();
+			renderGroups();
 		};
 		add.addEventListener('click', addTerm);
-		input.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); addTerm(); } });
+		input.addEventListener('keydown', event => {
+			if (event.key !== 'Enter' || event.isComposing) return;
+			event.preventDefault();
+			addTerm();
+		});
 		const remove = row.createEl('button', { text: 'Remove concept' });
-		remove.addEventListener('click', () => { this.draft?.groups.splice(index, 1); this.renderControls(); });
+		remove.addEventListener('click', () => {
+			this.draft?.groups.splice(index, 1);
+			renderGroups();
+		});
 	}
 
 	private renderPreview(parent: HTMLElement, source: LiteratureSource): void {
@@ -269,7 +360,11 @@ export class LiteratureView extends ItemView {
 				const spec = compileQuery(this.draft, source);
 				preview.query.setText(spec.query);
 				preview.error.setText('');
-				preview.effective.setText(`${this.draft.sources.includes(source) ? 'Selected' : 'Not selected'} · ${spec.scope} · provider relevance order · ${spec.from ? `${spec.from} through ${spec.to}` : 'all dates'} · ${spec.pageSize}/page · cap ${spec.limit}`);
+				preview.effective.setText([
+					this.draft.sources.includes(source) ? 'Selected' : 'Not selected',
+					spec.scope, 'provider relevance order', spec.from ? `${spec.from} through ${spec.to}` : 'all dates',
+					`${spec.pageSize} per page`, `up to ${spec.limit} records`,
+				].join(', '));
 			} catch (error) {
 				preview.query.setText(this.draft.nativeOverrides[source] ?? '');
 				preview.error.setText(error instanceof Error ? error.message : 'Check this query.');
@@ -310,7 +405,7 @@ export class LiteratureView extends ItemView {
 			el.createEl('p', { text: 'Review the concepts and queries, then press Search. No literature request has been sent.' });
 			return;
 		}
-		el.createDiv({ cls: 'sgb-literature-label', text: `Results · submitted ${new Date(this.searchState.startedAt).toLocaleString()}` });
+		el.createDiv({ cls: 'sgb-literature-label', text: `Results submitted ${new Date(this.searchState.startedAt).toLocaleString()}` });
 		const tabs = el.createDiv({ cls: 'sgb-literature-inline', attr: { 'aria-label': 'Results by source' } });
 		for (const source of LITERATURE_SOURCES) {
 			const state = this.searchState.sources[source];
@@ -336,12 +431,12 @@ export class LiteratureView extends ItemView {
 			status.createEl('button', { text: 'Retry source' }).addEventListener('click', () => void this.session.retry(this.selectedSource, this.plugin.literatureCredentials.read(this.plugin.settings.literatureContactEmail)));
 		}
 		if (state.status === 'empty') status.createDiv({ text: 'No publications found. Try removing a required concept or date restriction, or choose a different alias, then press Search.' });
-		if (state.total !== undefined) status.createDiv({ text: `${state.records.length} records loaded of ${state.total.toLocaleString()} reported · cap ${state.spec.limit} per source`, cls: 'sgb-literature-muted' });
+		if (state.total !== undefined) status.createDiv({ text: `${state.records.length} records loaded of ${state.total.toLocaleString()} reported (up to ${state.spec.limit} per source)`, cls: 'sgb-literature-muted' });
 		if (state.fetchedAt) status.createDiv({ text: `${state.cached ? 'Cached response' : 'Retrieved'} ${new Date(state.fetchedAt).toLocaleString()}`, cls: 'sgb-literature-muted' });
 		const submitted = status.createEl('details');
 		submitted.createEl('summary', { text: 'Exact submitted query and effective controls' });
 		submitted.createEl('pre', { text: state.spec.query });
-		submitted.createDiv({ text: `${state.spec.scope} · ${state.spec.from ? `${state.spec.from} through ${state.spec.to}` : 'all dates'} · provider relevance · ${state.spec.pageSize}/page · cap ${state.spec.limit}` });
+		submitted.createDiv({ text: `${state.spec.scope}, ${state.spec.from ? `${state.spec.from} through ${state.spec.to}` : 'all dates'}, provider relevance, ${state.spec.pageSize} per page, up to ${state.spec.limit} records` });
 		if (state.translation) submitted.createDiv({ text: `PubMed translation: ${state.translation}` });
 		for (const warning of state.warnings) status.createDiv({ text: warning, cls: 'sgb-literature-muted' });
 		const allRecords = Object.values(this.searchState.sources).flatMap(source => source?.records ?? []);
@@ -357,10 +452,10 @@ export class LiteratureView extends ItemView {
 			const button = list.createEl('button', { cls: 'sgb-literature-result' });
 			button.setAttr('aria-pressed', String(hit.key === this.selectedHit));
 			button.createDiv({ text: titleOf(hit.citation), cls: 'sgb-literature-result-title' });
-			button.createDiv({ text: [hit.citation.year, hit.citation.venue].filter(Boolean).join(' · ') || 'Year / source not supplied', cls: 'sgb-literature-muted' });
+			button.createDiv({ text: [hit.citation.year, hit.citation.venue].filter(Boolean).join(', ') || 'Year / source not supplied', cls: 'sgb-literature-muted' });
 			button.createDiv({ text: hit.records.map(record => SOURCE_NAMES[record.source]).join(' + ') +
-				(this.vaultMatches(hit).length ? ' · Already in vault' : '') +
-				(hit.records.some(record => record.abstract.state === 'available') ? ' · Abstract available' : ' · Abstract unavailable'), cls: 'sgb-literature-muted' });
+				(this.vaultMatches(hit).length ? ', already in vault' : '') +
+				(hit.records.some(record => record.abstract.state === 'available') ? ', abstract available' : ', abstract unavailable'), cls: 'sgb-literature-muted' });
 			button.addEventListener('click', () => {
 				this.selectedHit = hit.key;
 				this.renderResults();
@@ -398,13 +493,13 @@ export class LiteratureView extends ItemView {
 		for (const record of hit.records) {
 			const body = el.createEl('details', { cls: 'sgb-literature-record' });
 			body.open = record.abstract.state === 'available' || hit.records.length === 1;
-			body.createEl('summary', { text: `${SOURCE_NAMES[record.source]} metadata and abstract · rank ${record.sourceRank} in this source` });
+			body.createEl('summary', { text: `${SOURCE_NAMES[record.source]} metadata and abstract (rank ${record.sourceRank} in this source)` });
 			body.createDiv({ text: titleOf(record) });
 			body.createDiv({ text: record.authors === undefined ? 'Authors not supplied' : record.authors.length ? record.authors.join(', ') : 'Author list empty' });
 			if (record.authorsTruncated) body.createDiv({ text: 'The source list may truncate this author list.', cls: 'sgb-literature-muted' });
-			body.createDiv({ text: `${record.year ?? 'Year not supplied'} · ${record.venue === undefined ? 'Journal / source not supplied' : record.venue || 'Journal / source empty'}` });
+			body.createDiv({ text: `${record.year ?? 'Year not supplied'}, ${record.venue === undefined ? 'journal / source not supplied' : record.venue || 'journal / source empty'}` });
 			body.createDiv({ text: record.publicationTypes === undefined ? 'Publication type not supplied' : record.publicationTypes.join(', ') || 'Publication type empty' });
-			body.createDiv({ text: identifierKeys(record.identifiers).join(' · ') || 'Identifiers not supplied', cls: 'sgb-literature-muted' });
+			body.createDiv({ text: identifierKeys(record.identifiers).join(', ') || 'Identifiers not supplied', cls: 'sgb-literature-muted' });
 			body.createDiv({ text: `Retrieved ${new Date(record.retrievedAt).toLocaleString()}`, cls: 'sgb-literature-muted' });
 			if (record.abstract.state === 'available') {
 				for (const section of record.abstract.sections) {

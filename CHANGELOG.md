@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.10.2 - Direct AND conditions in literature search
+
+- Type a term in **Required concept** or select a graph path suggestion. Press
+  **Add AND condition** or Enter to create a group with that term. Both previews
+  update immediately. Press **Search** to run the queries.
+- Group titles show the selected search terms, with **AND** between groups and
+  **Add alternative (OR)** inside each group.
+- If a term is already selected as an OR alternative, the required concept
+  field identifies the group and checkbox to clear.
+- **Find more literature…** applies the current graph origin the first time you
+  open a literature search tab restored by Obsidian.
+
+See the [literature search guide](docs/LITERATURE_SEARCH.md#concepts-alternatives-and-exact-queries).
+
 ## 0.10.1: Obsidian review fixes
 
 - Publish the review fixes as a new patch release so Obsidian can offer the

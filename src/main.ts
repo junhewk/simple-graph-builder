@@ -397,8 +397,8 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			leaf = workspace.getLeaf('tab');
 			await leaf.setViewState({ type: LITERATURE_VIEW_TYPE, active: true });
 		}
-		if (leaf.view instanceof LiteratureView) leaf.view.setContext(context);
 		await workspace.revealLeaf(leaf);
+		if (leaf.view instanceof LiteratureView) leaf.view.setContext(context);
 	}
 
 	async loadSettings() {

@@ -55,7 +55,7 @@ assert.deepEqual(trail.steps, [{ nodeId: 'a', edgeId: undefined }], 'back naviga
 trail.visit('c');
 const jumped = captureGraphContext(plugin.graphCache, { steps: trail.steps, selectedNodeId: 'c', discovery: 'selection', scope: context.scope }, path => refs.reference(path));
 assert.equal(jumped.route[1].via?.kind, 'jump', 'unrelated selection does not invent a graph edge');
-assert.equal(describeGraphRoute(jumped), '의학교육 · selected → Deliberate practice');
+assert.equal(describeGraphRoute(jumped), '의학교육 / selected → Deliberate practice');
 for (let i = 0; i < 150; i++) trail.visit(`n${i}`);
 assert.equal(trail.steps[0].nodeId, 'a');
 assert.equal(trail.steps.length, 128);

@@ -11,7 +11,7 @@ export function describeGraphRoute(context: LiteratureGraphContext): string {
 		const via = step.via;
 		const connector = !index ? '' : via?.kind === 'relationship'
 			? via.direction === 'out' ? ` —${via.verb}→ ` : ` ←${via.verb}— `
-			: ' · selected → ';
+			: ' / selected → ';
 		return connector + (names.get(step.nodeId) ?? step.nodeId);
 	}).join('');
 }

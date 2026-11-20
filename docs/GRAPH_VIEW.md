@@ -82,7 +82,8 @@ From the inspector:
 - **Open note** opens a note node's note.
 - **Find more literature…** opens an editable PubMed/OpenAlex search in a
   dedicated Obsidian pane. A displayed path has a separate action that retains
-  the path and selects its final concept. See [Literature search](LITERATURE_SEARCH.md).
+  the path and selects its final concept. Other path concepts appear as
+  suggestions for the **Required concept** field. See [Literature search](LITERATURE_SEARCH.md).
 
 Relationships with recorded evidence have **Supporting sources** controls.
 Open the note to check an ordinary extraction's passage, or inspect a stored

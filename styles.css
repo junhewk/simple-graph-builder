@@ -1028,8 +1028,16 @@
 .sgb-literature textarea { width: 100%; resize: vertical; }
 .sgb-literature-inline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 10px 0; }
 .sgb-literature-inline label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; }
+.sgb-literature-condition-row { align-items: flex-end; max-width: 560px; }
+.sgb-literature-inline .sgb-literature-condition-field { display: grid; flex: 1 1 180px; min-width: 0; }
+.sgb-literature-condition-field input { width: 100%; min-width: 0; }
+.sgb-literature-suggestions { display: flex; flex-wrap: wrap; gap: 6px; max-height: 8em; overflow: auto; padding: 2px; }
+.sgb-literature-suggestions button { max-width: 100%; height: auto; min-height: var(--input-height); white-space: normal; overflow-wrap: anywhere; }
+.sgb-literature-suggestions button[hidden] { display: none; }
+.sgb-literature-and { font-size: var(--font-ui-small); font-weight: var(--font-semibold); }
 .sgb-literature-group { border: 1px solid var(--background-modifier-border); border-radius: 6px; margin: 10px 0; padding: 8px 12px; min-width: 0; }
-.sgb-literature-expression { display: inline-flex; align-items: center; gap: 5px; margin: 4px 12px 4px 0; }
+.sgb-literature-group legend { max-width: 100%; overflow-wrap: anywhere; }
+.sgb-literature-expression { display: inline-flex; align-items: center; gap: 5px; margin: 4px 12px 4px 0; max-width: 100%; overflow-wrap: anywhere; }
 .sgb-literature-query { margin: 10px 0; }
 .sgb-literature pre { white-space: pre-wrap; overflow-wrap: anywhere; background: var(--background-secondary); padding: 8px; font-size: var(--font-ui-small); }
 .sgb-literature-columns { display: grid; grid-template-columns: minmax(200px, 2fr) minmax(240px, 3fr); gap: 16px; }

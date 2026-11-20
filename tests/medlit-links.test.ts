@@ -23,8 +23,8 @@ const ctx = {
 	pathForName: nameIndex(Object.values(paths).filter(p => p.includes('/entities/'))),
 };
 
-const fromSource = toWikilinks('- [Empathy](../entities/Empathy.md) · CONCEPT · outcome', 'sources/x.md', ctx);
-check('entity link from a source page', fromSource === `- [[${F}/entities/Empathy|Empathy]] · CONCEPT · outcome`, fromSource);
+const fromSource = toWikilinks('- [Empathy](../entities/Empathy.md) (CONCEPT, outcome)', 'sources/x.md', ctx);
+check('entity link from a source page', fromSource === `- [[${F}/entities/Empathy|Empathy]] (CONCEPT, outcome)`, fromSource);
 
 const encoded = toWikilinks("[Cronbach's alpha](../entities/Cronbach%27s%20alpha.md)", 'entities/Empathy.md', ctx);
 check('URL-encoded target decoded', encoded === `[[${F}/entities/Cronbach's alpha|Cronbach's alpha]]`, encoded);

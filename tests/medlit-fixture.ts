@@ -129,7 +129,7 @@ export function buildProject(p: FixtureProject): MemoryReader {
 	for (const e of p.entities) {
 		const rels = p.relationships.filter(r => r.source === e.id).map(r => {
 			const t = entityById.get(r.target)!;
-			return `- ${r.verb} [${t.name}](../entities/${enc(t.name)}.md) · ${r.evidence.length} sources`;
+			return `- ${r.verb} [${t.name}](../entities/${enc(t.name)}.md) (${r.evidence.length} supporting sources)`;
 		});
 		const sources = p.articles.filter(a => a.mentions.some(([id]) => id === e.id))
 			.map(a => `- [${a.uid}](../sources/${enc(a.title)}.md)`);
@@ -138,7 +138,10 @@ export function buildProject(p: FixtureProject): MemoryReader {
 			`\n# ${e.name}\n\n${e.description ?? ''}\n\n## Relationships\n\n${rels.join('\n')}\n\n## Source Articles\n\n${sources.join('\n')}\n`);
 	}
 	for (const a of p.articles) {
-		const lines = a.mentions.map(([id, role]) => `- [${entityById.get(id)!.name}](../entities/${enc(entityById.get(id)!.name)}.md) · ${role ?? ''}`);
+		const lines = a.mentions.map(([id, role]) => {
+			const name = entityById.get(id)!.name;
+			return `- [${name}](../entities/${enc(name)}.md)${role ? ` (${role})` : ''}`;
+		});
 		const rel = articlePage(a);
 		reader.set(rel, p.bodies?.[rel] ?? fm({ type: 'source', uid: a.uid, title: a.title }) + `\n# ${a.title}\n\n## Entities\n\n${lines.join('\n')}\n`);
 	}

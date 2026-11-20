@@ -20,8 +20,8 @@ model API key, AI agent session, med-lit-mcp process or separate backend.
    view has a selection.
 4. Review **Graph origin**, including the original graph query, route, verbs,
    direction, available source references and imported evidence quotes.
-5. Select expressions, add required concepts, choose the sources and review
-   each outgoing query. Press **Search**.
+5. Select expressions, add any required concepts, and review each outgoing
+   query. Press **Search** to submit the queries to the selected sources.
 6. Select a publication to inspect its citation and available abstracts. Use
    **Open in external browser** to visit the displayed destination.
 
@@ -53,13 +53,34 @@ The selected concept starts as one group. Canonical names and aliases are
 available to select, including Korean labels and English aliases already in
 the graph. No terms are translated by a model.
 
-- Expressions within one concept are joined with **OR**.
-- Separately required concepts are joined with **AND**.
-- Connected concepts and all nodes on a path are not selected automatically.
-- You can add your own expressions or concepts and remove any term.
+- To require another concept, type a term in **Required concept** or choose a
+  **Graph path suggestions** entry to fill the same field. Press
+  **Add AND condition** or Enter to create a group with that term and refresh
+  the previews. The group title shows the term, with **AND** between groups.
+- Use **Add alternative (OR)** within a group to include another expression
+  for that concept. If an expression is already selected as an alternative,
+  the required concept field shows which group to uncheck it in.
 
-For example, selecting two expressions for one concept and requiring another
-produces different source queries:
+### Add a required concept
+
+1. Open **Find more literature…** from `Uncertainty sampling`.
+2. Enter `Abstract screening` in **Required concept** and press Enter once.
+3. Review the two previews and press **Search**.
+
+| Source | Query preview |
+| --- | --- |
+| PubMed | `("Uncertainty sampling"[tiab]) AND ("Abstract screening"[tiab])` |
+| OpenAlex | `("Uncertainty sampling") AND ("Abstract screening")` |
+
+To revise the search, reopen **Search controls**, add `Active learning` with
+**Add alternative (OR)** in the first group, and clear the
+`Uncertainty sampling` checkbox. The two previews now require `Active learning`
+and `Abstract screening`. Press **Search** to submit the revised queries.
+
+### Search for alternatives
+
+Selecting two alternatives in the first group and requiring a second group
+produces these previews.
 
 ```text
 PubMed:
