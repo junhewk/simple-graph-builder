@@ -7,16 +7,16 @@ import { EffortLevel, defaultMaxOutputTokens } from './effort';
  */
 export const MODEL_OPTIONS: Record<ApiProvider, string[]> = {
 	claude: [
-		'claude-sonnet-5',
-		'claude-haiku-4-5',
+		'claude-sonnet-5-5',
+		'claude-haiku-5-5',
 	],
 	openai: [
 		'gpt-6-luna',
 		'gpt-5.4-mini',
 	],
 	gemini: [
-		'gemini-3.6-flash',
-		'gemini-3.5-flash-lite',
+		'gemini-3.8-flash',
+		'gemini-4-hydrogen',
 	],
 	deepseek: [
 		'deepseek-flash',

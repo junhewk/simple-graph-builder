@@ -1,6 +1,7 @@
 import { postJsonWithDowngrade } from './http';
 import { createError } from './errors';
 import { EffortLevel } from './effort';
+import { supportsMinimalThinking, supportsXhighThinking } from './gemini-models';
 import {
 	Credentials,
 	LlmRequest,
@@ -62,7 +63,7 @@ export const geminiAdapter: ProviderAdapter = {
 			};
 
 			if (flags.effort) {
-				const thinkingLevel = toThinkingLevel(req.effort);
+				const thinkingLevel = toThinkingLevel(req.effort, req.model);
 				if (thinkingLevel) {
 					generationConfig.thinking_level = thinkingLevel;
 				}
@@ -146,13 +147,18 @@ export const geminiAdapter: ProviderAdapter = {
 	},
 };
 
-/** The enum tops out at `high`, so `max` clamps. */
-function toThinkingLevel(effort: EffortLevel): string | undefined {
+/**
+ * The nearest level the model accepts: *Minimal* is `low` where `minimal` is
+ * rejected, and *Max* is the highest level the model has.
+ */
+function toThinkingLevel(effort: EffortLevel, model: string): string | undefined {
 	switch (effort) {
 		case 'auto':
 			return undefined;
+		case 'minimal':
+			return supportsMinimalThinking(model) ? 'minimal' : 'low';
 		case 'max':
-			return 'high';
+			return supportsXhighThinking(model) ? 'xhigh' : 'high';
 		default:
 			return effort;
 	}

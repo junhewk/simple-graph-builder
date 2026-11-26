@@ -1,6 +1,6 @@
 import { postJsonWithDowngrade } from './http';
 import { createError } from './errors';
-import { supportsAdaptiveThinking, supportsStructuredOutput } from './anthropic-models';
+import { supportsAdaptiveThinking, supportsStructuredOutput, thinkingOffMode } from './anthropic-models';
 import { EffortLevel } from './effort';
 import {
 	Credentials,
@@ -26,13 +26,16 @@ interface AnthropicBlock {
 interface AnthropicResponse {
 	content?: AnthropicBlock[];
 	stop_reason?: string;
+	/** Set only when `stop_reason` is `refusal`. */
+	stop_details?: { category?: string | null; explanation?: string | null } | null;
 }
 
 /**
  * Anthropic keeps the Messages API as its current surface, so this adapter is
  * about parameter shape rather than a new endpoint. The per-model divergence is
- * the interesting part: Sonnet 5 takes `thinking` and `output_config.effort`,
- * while Haiku 4.5 errors on both.
+ * the interesting part: Sonnet 5.5 and Haiku 5.5 take `thinking` and
+ * `output_config.effort` but turn thinking off differently, while Haiku 4.5
+ * errors on both.
  */
 export const anthropicAdapter: ProviderAdapter = {
 	id: 'claude',
@@ -98,6 +101,18 @@ export const anthropicAdapter: ProviderAdapter = {
 			};
 		});
 
+		// A safety classifier declined. The reply is HTTP 200 with no usable
+		// text, or a truncated one; say so instead of "empty response" or a
+		// JSON parse error on half an answer.
+		if (data.stop_reason === 'refusal') {
+			const category = data.stop_details?.category;
+			throw createError(
+				'api_error',
+				`Claude declined this request${category ? ` (${category})` : ''}. Try another model for this note.`,
+				data.stop_details?.explanation ?? undefined
+			);
+		}
+
 		const blocks = data.content ?? [];
 
 		// Join every text block. The array can lead with a thinking block, so
@@ -134,6 +149,9 @@ export const anthropicAdapter: ProviderAdapter = {
  * `thinking` and `output_config.effort` are only valid on models with adaptive
  * thinking. On everything else, omitting `thinking` already means no thinking,
  * and sending `output_config.effort` is an error.
+ *
+ * *Minimal* turns thinking off in whichever form the model accepts; where it
+ * cannot be turned off, the lowest effort is the closest thing.
  */
 function applyThinkingAndEffort(
 	body: Record<string, unknown>,
@@ -145,8 +163,18 @@ function applyThinkingAndEffort(
 	}
 
 	if (effort === 'minimal') {
-		body.thinking = { type: 'disabled' };
-		return;
+		switch (thinkingOffMode(model)) {
+			case 'between_tools':
+				// Takes no other field, and only at the default effort or below.
+				body.thinking = { type: 'between_tools' };
+				return;
+			case 'none':
+				body.output_config = { effort: 'low' };
+				return;
+			default:
+				body.thinking = { type: 'disabled' };
+				return;
+		}
 	}
 
 	body.thinking = { type: 'adaptive' };

@@ -28,6 +28,22 @@ const base = { model: 'gemini-3.6-flash', maxOutputTokens: 8192 };
   await geminiAdapter.complete({ ...base, effort: 'max', turns: [{ kind: 'user', text: 'q' }] }, creds);
   check('max clamps to high (enum tops out)', captured.body.generation_config.thinking_level === 'high');
 
+  // Gemini 3.8 Flash and the Gemini 4 line reject `minimal` with a 400. The
+  // retry without a level would then run at the model's default -- `high` on
+  // Hydrogen -- so minimal has to become the nearest level they accept.
+  const level = async (model: string, effort: 'minimal' | 'max' | 'medium') => {
+    await geminiAdapter.complete({ model, maxOutputTokens: 4096, effort, turns: [{ kind: 'user', text: 'q' }] }, creds);
+    return captured.body.generation_config.thinking_level;
+  };
+  check('3.8-flash: minimal -> low', await level('gemini-3.8-flash', 'minimal') === 'low');
+  check('3.8-flash: max -> high', await level('gemini-3.8-flash', 'max') === 'high');
+  check('4-hydrogen: minimal -> low', await level('gemini-4-hydrogen', 'minimal') === 'low');
+  check('4-hydrogen: max -> xhigh', await level('gemini-4-hydrogen', 'max') === 'xhigh');
+  check('4-hydrogen: medium passes through', await level('gemini-4-hydrogen', 'medium') === 'medium');
+  check('3.5-flash-lite keeps minimal', await level('gemini-3.5-flash-lite', 'minimal') === 'minimal');
+  check('an unknown gemini model gets low, not minimal', await level('gemini-9-future', 'minimal') === 'low');
+  check('an unknown gemini model gets high for max', await level('gemini-9-future', 'max') === 'high');
+
   await geminiAdapter.complete({ ...base, effort: 'auto', system: 'SYS', turns: [{ kind: 'user', text: 'q' }] }, creds);
   check('system_instruction top-level', captured.body.system_instruction === 'SYS');
 

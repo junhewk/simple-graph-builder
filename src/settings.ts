@@ -15,7 +15,7 @@ import { DEFAULT_GRAPH_DISPLAY } from './graph/display';
  *     (both additive)
  * 8 = literature search controls (additive; credentials stay outside settings)
  */
-export const CURRENT_SETTINGS_VERSION = 8;
+export const CURRENT_SETTINGS_VERSION = 9;
 
 // The model catalog and the provider/model/key resolver now live with the
 // provider adapters. Re-exported here so existing importers keep working.
@@ -30,9 +30,9 @@ export const DEFAULT_SETTINGS: Settings = {
 	apiProvider: 'claude',
 	apiKey: '',
 	apiKeys: {},
-	claudeModel: 'claude-sonnet-5',
+	claudeModel: 'claude-sonnet-5-5',
 	openaiModel: 'gpt-6-luna',
-	geminiModel: 'gemini-3.6-flash',
+	geminiModel: 'gemini-3.8-flash',
 	deepseekModel: 'deepseek-flash',
 	ollamaModel: 'gpt-oss:20b',
 	ollamaHost: 'http://localhost:11434',

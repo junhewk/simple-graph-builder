@@ -19,9 +19,9 @@ const legacy = run({
   embeddingModel: 'text-embedding-3-small',
 });
 const s = legacy.settings;
-check('claude dated snapshot -> claude-sonnet-5', s.claudeModel === 'claude-sonnet-5', s.claudeModel);
+check('claude dated snapshot -> claude-sonnet-5-5', s.claudeModel === 'claude-sonnet-5-5', s.claudeModel);
 check('gpt-5-mini -> gpt-5.4-mini', s.openaiModel === 'gpt-5.4-mini', s.openaiModel);
-check('gemini-2.5-flash -> gemini-3.6-flash', s.geminiModel === 'gemini-3.6-flash', s.geminiModel);
+check('gemini-2.5-flash -> gemini-3.8-flash', s.geminiModel === 'gemini-3.8-flash', s.geminiModel);
 check('OLLAMA MODEL UNTOUCHED (local tag on disk)', s.ollamaModel === 'gpt-oss:20b', s.ollamaModel);
 check('smart search keys are removed', !Object.keys(s).some(k => k.startsWith('smartSearch')), Object.keys(s).filter(k => k.startsWith('smartSearch')).join());
 check('openai embedding model untouched', s.embeddingModel === 'text-embedding-3-small', s.embeddingModel);
@@ -30,13 +30,13 @@ check('reports changed', legacy.changed === true);
 
 // tier preservation
 check('gemini-2.5-flash-lite keeps its lite tier', run({ geminiModel: 'gemini-2.5-flash-lite' }).settings.geminiModel === 'gemini-3.5-flash-lite');
-check('gemini-2.0-flash -> 3.6-flash', run({ geminiModel: 'gemini-2.0-flash' }).settings.geminiModel === 'gemini-3.6-flash');
-check('gemini-3-pro-preview -> 3.6-flash', run({ geminiModel: 'gemini-3-pro-preview' }).settings.geminiModel === 'gemini-3.6-flash');
+check('gemini-2.0-flash -> 3.8-flash', run({ geminiModel: 'gemini-2.0-flash' }).settings.geminiModel === 'gemini-3.8-flash');
+check('gemini-3-pro-preview -> 3.8-flash', run({ geminiModel: 'gemini-3-pro-preview' }).settings.geminiModel === 'gemini-3.8-flash');
 check('gpt-4.1-mini -> gpt-5.4-mini', run({ openaiModel: 'gpt-4.1-mini' }).settings.openaiModel === 'gpt-5.4-mini');
 check('gpt-5-nano -> gpt-5.4-mini', run({ openaiModel: 'gpt-5-nano' }).settings.openaiModel === 'gpt-5.4-mini');
 check('gpt-5.1 -> gpt-6-luna', run({ openaiModel: 'gpt-5.1' }).settings.openaiModel === 'gpt-6-luna');
-check('claude-haiku dated -> claude-haiku-4-5', run({ claudeModel: 'claude-haiku-4-5-20251001' }).settings.claudeModel === 'claude-haiku-4-5');
-check('claude-3-opus -> claude-sonnet-5', run({ claudeModel: 'claude-3-opus-20240229' }).settings.claudeModel === 'claude-sonnet-5');
+check('claude-haiku dated -> claude-haiku-5-5', run({ claudeModel: 'claude-haiku-4-5-20251001' }).settings.claudeModel === 'claude-haiku-5-5');
+check('claude-3-opus -> claude-sonnet-5-5', run({ claudeModel: 'claude-3-opus-20240229' }).settings.claudeModel === 'claude-sonnet-5-5');
 check('dead text-embedding-004 -> gemini-embedding-001@768', run({ embeddingModel: 'text-embedding-004' }).settings.embeddingModel === 'gemini-embedding-001@768');
 
 // extractionMode rename still handled
@@ -46,7 +46,7 @@ check('extractionMode maximum -> thorough', run({ extractionMode: 'maximum' as a
 // idempotence + not clobbering deliberate choices
 const once = run({ claudeModel: 'claude-sonnet-4-5-20250929' });
 const twice = migrateSettings(once.settings, once.settings.settingsVersion);
-check('idempotent: second run changes nothing', twice.settings.claudeModel === 'claude-sonnet-5' && twice.notes.length === 0);
+check('idempotent: second run changes nothing', twice.settings.claudeModel === 'claude-sonnet-5-5' && twice.notes.length === 0);
 const deliberate = run({ claudeModel: 'claude-haiku-4-5' }, CURRENT_SETTINGS_VERSION);
 check('already-current version is not re-migrated', deliberate.settings.claudeModel === 'claude-haiku-4-5' && deliberate.notes.length === 0);
 const custom = run({ claudeModel: 'my-proxy/custom-model' });
@@ -64,7 +64,21 @@ const current = run({ useSeparateSmartSearchModel: true, smartSearchEffort: 'hig
 check('smart search keys are removed even at the current version',
   !('useSeparateSmartSearchModel' in current.settings) && !('smartSearchEffort' in current.settings));
 check('removal is idempotent', migrateSettings(current.settings, CURRENT_SETTINGS_VERSION).notes.length === 0);
-check('current models are stable under migration', run({ claudeModel: 'claude-sonnet-5', openaiModel: 'gpt-6-luna', geminiModel: 'gemini-3.6-flash' }).notes.length === 0);
+check('current models are stable under migration', run({ claudeModel: 'claude-sonnet-5-5', openaiModel: 'gpt-6-luna', geminiModel: 'gemini-3.8-flash' }).notes.length === 0);
+
+// v9: Sonnet 5.5, Haiku 5.5 and Gemini 3.8 Flash succeed the listed models.
+// Exact IDs only, from a v8 install; nothing else moves.
+const v8 = (over: Partial<Settings>) => run(over, 8).settings;
+check('v8 claude-sonnet-5 -> claude-sonnet-5-5', v8({ claudeModel: 'claude-sonnet-5' }).claudeModel === 'claude-sonnet-5-5');
+check('v8 claude-haiku-4-5 -> claude-haiku-5-5', v8({ claudeModel: 'claude-haiku-4-5' }).claudeModel === 'claude-haiku-5-5');
+check('v8 gemini-3.6-flash -> gemini-3.8-flash', v8({ geminiModel: 'gemini-3.6-flash' }).geminiModel === 'gemini-3.8-flash');
+check('v8 gemini-3.5-flash-lite stays (a cost choice)', v8({ geminiModel: 'gemini-3.5-flash-lite' }).geminiModel === 'gemini-3.5-flash-lite');
+check('v8 claude-opus-5 typed by hand stays', v8({ claudeModel: 'claude-opus-5' }).claudeModel === 'claude-opus-5');
+check('v8 openai choice untouched', v8({ openaiModel: 'gpt-5.4-mini' }).openaiModel === 'gpt-5.4-mini');
+check('a v9 install keeps a deliberate claude-sonnet-5',
+  run({ claudeModel: 'claude-sonnet-5' }, CURRENT_SETTINGS_VERSION).settings.claudeModel === 'claude-sonnet-5');
+check('new installs default to claude-sonnet-5-5 and gemini-3.8-flash',
+  DEFAULT_SETTINGS.claudeModel === 'claude-sonnet-5-5' && DEFAULT_SETTINGS.geminiModel === 'gemini-3.8-flash');
 
 console.log(fail ? `\n${fail} FAILURES` : '\nall pass');
 process.exit(fail ? 1 : 0);

@@ -35,9 +35,9 @@ const KEYS: Partial<Record<ApiProvider, string | undefined>> = {
 };
 
 const CHEAP_MODEL: Partial<Record<ApiProvider, string>> = {
-	claude: 'claude-haiku-4-5',
+	claude: 'claude-haiku-5-5',
 	openai: 'gpt-5.4-mini',
-	gemini: 'gemini-3.5-flash-lite',
+	gemini: 'gemini-3.8-flash',
 	deepseek: 'deepseek-flash',
 };
 

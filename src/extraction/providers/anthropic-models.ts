@@ -17,13 +17,37 @@
 
 /**
  * Models with adaptive thinking, and therefore with `output_config.effort`.
- * Sonnet 5 and the Opus 4.6+ family qualify; Haiku 4.5 does not — sending it
- * `output_config.effort` is an error, and it has no `adaptive` thinking mode.
+ * Sonnet 5+, Haiku 5.5+ and the Opus 4.6+ family qualify; Haiku 4.5 does not --
+ * sending it `output_config.effort` is an error, and it has no `adaptive`
+ * thinking mode.
  */
-const ADAPTIVE_THINKING = /^claude-(sonnet-([5-9]|\d\d)|opus-4-([6-9]|\d\d)|opus-([5-9]|\d\d)|fable-|mythos-)/;
+const ADAPTIVE_THINKING =
+	/^claude-(sonnet-([5-9]|\d\d)|haiku-([5-9]|\d\d)|opus-4-([6-9]|\d\d)|opus-([5-9]|\d\d)|fable-|mythos-)/;
 
 export function supportsAdaptiveThinking(model: string): boolean {
 	return ADAPTIVE_THINKING.test(model.trim());
+}
+
+/**
+ * How a model with adaptive thinking is asked not to think, for *Minimal*.
+ *
+ * - `disabled`: `thinking: {type: "disabled"}` -- Sonnet 5, Haiku 5.5, Opus 5
+ *   and the Opus 4.6-4.8 line, all at their default effort.
+ * - `between_tools`: Sonnet 5.5 rejects `disabled` with a 400 and takes
+ *   `{type: "between_tools"}` instead. No other model accepts that value.
+ * - `none`: thinking cannot be turned off (Opus 5.5, Fable, Mythos); both
+ *   `disabled` and a budget are a 400. The lowest setting is effort `low`.
+ */
+export type ThinkingOff = 'disabled' | 'between_tools' | 'none';
+
+const BETWEEN_TOOLS = /^claude-sonnet-5-5(?!\d)/;
+const ALWAYS_THINKS = /^claude-(opus-5-5(?!\d)|fable-|mythos-)/;
+
+export function thinkingOffMode(model: string): ThinkingOff {
+	const id = model.trim();
+	if (BETWEEN_TOOLS.test(id)) return 'between_tools';
+	if (ALWAYS_THINKS.test(id)) return 'none';
+	return 'disabled';
 }
 
 /**

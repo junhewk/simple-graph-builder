@@ -6,16 +6,16 @@ import { CURRENT_SETTINGS_VERSION } from './settings';
  *
  * Order matters: the narrower pattern in each family must come first, or the
  * general rule swallows it (`gemini-2.5-flash-lite` would become
- * `gemini-3.6-flash` rather than `gemini-3.5-flash-lite`).
+ * `gemini-3.8-flash` rather than `gemini-3.5-flash-lite`).
  *
  * Ollama models are deliberately absent — those tags name models the user has
  * actually pulled to disk, and rewriting one points at something that isn't
  * there.
  */
 const MODEL_MIGRATIONS: [RegExp, string][] = [
-	// Anthropic. Only Sonnet 5 and Haiku 4.5 are offered, so Opus lands on Sonnet 5.
-	[/^claude-(3-5-haiku|3-haiku|haiku-)/, 'claude-haiku-4-5'],
-	[/^claude-/, 'claude-sonnet-5'],
+	// Anthropic. Only Sonnet 5.5 and Haiku 5.5 are offered, so Opus lands on Sonnet 5.5.
+	[/^claude-(3-5-haiku|3-haiku|haiku-)/, 'claude-haiku-5-5'],
+	[/^claude-/, 'claude-sonnet-5-5'],
 
 	// OpenAI. Small/cheap tiers land on the mini model, everything else on Luna.
 	[/^(gpt-.*-(mini|nano)|gpt-.*-(mini|nano)-.*|o\d-mini)/, 'gpt-5.4-mini'],
@@ -23,7 +23,7 @@ const MODEL_MIGRATIONS: [RegExp, string][] = [
 
 	// Gemini. Lite tier keeps its tier.
 	[/^gemini-.*(lite|flash-8b)/, 'gemini-3.5-flash-lite'],
-	[/^gemini-/, 'gemini-3.6-flash'],
+	[/^gemini-/, 'gemini-3.8-flash'],
 ];
 
 /** Embedding models are versioned separately from chat models. */
@@ -39,6 +39,17 @@ const CHAT_MODEL_KEYS = [
 	'openaiModel',
 	'geminiModel',
 ] as const;
+
+/**
+ * v9: each listed model replaced by its successor. Exact IDs only, so a model
+ * typed in by hand stays, and each move is at the same price or lower.
+ * `gemini-3.5-flash-lite` is left alone: it is a deliberate cost choice.
+ */
+const V9_SUCCESSORS: [typeof CHAT_MODEL_KEYS[number], string, string][] = [
+	['claudeModel', 'claude-sonnet-5', 'claude-sonnet-5-5'],
+	['claudeModel', 'claude-haiku-4-5', 'claude-haiku-5-5'],
+	['geminiModel', 'gemini-3.6-flash', 'gemini-3.8-flash'],
+];
 
 /** Smart Search was removed in 0.7.0; its stored settings are dropped. */
 const REMOVED_SMART_SEARCH_KEYS = [
@@ -153,6 +164,19 @@ export function migrateSettings(settings: Settings, storedVersion: number): Migr
 	// v8 adds literature controls only; credentials never enter data.json.
 	next.literatureContactEmail = typeof next.literatureContactEmail === 'string' ? next.literatureContactEmail.trim() : '';
 	next.literaturePageSize = [10, 20, 50].includes(next.literaturePageSize) ? next.literaturePageSize : 20;
+
+	// v9: Claude Sonnet 5.5, Claude Haiku 5.5 and Gemini 3.8 Flash replace the
+	// models they succeed. Version-gated, like v2, so choosing an older model
+	// again later is respected.
+	if (storedVersion < 9) {
+		for (const [key, from, to] of V9_SUCCESSORS) {
+			if (next[key] === from) {
+				next[key] = to;
+				notes.push(`${key}: ${from} → ${to}`);
+			}
+		}
+	}
+
 	next.settingsVersion = CURRENT_SETTINGS_VERSION;
 
 	const changed = notes.length > 0 || storedVersion !== CURRENT_SETTINGS_VERSION;
