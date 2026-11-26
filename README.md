@@ -22,11 +22,12 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 See the [0.10.2 release notes](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.2)
 and the [full changelog](CHANGELOG.md).
 
-Latest patch: [0.10.3](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.3)
+Latest patch: [0.10.4](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.4)
+adds Claude Sonnet 5.5 and Haiku 5.5, and Gemini 3.8 Flash and Gemini 4 Hydrogen.
+Settings that used the models they replace move to them, at the same price or
+lower. [0.10.3](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.3)
 keeps analysis records when you move several analyzed notes at once, so they are
-not analyzed and billed again. It matches records in either Unicode path form.
-**Remove current note from graph** now also clears the record of a note that
-added nothing to the graph.
+not analyzed and billed again.
 
 ## Find more literature from your graph
 
@@ -132,9 +133,9 @@ Note analysis requires a model that can return **structured output**. Models tha
 
 | Provider | Models |
 |----------|--------|
-| Claude | `claude-sonnet-5`, `claude-haiku-4-5` |
+| Claude | `claude-sonnet-5-5`, `claude-haiku-5-5` |
 | OpenAI | `gpt-6-luna`, `gpt-5.4-mini` |
-| Gemini | `gemini-3.6-flash`, `gemini-3.5-flash-lite` |
+| Gemini | `gemini-3.8-flash`, `gemini-4-hydrogen` |
 | DeepSeek | `deepseek-flash` |
 | Local | any model your server exposes — Ollama, or an OpenAI-compatible server such as llama.cpp's `llama-server`, LM Studio or vLLM |
 

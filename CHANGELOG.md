@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.10.4 - Claude Sonnet 5.5, Haiku 5.5, Gemini 3.8 Flash and Gemini 4 Hydrogen
+
+- **New models.** Claude now offers `claude-sonnet-5-5` (the default) and
+  `claude-haiku-5-5`. Gemini offers `gemini-3.8-flash` (the default) and
+  `gemini-4-hydrogen`.
+- **Settings move to the successors on first load:** `claude-sonnet-5` becomes
+  `claude-sonnet-5-5`, `claude-haiku-4-5` becomes `claude-haiku-5-5`, and
+  `gemini-3.6-flash` becomes `gemini-3.8-flash`. Each costs the same or less.
+  Other choices stay as they are, including `gemini-3.5-flash-lite` and models
+  typed into **Custom…**. To go back to an older model, choose **Custom…** and
+  type its ID.
+- **Reasoning effort is sent in the form each model accepts.** On Claude Sonnet
+  5.5, *Minimal* turns thinking off. On models that always think, such as Gemini
+  3.8 Flash and Gemini 4 Hydrogen, *Minimal* uses their lowest level. Before,
+  these models rejected the request and it ran again at the model's default
+  level, which is the most expensive one on Gemini 4 Hydrogen. *Max* uses `xhigh`
+  on Gemini 4 Hydrogen. Claude Haiku 5.5 is the first Haiku model that uses the
+  effort setting.
+- **Refusals are reported as refusals.** When Claude declines a request, the
+  notice names the category. Before, it reported an empty response.
+
 ## 0.10.3 - Analysis records survive moves and renames
 
 - Moving several analyzed notes at once no longer loses their analysis

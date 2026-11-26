@@ -34,7 +34,7 @@ the row, as Obsidian's own settings do.
 - **Extraction Mode**: Control extraction depth
   - *Standard*: Max 15 entities per chunk (fast, low cost)
   - *Thorough*: No limits per chunk (comprehensive extraction)
-- **Reasoning effort**: How much the model thinks before extracting — *Auto*, *Minimal*, *Low*, *Medium*, *High*, or *Max*. Defaults to *Minimal*: notes are processed in many parallel chunks, so higher levels raise cost and latency noticeably. Models that don't support the setting (such as `claude-haiku-4-5`) are flagged in settings and simply ignore it.
+- **Reasoning effort**: How much the model thinks before extracting — *Auto*, *Minimal*, *Low*, *Medium*, *High*, or *Max*. Defaults to *Minimal*: notes are processed in many parallel chunks, so higher levels raise cost and latency noticeably. Each level is sent in the form the model accepts. *Minimal* turns thinking off where the model allows it. On models that always think, such as `claude-opus-5-5`, `gemini-3.8-flash` and `gemini-4-hydrogen`, it uses their lowest level. *Max* uses the model's highest level, such as `xhigh` on `gemini-4-hydrogen`. Models that don't support the setting (such as `claude-haiku-4-5`) are flagged in settings and simply ignore it.
 - **Chunked Processing**: Long notes are automatically split into ~500 token chunks and processed in parallel (max 3 concurrent)
 
 ## Analysis Exclusions
