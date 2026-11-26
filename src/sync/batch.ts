@@ -12,7 +12,7 @@
 import { Notice, TFile } from 'obsidian';
 import type SimpleGraphBuilderPlugin from '../main';
 import { isNoteNode } from '../types';
-import { loadHashes, saveHashes, computeNoteHashes, upgradeLegacyHash } from '../graph/hashes';
+import { loadHashes, updateHashes, computeNoteHashes, upgradeLegacyHash, NoteHashes } from '../graph/hashes';
 import { upsertEntityNotes, isEntityNotePath } from './entity-notes';
 import { clearRelatedProperty, writeRelatedProperty } from './related';
 
@@ -125,7 +125,7 @@ export async function writeLinksForVault(
 			// to the body form has to happen here, before the write, because
 			// afterwards the stored hash no longer matches anything on disk.
 			const hashes = await loadHashes(plugin);
-			let hashesChanged = false;
+			const upgraded: Array<[TFile, NoteHashes]> = [];
 
 			for (let i = 0; i < files.length; i++) {
 				if (state.isCancelled) break;
@@ -133,7 +133,8 @@ export async function writeLinksForVault(
 				progress.setMessage(`Writing links: ${i + 1}/${files.length}\n${files[i].basename}`);
 				try {
 					const content = await plugin.app.vault.cachedRead(files[i]);
-					if (upgradeLegacyHash(hashes, files[i].path, computeNoteHashes(content))) hashesChanged = true;
+					const noteHashes = computeNoteHashes(content);
+					if (upgradeLegacyHash(hashes, files[i].path, noteHashes)) upgraded.push([files[i], noteHashes]);
 
 					if (await writeRelatedProperty(plugin, files[i])) notesUpdated++;
 				} catch (error) {
@@ -143,7 +144,18 @@ export async function writeLinksForVault(
 				if (i % YIELD_EVERY === 0) await yieldToUi();
 			}
 
-			if (hashesChanged) await saveHashes(plugin, hashes);
+			// Applied to the records as they are now, not saved over them from the
+			// copy read before the loop, and at each file's current path: a rename
+			// during the loop must survive and keep its upgrade.
+			if (upgraded.length) {
+				await updateHashes(plugin, h => {
+					let changed = false;
+					for (const [file, noteHashes] of upgraded) {
+						if (upgradeLegacyHash(h, file.path, noteHashes)) changed = true;
+					}
+					return changed;
+				});
+			}
 		}
 
 		await plugin.graphCache.flush();

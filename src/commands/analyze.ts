@@ -1,7 +1,7 @@
 import { Notice, MarkdownView, TFile } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
 import type { OntologyExtractionResult, ResolutionStats, Settings } from '../types';
-import { loadHashes, saveHashes, computeNoteHashes, hasNoteChangedByHashes, upgradeLegacyHash, updateNoteHash, removeNoteHash, clearHashes, getNoteHash } from '../graph/hashes';
+import { loadHashes, updateHashes, recordNoteHash, computeNoteHashes, hasNoteChangedByHashes, upgradeLegacyHash, updateNoteHash, removeNoteHash, clearHashes, getNoteHash } from '../graph/hashes';
 import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeNoteLayerIntoCache, removeNoteFromCache } from '../graph/merge';
 import { stripFrontmatter } from '../sync/note-content';
 import { syncNoteWriteback, deleteEntityNote, clearRelatedProperty } from '../sync';
@@ -49,7 +49,9 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 	if (!hasNoteChangedByHashes(hashes, file.path, noteHashes)) {
 		// Recognized by its pre-0.6 whole-file hash: record the body hash now, or
 		// the next frontmatter edit would make this note look changed.
-		if (upgradeLegacyHash(hashes, file.path, noteHashes)) await saveHashes(plugin, hashes);
+		if (upgradeLegacyHash(hashes, file.path, noteHashes)) {
+			await updateHashes(plugin, h => upgradeLegacyHash(h, file.path, noteHashes));
+		}
 		new Notice('Note has not changed since last analysis');
 		return;
 	}
@@ -94,9 +96,9 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 			}
 		}
 
-		// Update hash
-		const updatedHashes = updateNoteHash(hashes, file.path, noteHashes.body);
-		await saveHashes(plugin, updatedHashes);
+		// Record the hash on data.json as it is now, not on the copy read before
+		// the model call: a rename or another analysis may have landed meanwhile.
+		await recordNoteHash(plugin, file.path, noteHashes.body);
 
 		// Build success message
 		const parts: string[] = [];
@@ -225,16 +227,20 @@ export async function removeCurrentNoteFromGraph(plugin: SimpleGraphBuilderPlugi
 		} catch (error) {
 			console.error('Simple Graph Builder: could not clean up written links', error);
 		}
+	}
 
-		// Also remove the hash so it can be re-analyzed
-		const hashes = await loadHashes(plugin);
-		const updatedHashes = removeNoteHash(hashes, file.path);
-		await saveHashes(plugin, updatedHashes);
+	// The record goes either way, so the note can be analyzed again. A note
+	// whose analysis found nothing has a record but no graph data, and keeping
+	// the record would leave it marked analyzed for good.
+	const hadRecord = await updateHashes(plugin, hashes => removeNoteHash(hashes, file.path));
 
+	if (nodesRemoved > 0 || edgesRemoved > 0) {
 		new Notice(`Removed "${file.basename}" from graph (${nodesRemoved} nodes, ${edgesRemoved} edges)`);
 		plugin.updateStatusBar();
+	} else if (hadRecord) {
+		new Notice(`"${file.basename}" had no graph data, so its analysis record was cleared`);
 	} else {
-		new Notice('This note is not in the graph');
+		new Notice(`"${file.basename}" was never analyzed`);
 	}
 }
 
@@ -252,6 +258,10 @@ export async function clearAllGraphData(plugin: SimpleGraphBuilderPlugin): Promi
 /**
  * Analyze a single file (used by vault analysis and auto-analysis).
  * Returns true if analysis was successful, false otherwise.
+ *
+ * `hashes` is a snapshot to check against. What changes -- a new record, an
+ * upgraded legacy one -- goes to data.json through the queue as it happens,
+ * and into the snapshot too, so the caller never saves the snapshot itself.
  */
 export async function analyzeFile(
 	plugin: SimpleGraphBuilderPlugin,
@@ -283,8 +293,9 @@ export async function analyzeFile(
 		// Check if note has changed
 		const noteHashes = computeNoteHashes(content);
 		if (skipUnchanged && !hasNoteChangedByHashes(hashes, file.path, noteHashes)) {
-			// Caller persists `hashes`, so the upgraded record travels with it.
-			upgradeLegacyHash(hashes, file.path, noteHashes);
+			if (upgradeLegacyHash(hashes, file.path, noteHashes)) {
+				await updateHashes(plugin, h => upgradeLegacyHash(h, file.path, noteHashes));
+			}
 			return { success: false, skipped: true, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 		}
 
@@ -299,8 +310,9 @@ export async function analyzeFile(
 
 		const { nodesAdded, nodesMerged, relationshipsAdded } = await applyExtraction(plugin, file, content, result);
 
-		// Update hash in the passed hashes object
+		// Only this record step waits for the data.json queue, never the model call.
 		updateNoteHash(hashes, file.path, noteHashes.body);
+		await recordNoteHash(plugin, file.path, noteHashes.body);
 
 		return { success: true, skipped: false, nodesAdded, nodesMerged, relationshipsAdded };
 	} catch (error) {
@@ -452,7 +464,7 @@ export async function analyzeEntireVault(
 			if (result.success && i < files.length - 1) await sleep(500);
 		}
 
-		await saveHashes(plugin, hashes);
+		// Each note's record was saved as it finished.
 		await plugin.graphCache.flush();
 		const outcome = unavailable ? 'stopped' : vaultAnalysisState.isCancelled ? 'cancelled' : 'complete';
 		new Notice(
@@ -504,7 +516,6 @@ export async function autoAnalyzeFile(plugin: SimpleGraphBuilderPlugin, file: TF
 		if (result.unavailable && result.error) reportAnalysisUnavailable(plugin, result.error);
 
 		if (result.success) {
-			await saveHashes(plugin, hashes);
 			new Notice(`Auto-analyzed "${file.basename}" (+${result.nodesAdded} nodes, +${result.relationshipsAdded} rels)`);
 			plugin.updateStatusBar();
 		}

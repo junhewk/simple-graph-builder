@@ -1,5 +1,5 @@
 import { Plugin, TFile, TFolder, debounce, Menu, Notice, WorkspaceLeaf } from 'obsidian';
-import { Settings, PluginData } from './types';
+import { Settings } from './types';
 import { DEFAULT_SETTINGS } from './settings';
 import { migrateSettings } from './settings-migration';
 import { SettingsTab } from './ui/settings-tab';
@@ -15,7 +15,8 @@ import { ConfirmModal } from './ui/confirm-modal';
 import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from './sync/batch';
 import { QueryEngine } from './query/engine';
 import { ObsidianVaultSource } from './query/obsidian-source';
-import { loadHashes, renameNoteHash, saveHashes } from './graph/hashes';
+import { HashRenameQueue, healHashRecords } from './graph/hashes';
+import { readData, updateData } from './data-store';
 import { McpController } from './mcp/controller';
 import { showReleaseNotesIfUpdated } from './ui/release-notes-modal';
 import { ImportRegistry } from './import/registry';
@@ -46,6 +47,8 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	/** Marks vault writes the plugin made, so they don't look like user edits. */
 	writeGuard = new WriteGuard();
 	private statusBarItem: HTMLElement | null = null;
+	/** Hash records follow note renames, batched into one data.json write per burst. */
+	private hashRenames = new HashRenameQueue(this);
 
 	// Debounced auto-analyze to avoid multiple calls on rapid saves
 	private debouncedAutoAnalyze = debounce(
@@ -219,6 +222,10 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		// at plugin load. Only runs when there is something to do.
 		this.app.workspace.onLayoutReady(() => {
 			this.repairNoteLayer(false);
+			// Store hash records written under NFD paths, or in both forms, by
+			// another device or version once, in NFC. Lookups already compare in
+			// NFC, so nothing waits on this; it keeps startup to one read less.
+			void healHashRecords(this).catch(error => console.error('Simple Graph Builder: could not normalize analysis records', error));
 			this.registerIndexEvents();
 			if (this.settings.mcpEnabled) void this.mcp.start();
 			void showReleaseNotesIfUpdated(this, this.freshInstall);
@@ -261,11 +268,12 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	private async followRename(oldPath: string, newPath: string): Promise<void> {
 		const moved = this.graphCache.renameSourceNote(oldPath, newPath);
 		if (this.imports.renamePath(oldPath, newPath)) this.graphCache.setImports(this.imports.toRecord());
-		const hashes = await loadHashes(this);
-		if (hashes.hashes.some(h => h.path === oldPath)) {
-			await saveHashes(this, renameNoteHash(hashes, oldPath, newPath));
-		}
 		if (moved.nodes || moved.edges) this.debouncedNoteLayerRebuild();
+		try {
+			await this.hashRenames.follow(oldPath, newPath);
+		} catch (error) {
+			console.error(`Simple Graph Builder: could not move the analysis record of ${oldPath}`, error);
+		}
 	}
 
 
@@ -402,7 +410,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	}
 
 	async loadSettings() {
-		const data = (await this.loadData()) as PluginData | null;
+		const data = await readData(this);
 		this.freshInstall = !data?.settings;
 
 		// Read the stored version before merging: Object.assign fills a missing
@@ -424,13 +432,10 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	}
 
 	async saveSettings() {
-		const data = ((await this.loadData()) as PluginData | null) ?? {
-			settings: DEFAULT_SETTINGS,
-			graph: { nodes: [], edges: [], version: 1 },
-			hashes: { hashes: [] },
-		};
-		data.settings = this.settings;
-		await this.saveData(data);
+		// Only the settings key: the graph and hash records are other writers'.
+		await updateData(this, data => {
+			data.settings = this.settings;
+		});
 
 		// Exclusions decide what search and agents may see; re-index under the new rules.
 		if (this.queryEngine) {

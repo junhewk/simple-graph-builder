@@ -1,6 +1,7 @@
 import { Notice } from 'obsidian';
-import { GraphData, OntologyNode, OntologyEdge, PluginData, GRAPH_SCHEMA_VERSION, NOTE_ID_PREFIX, isLegacyGraphData, isLegacyWikilinkEdge, isNoteLayerEdge, isNoteNode, noteNodeIds, ResolutionCache, EmbeddingIndex, labelToEntityType, normalizeKey, normalizeUnicode } from '../types';
-import { DEFAULT_SETTINGS, DEFAULT_EMBEDDING_DIMENSIONS, getEmbeddingDimensions } from '../settings';
+import { GraphData, OntologyNode, OntologyEdge, GRAPH_SCHEMA_VERSION, NOTE_ID_PREFIX, isLegacyGraphData, isLegacyWikilinkEdge, isNoteLayerEdge, isNoteNode, noteNodeIds, ResolutionCache, EmbeddingIndex, labelToEntityType, normalizeKey, normalizeUnicode } from '../types';
+import { DEFAULT_EMBEDDING_DIMENSIONS, getEmbeddingDimensions } from '../settings';
+import { readData, updateData } from '../data-store';
 import { loadEmbeddingsBinary, saveEmbeddingsBinary, cosineSimilarity } from '../extraction/llm-client';
 import type SimpleGraphBuilderPlugin from '../main';
 import type { ImportManifest } from '../import/types';
@@ -119,7 +120,7 @@ export class GraphCache {
 	async ensureLoaded(): Promise<void> {
 		if (this.loaded) return;
 
-		const data = (await this.plugin.loadData()) as PluginData | null;
+		const data = await readData(this.plugin);
 		const graph = data?.graph;
 
 		if (graph) {
@@ -1058,7 +1059,7 @@ export class GraphCache {
 		if (this.embeddingsLoaded) return;
 
 		// Load embedding index from plugin data
-		const data = (await this.plugin.loadData()) as PluginData | null;
+		const data = await readData(this.plugin);
 		this.embeddingIndex = data?.embeddingIndex || null;
 
 		if (!this.embeddingIndex || this.embeddingIndex.nodeIds.length === 0) {
@@ -1298,43 +1299,57 @@ export class GraphCache {
 		const needsSave = this.dirty || this.resolutionCacheDirty || this.importsDirty || this.embeddingIndex;
 		if (!needsSave) return;
 
-		const data = ((await this.plugin.loadData()) as PluginData | null) ?? {
-			settings: DEFAULT_SETTINGS,
-			graph: { nodes: [], edges: [], version: GRAPH_SCHEMA_VERSION },
-			hashes: { hashes: [] },
-		};
+		// Writes only the cache's own keys, onto data.json as it is when this
+		// write's turn comes: settings and hash records belong to other writers.
+		// The in-memory graph is read at that moment too, so changes made while
+		// the write waited go with it, and the dirty flags clear right then.
+		const taken = { graph: false, resolutionCache: false, imports: false };
+		try {
+			await updateData(this.plugin, data => {
+				if (this.dirty) {
+					// The note layer stays in memory but never reaches disk: it is derived
+					// from sourceNotes and Obsidian's link index, and rebuilt on load.
+					const noteIds = noteNodeIds(this.nodes);
+					data.graph = {
+						nodes: this.nodes.filter(n => !isNoteNode(n)),
+						edges: this.edges.filter(e => !isNoteLayerEdge(e, noteIds)),
+						version: this.version,
+					};
+					taken.graph = true;
+				}
 
-		if (this.dirty) {
-			// The note layer stays in memory but never reaches disk: it is derived
-			// from sourceNotes and Obsidian's link index, and rebuilt on load.
-			const noteIds = noteNodeIds(this.nodes);
-			data.graph = {
-				nodes: this.nodes.filter(n => !isNoteNode(n)),
-				edges: this.edges.filter(e => !isNoteLayerEdge(e, noteIds)),
-				version: this.version,
-			};
+				if (this.resolutionCacheDirty) {
+					// Convert Map to object for JSON storage
+					const cacheObj: ResolutionCache = {};
+					for (const [token, nodeId] of this.resolutionCache) {
+						cacheObj[token] = nodeId;
+					}
+					data.resolutionCache = cacheObj;
+					taken.resolutionCache = true;
+				}
+
+				// Include embedding index if present
+				if (this.embeddingIndex) {
+					data.embeddingIndex = this.embeddingIndex;
+				}
+
+				if (this.importsDirty) {
+					data.imports = this.imports;
+					taken.imports = true;
+				}
+
+				if (!taken.graph && !taken.resolutionCache && !taken.imports && !this.embeddingIndex) return false;
+				this.dirty = false;
+				this.resolutionCacheDirty = false;
+				this.importsDirty = false;
+			});
+		} catch (error) {
+			// Not saved: keep what this write took marked for the next one.
+			if (taken.graph) this.dirty = true;
+			if (taken.resolutionCache) this.resolutionCacheDirty = true;
+			if (taken.imports) this.importsDirty = true;
+			throw error;
 		}
-
-		if (this.resolutionCacheDirty) {
-			// Convert Map to object for JSON storage
-			const cacheObj: ResolutionCache = {};
-			for (const [token, nodeId] of this.resolutionCache) {
-				cacheObj[token] = nodeId;
-			}
-			data.resolutionCache = cacheObj;
-		}
-
-		// Include embedding index if present
-		if (this.embeddingIndex) {
-			data.embeddingIndex = this.embeddingIndex;
-		}
-
-		if (this.importsDirty) data.imports = this.imports;
-
-		await this.plugin.saveData(data);
-		this.dirty = false;
-		this.resolutionCacheDirty = false;
-		this.importsDirty = false;
 	}
 
 	/**

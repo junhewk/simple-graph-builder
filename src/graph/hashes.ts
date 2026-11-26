@@ -1,21 +1,93 @@
-import { HashData, NoteHash, PluginData } from '../types';
+import { HashData, NoteHash, PluginData, normalizeUnicode } from '../types';
 import { stripFrontmatter } from '../sync/note-content';
-import SimpleGraphBuilderPlugin from '../main';
+import { DataHost, readData, updateData } from '../data-store';
 
-export async function loadHashes(plugin: SimpleGraphBuilderPlugin): Promise<HashData> {
-	const data = (await plugin.loadData()) as PluginData | null;
-	return data?.hashes ?? { hashes: [] };
+/**
+ * The key a hash record is stored and matched under: the path in NFC.
+ *
+ * macOS can hand Obsidian NFD file names, and data.json syncs between devices
+ * whose file systems disagree. A record stored in one form and looked up in the
+ * other would make an analyzed note look new -- and re-analyzing it costs an
+ * API call. Every lookup, filter and rename below compares through this.
+ */
+export function notePathKey(path: string): string {
+	return normalizeUnicode(path);
 }
 
-export async function saveHashes(plugin: SimpleGraphBuilderPlugin, hashes: HashData): Promise<void> {
-	const data = ((await plugin.loadData()) as PluginData | null) ?? {
-		settings: plugin.settings,
-		graph: { nodes: [], edges: [], version: 1 },
-		hashes: { hashes: [] },
-	};
+/** A snapshot of the hash records, healed, for reading. Changes go through updateHashes. */
+export async function loadHashes(host: DataHost): Promise<HashData> {
+	const data = await readData(host);
+	const hashes = data?.hashes?.hashes ? data.hashes : { hashes: [] };
+	normalizeHashData(hashes);
+	return hashes;
+}
 
-	data.hashes = hashes;
-	await plugin.saveData(data);
+/**
+ * Change the stored hash records through the data.json queue.
+ *
+ * `mutate` sees the records as they are on disk now, healed, and returns
+ * false when it changed nothing. Resolves to what `mutate` reported: whether
+ * the records changed. The save also happens when healing alone changed them.
+ */
+export async function updateHashes(host: DataHost, mutate: (hashes: HashData) => boolean | void): Promise<boolean> {
+	let changed = false;
+	await updateData(host, data => {
+		const healed = healStoredHashes(data);
+		changed = mutate(data.hashes) !== false;
+		return changed || healed;
+	});
+	return changed;
+}
+
+/** Record a note's body hash after analyzing it. */
+export function recordNoteHash(host: DataHost, path: string, hash: string): Promise<boolean> {
+	return updateHashes(host, hashes => {
+		updateNoteHash(hashes, path, hash);
+	});
+}
+
+/**
+ * Normalize stored paths and fold records that become duplicates, at load.
+ * Resolves to true when data.json was rewritten.
+ */
+export function healHashRecords(host: DataHost): Promise<boolean> {
+	return updateData(host, healStoredHashes);
+}
+
+function healStoredHashes(data: PluginData): boolean {
+	if (!data.hashes?.hashes) data.hashes = { hashes: [] };
+	return normalizeHashData(data.hashes);
+}
+
+/**
+ * Store every record under its NFC path, keeping one record per path.
+ *
+ * Records that collide after normalization are the same note written from two
+ * devices or two Obsidian versions; the most recent analysis wins. Returns
+ * true when anything changed.
+ */
+export function normalizeHashData(hashes: HashData): boolean {
+	const kept = new Map<string, NoteHash>();
+	let changed = false;
+	for (const record of hashes.hashes) {
+		const path = notePathKey(record.path);
+		const normalized = path === record.path ? record : { ...record, path };
+		if (normalized !== record) changed = true;
+		const existing = kept.get(path);
+		if (!existing) {
+			kept.set(path, normalized);
+			continue;
+		}
+		changed = true;
+		if ((normalized.analyzedAt ?? 0) > (existing.analyzedAt ?? 0)) kept.set(path, normalized);
+	}
+	if (changed) hashes.hashes = [...kept.values()];
+	return changed;
+}
+
+function findRecord(hashes: HashData, path: string): NoteHash | undefined {
+	const key = notePathKey(path);
+	return hashes.hashes.find(h => notePathKey(h.path) === key);
 }
 
 /**
@@ -45,7 +117,7 @@ export function computeHash(content: string, seed = 0): string {
  * Check if a note has changed since last analysis.
  */
 export function hasNoteChanged(hashes: HashData, path: string, currentHash: string): boolean {
-	const existing = hashes.hashes.find(h => h.path === path);
+	const existing = findRecord(hashes, path);
 	return !existing || existing.hash !== currentHash;
 }
 
@@ -73,7 +145,7 @@ export function computeNoteHashes(content: string): NoteHashes {
 
 /** True when neither the stored body hash nor a pre-upgrade full hash matches. */
 export function hasNoteChangedByHashes(hashes: HashData, path: string, current: NoteHashes): boolean {
-	const existing = hashes.hashes.find(h => h.path === path);
+	const existing = findRecord(hashes, path);
 	if (!existing) return true;
 	return existing.hash !== current.body && existing.hash !== current.legacy;
 }
@@ -91,7 +163,7 @@ export function hasNoteChangedByHashes(hashes: HashData, path: string, current: 
  * Returns true when a record was rewritten and the caller should save.
  */
 export function upgradeLegacyHash(hashes: HashData, path: string, current: NoteHashes): boolean {
-	const existing = hashes.hashes.find(h => h.path === path);
+	const existing = findRecord(hashes, path);
 	if (!existing || existing.hash !== current.legacy || existing.hash === current.body) return false;
 
 	existing.hash = current.body;
@@ -102,28 +174,21 @@ export function upgradeLegacyHash(hashes: HashData, path: string, current: NoteH
  * Get the hash record for a specific note.
  */
 export function getNoteHash(hashes: HashData, path: string): NoteHash | undefined {
-	return hashes.hashes.find(h => h.path === path);
+	return findRecord(hashes, path);
 }
 
 /**
- * Update or add a note's hash record.
+ * Update or add a note's hash record, under the NFC path.
  */
 export function updateNoteHash(hashes: HashData, path: string, hash: string): HashData {
-	const now = Date.now();
-	const existingIndex = hashes.hashes.findIndex(h => h.path === path);
+	const key = notePathKey(path);
+	const record: NoteHash = { path: key, hash, analyzedAt: Date.now() };
+	const existingIndex = hashes.hashes.findIndex(h => notePathKey(h.path) === key);
 
 	if (existingIndex >= 0) {
-		hashes.hashes[existingIndex] = {
-			path,
-			hash,
-			analyzedAt: now,
-		};
+		hashes.hashes[existingIndex] = record;
 	} else {
-		hashes.hashes.push({
-			path,
-			hash,
-			analyzedAt: now,
-		});
+		hashes.hashes.push(record);
 	}
 
 	return hashes;
@@ -131,21 +196,71 @@ export function updateNoteHash(hashes: HashData, path: string, hash: string): Ha
 
 /**
  * Remove a note's hash record (when note is deleted or removed from graph).
+ * Returns true when there was one.
  */
-export function removeNoteHash(hashes: HashData, path: string): HashData {
-	hashes.hashes = hashes.hashes.filter(h => h.path !== path);
-	return hashes;
+export function removeNoteHash(hashes: HashData, path: string): boolean {
+	const key = notePathKey(path);
+	const before = hashes.hashes.length;
+	hashes.hashes = hashes.hashes.filter(h => notePathKey(h.path) !== key);
+	return hashes.hashes.length !== before;
 }
 
 /**
- * Update hash when a note is renamed.
+ * Move a note's hash record to its new path. Returns true when one moved.
+ *
+ * A record already stored under the new path belonged to a note that is gone
+ * -- deleting a note leaves its record behind -- and the moved one replaces it.
  */
-export function renameNoteHash(hashes: HashData, oldPath: string, newPath: string): HashData {
-	const existing = hashes.hashes.find(h => h.path === oldPath);
-	if (existing) {
-		existing.path = newPath;
+export function renameNoteHash(hashes: HashData, oldPath: string, newPath: string): boolean {
+	const from = notePathKey(oldPath);
+	const to = notePathKey(newPath);
+	const existing = hashes.hashes.find(h => notePathKey(h.path) === from);
+	if (!existing) return false;
+	if (from === to) {
+		if (existing.path === to) return false;
+		existing.path = to;
+		return true;
 	}
-	return hashes;
+	hashes.hashes = hashes.hashes.filter(h => h === existing || notePathKey(h.path) !== to);
+	existing.path = to;
+	return true;
+}
+
+/**
+ * Moves hash records after renames, one data.json write per burst.
+ *
+ * Moving a folder fires one rename event per note. Written one at a time, a
+ * move of a few hundred analyzed notes would load and save the whole data.json
+ * a few hundred times. Renames wait here instead, and the next write applies
+ * all of them in order, so a -> b followed by b -> c still ends at c.
+ */
+export class HashRenameQueue {
+	private pending: Array<[string, string]> = [];
+	private write: Promise<void> | null = null;
+
+	constructor(private readonly host: DataHost) {}
+
+	/** Resolves once this rename is saved, or was nothing to save. */
+	follow(oldPath: string, newPath: string): Promise<void> {
+		this.pending.push([oldPath, newPath]);
+		if (this.write) return this.write;
+
+		const write = updateHashes(this.host, hashes => {
+			// Renames arriving from here on need the next write.
+			this.write = null;
+			let changed = false;
+			for (const [from, to] of this.pending.splice(0)) {
+				if (renameNoteHash(hashes, from, to)) changed = true;
+			}
+			return changed;
+		}).then(() => undefined);
+		this.write = write;
+		// A load that failed leaves the renames pending for the next write.
+		write.catch(() => {
+			if (this.write === write) this.write = null;
+		});
+		return write;
+	}
 }
 
 /**
@@ -174,6 +289,8 @@ export function getHashStats(hashes: HashData): { count: number; oldestAnalysis:
 /**
  * Clear all hash records.
  */
-export async function clearHashes(plugin: SimpleGraphBuilderPlugin): Promise<void> {
-	await saveHashes(plugin, { hashes: [] });
+export async function clearHashes(host: DataHost): Promise<void> {
+	await updateData(host, data => {
+		data.hashes = { hashes: [] };
+	});
 }

@@ -16,7 +16,7 @@ import { applyExtraction, isAnalyzingVault, planVaultAnalysis } from '../command
 import { parseExtraction, validateEnvelope } from '../extraction/llm-client';
 import { buildAgentExtractionInstructions, truncateContent } from '../extraction/prompts';
 import { getExtractionConfigError } from '../extraction/providers/models';
-import { computeNoteHashes, getNoteHash, hasNoteChangedByHashes, loadHashes, saveHashes, updateNoteHash } from '../graph/hashes';
+import { computeNoteHashes, getNoteHash, hasNoteChangedByHashes, loadHashes, recordNoteHash } from '../graph/hashes';
 import { stripFrontmatter } from '../sync/note-content';
 import { isNoteNode } from '../types';
 import type { NotFound } from '../query/types';
@@ -56,7 +56,7 @@ export interface SubmitResult {
 }
 
 export class GraphWriter {
-	/** Submissions run one at a time: each reads and saves the hash table. */
+	/** Submissions run one at a time: one note's merge and write-back finish before the next starts. */
 	private queue: Promise<unknown> = Promise.resolve();
 
 	constructor(
@@ -116,8 +116,8 @@ export class GraphWriter {
 	}
 
 	private async submitNow(ref: string, hash: string, entities: unknown[], relationships: unknown[]): Promise<SubmitResult | NotFound> {
-		// A vault analysis holds its own copy of the hash table and saves it at
-		// the end, which would drop the hash recorded here.
+		// A vault analysis works through the same pending notes with the
+		// configured provider; both would extract and merge the same note.
 		if (isAnalyzingVault()) {
 			return { error: 'Obsidian is analyzing the vault right now. Try again when it finishes.' };
 		}
@@ -152,9 +152,7 @@ export class GraphWriter {
 		};
 		const merged = await applyExtraction(this.plugin, file, content, result, settings);
 
-		const hashes = await loadHashes(this.plugin);
-		updateNoteHash(hashes, file.path, note.hash);
-		await saveHashes(this.plugin, hashes);
+		await recordNoteHash(this.plugin, file.path, note.hash);
 		this.plugin.updateStatusBar();
 
 		return {
