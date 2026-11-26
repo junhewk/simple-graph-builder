@@ -70,7 +70,7 @@ Everything stays in your vault, in the plugin folder
 
 | File | What it holds |
 |---|---|
-| `data.json` | Settings (including API keys) and the graph: entities and their relationships. Note nodes and their `mentions` / `links to` edges are not stored; they are rebuilt from your notes and Obsidian's link index on every load |
+| `data.json` | Settings (including API keys); the graph: entities and their relationships; and an analysis record for each analyzed note, a hash of its text that lets analysis skip unchanged notes. Note nodes and their `mentions` / `links to` edges are not stored; they are rebuilt from your notes and Obsidian's link index on every load |
 | `embeddings.bin` | Entity embeddings, if [entity resolution](SETTINGS.md#entity-resolution-opt-in) is on |
 | `graph-layout.json` | Where each node sits in the [graph view](GRAPH_VIEW.md#layout) |
 | `med-lit/` | A copy of each [imported med-lit project](MED_LIT_IMPORT.md)'s graph |

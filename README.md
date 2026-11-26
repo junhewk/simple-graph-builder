@@ -22,6 +22,12 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 See the [0.10.2 release notes](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.2)
 and the [full changelog](CHANGELOG.md).
 
+Latest patch: [0.10.3](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.3)
+keeps analysis records when you move several analyzed notes at once, so they are
+not analyzed and billed again. It matches records in either Unicode path form.
+**Remove current note from graph** now also clears the record of a note that
+added nothing to the graph.
+
 ## Find more literature from your graph
 
 - **Search from a concept or path.** Choose **Find more literature…** in the
@@ -97,7 +103,7 @@ in **Required concept**, and press Enter. Review both query previews and press
 | `Open graph view` | Show the knowledge graph |
 | `Find more literature…` | Search PubMed/OpenAlex from the active graph selection; also available in the inspector and path view |
 | `Open note neighborhood panel` | Show the current note's connections in the sidebar |
-| `Remove current note from graph` | Remove the active note from the graph |
+| `Remove current note from graph` | Remove the active note from the graph and clear its analysis record, so it can be analyzed again |
 | `Rebuild note layer` | Recreate note nodes and their links from existing data (no API calls) |
 | `Write graph links into notes` | Apply the graph to your vault as Obsidian links (no API calls) |
 | `Remove graph links from notes` | Take the link property back out of every note |

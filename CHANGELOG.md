@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.10.3 - Analysis records survive moves and renames
+
+- Moving several analyzed notes at once no longer loses their analysis
+  records. Each rename saved the plugin's data file separately and the last save
+  won. The other notes then looked unanalyzed, and the next vault analysis paid
+  to extract them again. A graph save or settings change at the same moment
+  could restore stale records the same way. Writes to settings, the graph and
+  analysis records now run one at a time, and each changes only its own data. A
+  folder move is saved once instead of once per note.
+- Vault analysis saves each note's analysis record as soon as that note
+  finishes, instead of saving all records at the end. If Obsidian quits during a
+  run, the notes it already analyzed stay analyzed.
+- Analysis records match note paths in either Unicode form (NFC or NFD), as the
+  rest of the plugin already does. On load, records stored in NFD are
+  normalized. Duplicates stored in both forms, for example from different
+  devices, are merged and the latest analysis is kept.
+- **Remove current note from graph** now clears the analysis record of a note
+  whose analysis found nothing, so the note can be analyzed again. Before, the
+  notice said "This note is not in the graph" and the note stayed marked as
+  analyzed. The notice now says whether nodes were removed, only the record was
+  cleared, or the note was never analyzed.
+
 ## 0.10.2 - Direct AND conditions in literature search
 
 - Type a term in **Required concept** or select a graph path suggestion. Press

@@ -23,6 +23,15 @@ SGB_LAYOUT_BENCH=1 node /tmp/layout.cjs
 
 `tests/query.test.ts` and the `tests/mcp-*.test.ts` suites cover search and agent access against an in-memory vault that includes an excluded folder. `mcp-http` starts a real server on a free port, checks every rejection path (token, Host/Origin, method, content type, size), and drives the Claude Desktop bridge as a child process. `tests/query-reached.test.ts` covers the graph view's [reached-through-the-graph](SEARCH.md#reached-through-the-graph) results on a graph where text matches outnumber the result limit, including that a hub every node touches is ranked below specific neighbors.
 
+Settings, the graph and the analysis records share `data.json`, which Obsidian
+reads and writes as a whole. All access goes through `src/data-store.ts`. It
+runs reads and writes one at a time, so one writer cannot save over another's
+change. A write is a synchronous mutator applied to a fresh load, so slow work
+such as a model call cannot hold up other writes. `tests/data-concurrency.test.ts` drives
+the rename handler, graph flush and settings save against a store whose loads
+and saves finish in random order. `tests/hash-unicode.test.ts` covers analysis
+records stored and looked up in both Unicode forms.
+
 The graph view's own logic is tested where it can run under node:
 
 - `tests/graph-display.test.ts`: display settings (defaults, clamping, malformed values), color conversion, cluster detection, and that the edge weights behind **Link length** and **Cluster pull** really change how long ForceAtlas2 settles an edge.

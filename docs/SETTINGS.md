@@ -67,7 +67,8 @@ off; your custom patterns continue to work with it off.
 
 Changing exclusions affects queued and future analysis; a note already being
 analyzed finishes. Existing graph data, search results, and written links are
-kept. Use **Remove current note from graph** to remove prior contributions.
+kept. Use **Remove current note from graph** to remove prior contributions and
+the note's analysis record.
 Standalone write-back commands remain independent of analysis exclusions.
 Plugin-managed entity notes are always excluded from analysis.
 
