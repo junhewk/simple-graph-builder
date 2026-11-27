@@ -30,18 +30,28 @@ the row, as Obsidian's own settings do.
 
 ## Analysis Settings
 - **Auto-analyze on save**: Analyze a note each time you save it (2-second debounce), so new and edited notes join the graph without another vault analysis
-- **Analyze entire vault**: First counts, on your computer, which eligible notes are new and which changed since their last analysis, and shows those numbers with the unchanged, too-short and excluded notes it will skip. Nothing is sent until you confirm, and then only the new and changed notes are, with progress tracking and cancellation support
+- **Analyze entire vault** counts new, changed and skipped notes locally. After you confirm, it sends the new and changed notes for extraction, with progress tracking and cancellation support.
+- **Automatically correct relationships** is off by default. When enabled, Obsidian checks up to six existing relationships after opening the vault and repeats while the vault stays open. The background review sends one request per 24 hours at most, capped at 6,000 prompt characters and 768 output tokens. It applies changes with a matching original passage that names both entities. Each edit has an undo record.
+- **Review relationships after vault analysis** previews a batch after a vault analysis when automatic correction is off. Changes in the preview apply when you choose them.
 - **Extraction Mode**: Control extraction depth
   - *Standard*: Max 15 entities per chunk (fast, low cost)
   - *Thorough*: No limits per chunk (comprehensive extraction)
 - **Reasoning effort**: How much the model thinks before extracting — *Auto*, *Minimal*, *Low*, *Medium*, *High*, or *Max*. Defaults to *Minimal*: notes are processed in many parallel chunks, so higher levels raise cost and latency noticeably. Each level is sent in the form the model accepts. *Minimal* turns thinking off where the model allows it. On models that always think, such as `claude-opus-5-5`, `gemini-3.8-flash` and `gemini-4-hydrogen`, it uses their lowest level. *Max* uses the model's highest level, such as `xhigh` on `gemini-4-hydrogen`. Models that don't support the setting (such as `claude-haiku-4-5`) are flagged in settings and simply ignore it.
 - **Chunked Processing**: Long notes are automatically split into ~500 token chunks and processed in parallel (max 3 concurrent)
 
+Use **Review graph relationships** to run a batch when the vault is up to date.
+Use **Review relationship** in the graph inspector to edit or retract a source
+locally, flag it for the next batch, or ask the model to check a single excerpt.
+Background review gives flagged sources priority and continues through older
+relationships across runs. It applies corrections to the evidence from one
+note. Inconclusive excerpts and evidence from other notes are preserved.
+See [Relationship review and correction](RELATIONSHIP_REVIEW.md) for examples and undo.
+
 ## Analysis Exclusions
 
 Under **Analysis → Excluded files**, add one vault-relative path or pattern per
 line to **Excluded files and folders**. Exclusions apply to **Analyze current note**, **Analyze entire
-vault**, and **Auto-analyze on save**, before note content is read or sent to a
+vault**, **Auto-analyze on save**, and relationship review, before note content is read or sent to a
 provider. Vault analysis reports excluded notes separately from unchanged or
 short notes.
 

@@ -45,6 +45,19 @@ Relationships are expressed as active verbs describing how entities relate:
 
 Each relationship also includes an optional `detail` field for additional context.
 
+A relationship can have multiple supporting notes. Each new contribution
+stores the note path and body hash. A successful built-in analysis of a full
+note refreshes that note's relationship contributions and keeps evidence from
+other notes and imports. Truncated notes and existing MCP submissions add
+contributions because they can cover only part of a note. Old edges keep their
+recorded source and gain evidence as notes are analyzed or reviewed.
+
+Reviewed passages are referenced by offsets in the note body. Manual and
+automatic corrections and their undo data are stored with the graph in `data.json`.
+Corrections apply to the reviewed note revision, including if extraction runs
+again on the same text. After the note changes, a complete re-analysis can
+refresh its contribution from the new text.
+
 ## Entity Resolution
 
 A key insight from recent knowledge graph research is that **entity resolution is critical** for quality knowledge graphs [3]. Without proper deduplication, "AI", "artificial intelligence", and "Artificial Intelligence" appear as separate nodes, fragmenting your knowledge.

@@ -19,6 +19,8 @@ import {
 } from '../graph/display';
 import { ClusterResult, clusterColor, detectClusters } from '../graph/clusters';
 import { GraphControlsPanel, GraphLegend } from './graph-controls';
+import { noteRelationshipEvidence } from '../graph/relationship-evidence';
+import { openRelationshipReview } from './relationship-review-modal';
 import {
 	GraphInspector,
 	GraphSearchBar,
@@ -514,6 +516,7 @@ export class GraphView extends ItemView {
 		});
 		this.inspector = new GraphInspector(left, {
 			onNavigate: (row, edgeId) => this.pick(row, edgeId),
+			onReviewRelationship: edgeId => openRelationshipReview(this.plugin, edgeId),
 			onOpenNote: path => void this.openNote(path),
 			onClose: () => this.deselect(),
 			onFocusHops: hops => this.setFocusHops(hops),
@@ -1615,6 +1618,7 @@ export class GraphView extends ItemView {
 		const relations: InspectorRelation[] = node.connectedEdges().map(edge => {
 			const { relationship, detail } = edgeData(edge);
 			const out = edge.source().id() === node.id();
+			const original = this.plugin.graphCache.getEdgeById(edge.id());
 			return {
 				edgeId: edge.id(),
 				verb: relationship,
@@ -1622,6 +1626,8 @@ export class GraphView extends ItemView {
 				other: this.rowFor(out ? edge.target() : edge.source()),
 				detail,
 				evidence: this.edgeEvidence(edge.id()),
+				reviewable: !!original && nodeData(edge.source()).entityType !== 'NOTE' &&
+					noteRelationshipEvidence(original).some(item => !item.correctionId),
 			};
 		});
 

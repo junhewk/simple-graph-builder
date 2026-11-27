@@ -1,7 +1,7 @@
 import { Notice, MarkdownView, TFile } from 'obsidian';
 import SimpleGraphBuilderPlugin from '../main';
 import type { OntologyExtractionResult, ResolutionStats, Settings } from '../types';
-import { loadHashes, updateHashes, recordNoteHash, computeNoteHashes, hasNoteChangedByHashes, upgradeLegacyHash, updateNoteHash, removeNoteHash, clearHashes, getNoteHash } from '../graph/hashes';
+import { loadHashes, updateHashes, computeNoteHashes, computeHash, hasNoteChangedByHashes, upgradeLegacyHash, updateNoteHash, removeNoteHash, clearHashes, getNoteHash } from '../graph/hashes';
 import { mergeExtractionIntoCache, mergeExtractionIntoCacheWithResolution, mergeNoteLayerIntoCache, removeNoteFromCache } from '../graph/merge';
 import { stripFrontmatter } from '../sync/note-content';
 import { syncNoteWriteback, deleteEntityNote, clearRelatedProperty } from '../sync';
@@ -9,6 +9,8 @@ import { getAnalysisEligibility, reportAnalysisUnavailable } from '../analysis/e
 import { truncateContent } from '../extraction/prompts';
 import { extractOntologyChunked, settingsToExtractionOptions, ExtractionError } from '../extraction/llm-client';
 import { getExtractionConfigError } from '../extraction/providers/models';
+import { reviewNextRelationships } from '../analysis/relationship-review';
+import type { RelationshipReview } from '../analysis/relationship-review';
 
 // Vault analysis state (encapsulated to avoid module-level mutable variables)
 const vaultAnalysisState = {
@@ -80,7 +82,7 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 		loadingNotice.hide();
 
 		const { nodesAdded, nodesMerged, relationshipsAdded, linksAdded, resolutionStats: stats } =
-			await applyExtraction(plugin, file, content, result);
+			await applyExtraction(plugin, file, content, result, { replace: truncatedContent === body });
 
 		// Build resolution stats info
 		let resolutionInfo = '';
@@ -95,10 +97,6 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 				resolutionInfo = `\nResolution: ${resolvedParts.join(', ')}`;
 			}
 		}
-
-		// Record the hash on data.json as it is now, not on the copy read before
-		// the model call: a rename or another analysis may have landed meanwhile.
-		await recordNoteHash(plugin, file.path, noteHashes.body);
 
 		// Build success message
 		const parts: string[] = [];
@@ -153,8 +151,8 @@ export async function analyzeCurrentNote(plugin: SimpleGraphBuilderPlugin): Prom
 
 /**
  * Merge one note's extraction into the graph: its entities and relationships,
- * its note layer, and the vault write-back when that is on. Recording the
- * note's hash is left to the caller, which knows where hashes are kept.
+ * its note layer, and the vault write-back when that is on. The extracted
+ * relationships and the matching note hash are persisted together.
  *
  * Shared by the analyze commands and by results agents submit over MCP.
  */
@@ -163,8 +161,19 @@ export async function applyExtraction(
 	file: TFile,
 	content: string,
 	result: OntologyExtractionResult,
-	settings: Settings = plugin.settings
+	options: { replace: boolean; settings?: Settings },
 ): Promise<{ nodesAdded: number; nodesMerged: number; relationshipsAdded: number; linksAdded: number; resolutionStats?: ResolutionStats }> {
+	const settings = options.settings ?? plugin.settings;
+	const path = file.path;
+	const bodyHash = computeHash(stripFrontmatter(content).body);
+	const extraction = { bodyHash, replace: options.replace };
+	const checkCurrent = async () => {
+		const latest = await plugin.app.vault.read(file);
+		if (file.path !== path || plugin.app.vault.getAbstractFileByPath(path) !== file ||
+			computeHash(stripFrontmatter(latest).body) !== bodyHash) {
+			throw new Error('The note changed during analysis. Analyze it again to use the latest text.');
+		}
+	};
 	let nodesAdded: number;
 	let nodesMerged = 0;
 	let relationshipsAdded: number;
@@ -172,13 +181,14 @@ export async function applyExtraction(
 
 	// Merge results into graph cache with resolution if embeddings enabled
 	if (settings.enableEmbeddings) {
-		const mergeResult = await mergeExtractionIntoCacheWithResolution(plugin.graphCache, file.path, result, settings);
+		const mergeResult = await mergeExtractionIntoCacheWithResolution(plugin.graphCache, path, result, settings, extraction, checkCurrent);
 		nodesAdded = mergeResult.nodesAdded;
 		nodesMerged = mergeResult.nodesMerged;
 		relationshipsAdded = mergeResult.relationshipsAdded;
 		resolutionStats = mergeResult.resolutionStats;
 	} else {
-		const mergeResult = mergeExtractionIntoCache(plugin.graphCache, file.path, result);
+		await checkCurrent();
+		const mergeResult = mergeExtractionIntoCache(plugin.graphCache, path, result, extraction);
 		nodesAdded = mergeResult.nodesAdded;
 		relationshipsAdded = mergeResult.relationshipsAdded;
 	}
@@ -186,6 +196,7 @@ export async function applyExtraction(
 	// Build the note layer: a NOTE node, its `mentions` edges, and `links to`
 	// edges for its [[wikilinks]]
 	const linksAdded = mergeNoteLayerIntoCache(plugin.graphCache, plugin.app, file, content);
+	await plugin.graphCache.flush({ file, hash: bodyHash });
 
 	// Mirror the result into the vault as real links, when enabled. Ordering
 	// against the hash update does not matter: hashes cover the body only, so
@@ -308,11 +319,10 @@ export async function analyzeFile(
 		const mode = plugin.settings.extractionMode || 'standard';
 		const { result } = await extractOntologyChunked(extractionOptions, truncatedContent, existingNodeNames, mode);
 
-		const { nodesAdded, nodesMerged, relationshipsAdded } = await applyExtraction(plugin, file, content, result);
+		const { nodesAdded, nodesMerged, relationshipsAdded } = await applyExtraction(plugin, file, content, result, { replace: truncatedContent === body });
 
 		// Only this record step waits for the data.json queue, never the model call.
 		updateNoteHash(hashes, file.path, noteHashes.body);
-		await recordNoteHash(plugin, file.path, noteHashes.body);
 
 		return { success: true, skipped: false, nodesAdded, nodesMerged, relationshipsAdded };
 	} catch (error) {
@@ -389,7 +399,8 @@ export async function planVaultAnalysis(plugin: SimpleGraphBuilderPlugin): Promi
 export async function analyzeEntireVault(
 	plugin: SimpleGraphBuilderPlugin,
 	onProgress?: (current: number, total: number, currentFile: string) => void,
-	plan?: VaultAnalysisPlan
+	plan?: VaultAnalysisPlan,
+	onReview?: (reviews: RelationshipReview[]) => void,
 ): Promise<{ analyzed: number; skipped: number; excluded: number; errors: number; nodesAdded: number; nodesMerged: number; relationshipsAdded: number }> {
 	const totals = { analyzed: 0, skipped: 0, excluded: 0, errors: 0, nodesAdded: 0, nodesMerged: 0, relationshipsAdded: 0 };
 	if (vaultAnalysisState.isRunning) {
@@ -399,6 +410,9 @@ export async function analyzeEntireVault(
 
 	vaultAnalysisState.isRunning = true;
 	vaultAnalysisState.isCancelled = false;
+	const review = plugin.settings.reviewAfterVaultAnalysis && !plugin.settings.autoCorrectRelationships ? onReview : undefined;
+	const started = Date.now();
+	const touched = new Set<string>();
 	let progressNotice: Notice | undefined;
 	try {
 		// Enumeration remains user-triggered, after the settings confirmation.
@@ -456,6 +470,12 @@ export async function analyzeEntireVault(
 				totals.nodesAdded += result.nodesAdded;
 				totals.nodesMerged += result.nodesMerged;
 				totals.relationshipsAdded += result.relationshipsAdded;
+				if (review && touched.size < 24) {
+					for (const node of plugin.graphCache.getNodesBySourceNote(file.path)) {
+						if (node.entityType !== 'NOTE') touched.add(node.id);
+						if (touched.size === 24) break;
+					}
+				}
 			} else if (result.skipped) totals.skipped++;
 			else {
 				totals.errors++;
@@ -466,6 +486,16 @@ export async function analyzeEntireVault(
 
 		// Each note's record was saved as it finished.
 		await plugin.graphCache.flush();
+		const cancelled = () => vaultAnalysisState.isCancelled || !plugin.settings.reviewAfterVaultAnalysis || plugin.settings.autoCorrectRelationships;
+		if (review && totals.analyzed && !unavailable && !cancelled()) {
+			progressNotice.setMessage('Checking up to six existing relationships…');
+			try {
+				const reviews = await reviewNextRelationships(plugin, { touched, before: started, cancelled });
+				if (reviews.length && !cancelled()) review(reviews);
+			} catch (error) {
+				if (!cancelled()) new Notice(`Could not review relationships. ${error instanceof Error ? error.message : String(error)}`);
+			}
+		}
 		const outcome = unavailable ? 'stopped' : vaultAnalysisState.isCancelled ? 'cancelled' : 'complete';
 		new Notice(
 			`Vault analysis ${outcome}.\n` +

@@ -198,17 +198,50 @@ export interface OntologyNode {
 /**
  * Ontology edge with free-form relationship verbs.
  */
-export interface OntologyEdge {
+export interface RelationshipClaim {
+	source: string;
+	target: string;
+	relationship: string;
+}
+
+/** Offsets into the frontmatter-free note body, tied to its body hash. */
+export type EvidenceSpan = [start: number, end: number];
+
+export interface RelationshipEvidence {
+	note: string;
+	/** Missing on extractions made before relationship evidence was tracked. */
+	bodyHash?: string;
+	detail?: string;
+	span?: EvidenceSpan;
+	checked?: true;
+	/** A user-approved replacement is independent of ordinary extraction. */
+	correctionId?: string;
+}
+
+export interface RelationshipCorrection {
 	id: string;
-	source: string;          // source node ID
-	target: string;          // target node ID
-	relationship: string;    // free-form verb (e.g., "develops", "uses", "causes")
+	original: RelationshipClaim;
+	evidence: RelationshipEvidence & { bodyHash: string };
+	replacement?: RelationshipClaim;
+	span?: EvidenceSpan;
+	appliedAt: number;
+}
+
+export interface RelationshipReviewState {
+	cursor?: number;
+	flags?: { edgeId: string; note: string }[];
+	lastBackgroundRequestAt?: number;
+}
+
+export interface OntologyEdge extends RelationshipClaim {
+	id: string;
 	type?: string; // Legacy: kept for backwards compatibility
 	properties: {
 		detail?: string;       // optional: additional context
 		[key: string]: unknown;  // additional properties
 	};
-	sourceNote?: string;     // note path that created this relationship
+	sourceNote?: string;     // primary note for consumers that show one source
+	noteEvidence?: RelationshipEvidence[];
 	createdAt?: number;
 }
 
@@ -315,6 +348,8 @@ export interface GraphData {
 	nodes: OntologyNode[];
 	edges: OntologyEdge[];
 	version: number;        // schema version (should be 2)
+	relationshipCorrections?: RelationshipCorrection[];
+	relationshipReview?: RelationshipReviewState;
 }
 
 // ============================================
@@ -409,6 +444,8 @@ export interface Settings {
 	extractionEffort: EffortLevel;   // default: 'minimal' - reasoning depth for extraction
 	// Auto-analysis
 	autoAnalyzeOnSave: boolean;  // Analyze notes automatically when saved
+	reviewAfterVaultAnalysis: boolean;
+	autoCorrectRelationships: boolean;
 	excludedPatterns: string[]; // Vault-relative paths and simple globs, one per UI line
 	respectObsidianExcludedFiles: boolean; // Opt in to Obsidian's native exclusion list
 	// View settings

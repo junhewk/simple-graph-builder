@@ -6,8 +6,21 @@ import { loadEmbeddingsBinary, saveEmbeddingsBinary, cosineSimilarity } from '..
 import type SimpleGraphBuilderPlugin from '../main';
 import type { ImportManifest } from '../import/types';
 import { edgeMedLit, nodeMedLit } from '../import/node-props';
+import { mergeRelationshipEvidence } from './relationship-evidence';
+import { updateNoteHash } from './hashes';
+import type { RelationshipCorrection, RelationshipReviewState } from '../types';
 
 const SAVE_DEBOUNCE_MS = 1000;
+
+function edgeNoteKeys(edge: OntologyEdge): string[] {
+	const primary = edge.sourceNote ? [normalizeUnicode(edge.sourceNote)] : [];
+	if (!edge.noteEvidence?.length) return primary;
+	for (const evidence of edge.noteEvidence) {
+		const note = normalizeUnicode(evidence.note);
+		if (!primary.includes(note)) primary.push(note);
+	}
+	return primary;
+}
 
 /**
  * Canonical alias list: NFC, no duplicates, never repeating the display name.
@@ -70,6 +83,8 @@ export class GraphCache {
 	// Raw data
 	private nodes: OntologyNode[] = [];
 	private edges: OntologyEdge[] = [];
+	private relationshipCorrections = new Map<string, RelationshipCorrection[]>();
+	private relationshipReview: RelationshipReviewState = {};
 	private version = GRAPH_SCHEMA_VERSION;
 	private prunedLegacyEdgeCount = 0;
 	private mergedDuplicateCount = 0;
@@ -139,6 +154,14 @@ export class GraphCache {
 				this.nodes = graph.nodes || [];
 				this.edges = graph.edges || [];
 				this.version = graph.version || GRAPH_SCHEMA_VERSION;
+				this.relationshipReview = graph.relationshipReview ?? {};
+				for (const correction of graph.relationshipCorrections ?? []) {
+					const note = normalizeUnicode(correction.evidence.note);
+					correction.evidence.note = note;
+					const list = this.relationshipCorrections.get(note);
+					if (list) list.push(correction);
+					else this.relationshipCorrections.set(note, [correction]);
+				}
 			}
 		} else {
 			this.nodes = [];
@@ -359,7 +382,7 @@ export class GraphCache {
 
 		// Rewrite edges onto the surviving ids, dropping self-loops created by a
 		// merge and any duplicates that collapse onto the same id
-		const seenEdges = new Set<string>();
+		const seenEdges = new Map<string, OntologyEdge>();
 		const rewritten: OntologyEdge[] = [];
 		for (const edge of this.edges) {
 			const source = remap.get(edge.source) ?? normalizeKey(edge.source);
@@ -371,11 +394,24 @@ export class GraphCache {
 			edge.relationship = normalizeUnicode(edge.relationship ?? 'relates to');
 			edge.id = `${source}->${target}:${normalizeKey(edge.relationship)}`;
 
-			if (seenEdges.has(edge.id)) continue;
-			seenEdges.add(edge.id);
+			const existing = seenEdges.get(edge.id);
+			if (existing) {
+				mergeRelationshipEvidence(existing, edge);
+				continue;
+			}
+			seenEdges.set(edge.id, edge);
 			rewritten.push(edge);
 		}
 		this.edges = rewritten;
+		for (const list of this.relationshipCorrections.values()) {
+			for (const correction of list) {
+				for (const claim of [correction.original, correction.replacement]) {
+					if (!claim) continue;
+					claim.source = remap.get(claim.source) ?? normalizeKey(claim.source);
+					claim.target = remap.get(claim.target) ?? normalizeKey(claim.target);
+				}
+			}
+		}
 
 		// Resolution cache: canonical tokens, canonical targets
 		const resolution = new Map<string, string>();
@@ -578,8 +614,8 @@ export class GraphCache {
 		this.addEdgeToMapIndex(this.edgesBySource, edge.source, edge);
 		this.addEdgeToMapIndex(this.edgesByTarget, edge.target, edge);
 
-		if (edge.sourceNote) {
-			this.addEdgeToMapIndex(this.edgesBySourceNote, edge.sourceNote, edge);
+		for (const note of edgeNoteKeys(edge)) {
+			this.addEdgeToMapIndex(this.edgesBySourceNote, note, edge);
 		}
 	}
 
@@ -602,11 +638,12 @@ export class GraphCache {
 			if (idx >= 0) targetArr.splice(idx, 1);
 		}
 
-		if (edge.sourceNote) {
-			const noteArr = this.edgesBySourceNote.get(edge.sourceNote);
+		for (const note of edgeNoteKeys(edge)) {
+			const noteArr = this.edgesBySourceNote.get(note);
 			if (noteArr) {
 				const idx = noteArr.indexOf(edge);
 				if (idx >= 0) noteArr.splice(idx, 1);
+				if (!noteArr.length) this.edgesBySourceNote.delete(note);
 			}
 		}
 	}
@@ -881,6 +918,10 @@ export class GraphCache {
 		// Imported relationships keep every article that supports them.
 		for (const edge of this.edges) {
 			for (const provenance of Object.values(edgeMedLit(edge))) {
+				if (provenance.fallbackNote && normalizeUnicode(provenance.fallbackNote) === from) {
+					provenance.fallbackNote = to;
+					edges++;
+				}
 				if (!Array.isArray(provenance.evidence)) continue;
 				for (const item of provenance.evidence) {
 					if (normalizeUnicode(item.note) === from) {
@@ -895,9 +936,21 @@ export class GraphCache {
 		for (const edge of evidence) {
 			if (this.isDerivedEdge(edge)) continue;
 			this.unindexEdge(edge);
-			edge.sourceNote = to;
+			if (edge.sourceNote && normalizeUnicode(edge.sourceNote) === from) edge.sourceNote = to;
+			for (const item of edge.noteEvidence ?? []) {
+				if (normalizeUnicode(item.note) === from) item.note = to;
+			}
 			this.indexEdge(edge);
 			edges++;
+		}
+		const corrections = this.getRelationshipCorrections(from);
+		if (corrections.length) {
+			this.setRelationshipCorrections(from, []);
+			this.setRelationshipCorrections(to, corrections.map(item => ({ ...item, evidence: { ...item.evidence, note: to } })));
+		}
+		if (this.relationshipReview.flags?.some(flag => flag.note === from)) {
+			const flags = this.relationshipReview.flags.map(flag => flag.note === from ? { ...flag, note: to } : flag);
+			this.setRelationshipReview({ ...this.relationshipReview, flags });
 		}
 
 		const staleNoteNode = this.nodeById.get(`${NOTE_ID_PREFIX}${normalizeKey(from)}`);
@@ -922,7 +975,54 @@ export class GraphCache {
 	}
 
 	getEdgesBySourceNote(notePath: string): OntologyEdge[] {
-		return this.edgesBySourceNote.get(notePath) || [];
+		return this.edgesBySourceNote.get(normalizeUnicode(notePath)) || [];
+	}
+
+	/** Read a bounded slice for relationship review without copying the graph. */
+	getEdgeAt(index: number): OntologyEdge | undefined {
+		return this.edges[index];
+	}
+
+	getRelationshipCorrections(note: string): readonly RelationshipCorrection[] {
+		return this.relationshipCorrections.get(normalizeUnicode(note)) ?? [];
+	}
+
+	setRelationshipCorrections(note: string, corrections: RelationshipCorrection[]): void {
+		const key = normalizeUnicode(note);
+		if (corrections.length) this.relationshipCorrections.set(key, corrections);
+		else if (!this.relationshipCorrections.delete(key)) return;
+		this.markDirty();
+	}
+
+	getLatestRelationshipCorrection(): RelationshipCorrection | undefined {
+		let latest: RelationshipCorrection | undefined;
+		for (const list of this.relationshipCorrections.values()) {
+			for (const correction of list) {
+				if (!latest || correction.appliedAt >= latest.appliedAt) latest = correction;
+			}
+		}
+		return latest;
+	}
+
+	remapRelationshipCorrections(from: string, to: string): void {
+		for (const list of this.relationshipCorrections.values()) {
+			for (const correction of list) {
+				for (const claim of [correction.original, correction.replacement]) {
+					if (!claim) continue;
+					if (claim.source === from) claim.source = to;
+					if (claim.target === from) claim.target = to;
+				}
+			}
+		}
+	}
+
+	getRelationshipReview(): Readonly<RelationshipReviewState> {
+		return this.relationshipReview;
+	}
+
+	setRelationshipReview(review: RelationshipReviewState): void {
+		this.relationshipReview = review;
+		this.markDirty();
 	}
 
 	getAllEdges(): OntologyEdge[] {
@@ -1285,18 +1385,19 @@ export class GraphCache {
 	/**
 	 * Immediately persist changes to disk.
 	 */
-	async flush(): Promise<void> {
-		if (this.saveTimeout) {
+	async flush(analysis?: { file: { path: string }; hash: string }): Promise<void> {
+		if (this.saveTimeout && (!analysis || !this.embeddingsDirty)) {
 			window.clearTimeout(this.saveTimeout);
 			this.saveTimeout = null;
 		}
 
-		// Save embeddings binary first (updates embeddingIndex)
-		if (this.embeddingsDirty) {
+		// A note commit saves the graph and hash. Keep large binary embedding
+		// writes on the normal debounce instead of rewriting them per note.
+		if (!analysis && this.embeddingsDirty) {
 			await this.saveEmbeddings();
 		}
 
-		const needsSave = this.dirty || this.resolutionCacheDirty || this.importsDirty || this.embeddingIndex;
+		const needsSave = this.dirty || this.resolutionCacheDirty || this.importsDirty || this.embeddingIndex || analysis;
 		if (!needsSave) return;
 
 		// Writes only the cache's own keys, onto data.json as it is when this
@@ -1314,6 +1415,10 @@ export class GraphCache {
 						nodes: this.nodes.filter(n => !isNoteNode(n)),
 						edges: this.edges.filter(e => !isNoteLayerEdge(e, noteIds)),
 						version: this.version,
+						relationshipCorrections: this.relationshipCorrections.size
+							? [...this.relationshipCorrections.values()].flat() : undefined,
+						relationshipReview: this.relationshipReview.cursor || this.relationshipReview.flags?.length || this.relationshipReview.lastBackgroundRequestAt
+							? this.relationshipReview : undefined,
 					};
 					taken.graph = true;
 				}
@@ -1338,7 +1443,11 @@ export class GraphCache {
 					taken.imports = true;
 				}
 
-				if (!taken.graph && !taken.resolutionCache && !taken.imports && !this.embeddingIndex) return false;
+				if (analysis) {
+					if (!data.hashes?.hashes) data.hashes = { hashes: [] };
+					updateNoteHash(data.hashes, analysis.file.path, analysis.hash);
+				}
+				if (!taken.graph && !taken.resolutionCache && !taken.imports && !this.embeddingIndex && !analysis) return false;
 				this.dirty = false;
 				this.resolutionCacheDirty = false;
 				this.importsDirty = false;
@@ -1358,6 +1467,8 @@ export class GraphCache {
 	clear(): void {
 		this.nodes = [];
 		this.edges = [];
+		this.relationshipCorrections.clear();
+		this.relationshipReview = { lastBackgroundRequestAt: this.relationshipReview.lastBackgroundRequestAt };
 		this.resolutionCache.clear();
 		this.embeddings.clear();
 		this.embeddingIndex = null;

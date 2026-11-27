@@ -1,9 +1,12 @@
-import { OntologyNode, OntologyEdge, OntologyExtractionResult, RawExtractionRelationship, ResolutionStats, Settings, NOTE_ID_PREFIX, normalizeKey, normalizeUnicode } from '../types';
+import { OntologyNode, OntologyExtractionResult, RawExtractionRelationship, ResolutionStats, Settings, NOTE_ID_PREFIX, isNoteLayerEdge, normalizeKey, normalizeUnicode } from '../types';
 import type { GraphCache } from './cache';
 import type { App, TFile } from 'obsidian';
 import { getResolvedLinks, getResolvedLinksFromCache } from './links';
 import { EntityResolver } from './resolver';
 import { edgeMedLit } from '../import/node-props';
+import { generateEdgeId, noteRelationshipEvidence, relationshipId, removeRelationshipEvidence, upsertRelationshipEvidence } from './relationship-evidence';
+
+export { generateEdgeId } from './relationship-evidence';
 
 /**
  * Generate a unique node ID from entity type and name.
@@ -11,13 +14,6 @@ import { edgeMedLit } from '../import/node-props';
  */
 export function generateNodeId(entityType: string, name: string): string {
 	return `${entityType.toLowerCase()}:${normalizeKey(name)}`;
-}
-
-/**
- * Generate a unique edge ID from source, target, and relationship verb.
- */
-export function generateEdgeId(source: string, target: string, relationship: string): string {
-	return `${source}->${target}:${normalizeKey(relationship)}`;
 }
 
 /**
@@ -32,14 +28,26 @@ export function normalizeName(name: string): string {
  * Process relationships and add edges to the cache.
  * Shared helper for both merge functions.
  */
+export interface RelationshipExtraction {
+	bodyHash: string;
+	/** True only when the complete note was successfully extracted. */
+	replace: boolean;
+}
+
 function processRelationships(
 	cache: GraphCache,
 	relationships: RawExtractionRelationship[],
 	idMap: Map<string, string>,
 	notePath: string,
-	now: number
+	extraction?: RelationshipExtraction,
 ): number {
 	let relationshipsAdded = 0;
+	const note = normalizeUnicode(notePath);
+	const previous = extraction?.replace ? [...cache.getEdgesBySourceNote(note)] : [];
+	const corrections = cache.getRelationshipCorrections(note);
+	const active = corrections.filter(item => item.evidence.bodyHash === extraction?.bodyHash);
+	const corrected = new Set(active.map(item => relationshipId(item.original)));
+	const kept = new Set<string>();
 
 	for (const rawRel of relationships) {
 		const sourceId = idMap.get(rawRel.source);
@@ -57,25 +65,21 @@ function processRelationships(
 
 		const relationship = rawRel.relationship || 'relates to';
 		const edgeId = generateEdgeId(sourceId, targetId, relationship);
+		if (corrected.has(edgeId) || kept.has(edgeId)) continue;
+		kept.add(edgeId);
+		if (upsertRelationshipEvidence(cache, { source: sourceId, target: targetId, relationship }, {
+			note, bodyHash: extraction?.bodyHash, detail: rawRel.properties.detail,
+		}, { ...rawRel.properties })) relationshipsAdded++;
+	}
 
-		if (!cache.getEdgeById(edgeId)) {
-			const newEdge: OntologyEdge = {
-				id: edgeId,
-				source: sourceId,
-				target: targetId,
-				relationship: relationship,
-				properties: {
-					detail: rawRel.properties.detail,
-					...Object.fromEntries(
-						Object.entries(rawRel.properties).filter(([k]) => k !== 'detail')
-					)
-				},
-				sourceNote: notePath,
-				createdAt: now,
-			};
-			cache.addEdge(newEdge);
-			relationshipsAdded++;
+	if (extraction?.replace) {
+		for (const edge of previous) {
+			if (isNoteLayerEdge(edge)) continue;
+			removeRelationshipEvidence(cache, edge, source => source.note === note && (
+				source.correctionId ? source.bodyHash !== extraction.bodyHash : !kept.has(edge.id)
+			));
 		}
+		if (active.length !== corrections.length) cache.setRelationshipCorrections(note, active);
 	}
 
 	return relationshipsAdded;
@@ -89,7 +93,8 @@ function processRelationships(
 export function mergeExtractionIntoCache(
 	cache: GraphCache,
 	notePath: string,
-	extraction: OntologyExtractionResult
+	extraction: OntologyExtractionResult,
+	relationshipExtraction?: RelationshipExtraction,
 ): { nodesAdded: number; relationshipsAdded: number } {
 	const now = Date.now();
 	let nodesAdded = 0;
@@ -148,7 +153,7 @@ export function mergeExtractionIntoCache(
 	}
 
 	// Process relationships
-	const relationshipsAdded = processRelationships(cache, extraction.relationships, idMap, notePath, now);
+	const relationshipsAdded = processRelationships(cache, extraction.relationships, idMap, notePath, relationshipExtraction);
 
 	return { nodesAdded, relationshipsAdded };
 }
@@ -171,7 +176,9 @@ export async function mergeExtractionIntoCacheWithResolution(
 	cache: GraphCache,
 	notePath: string,
 	extraction: OntologyExtractionResult,
-	settings: Settings
+	settings: Settings,
+	relationshipExtraction?: RelationshipExtraction,
+	checkCurrent?: () => Promise<void>,
 ): Promise<MergeResultWithResolution> {
 	const now = Date.now();
 	let nodesAdded = 0;
@@ -182,6 +189,7 @@ export async function mergeExtractionIntoCacheWithResolution(
 
 	// Resolve all nodes in batch
 	const resolutionResults = await resolver.resolveBatch(extraction.nodes);
+	await checkCurrent?.();
 
 	// Map temporary extraction IDs to actual graph node IDs
 	const idMap = new Map<string, string>();
@@ -241,7 +249,7 @@ export async function mergeExtractionIntoCacheWithResolution(
 	}
 
 	// Process relationships
-	const relationshipsAdded = processRelationships(cache, extraction.relationships, idMap, notePath, now);
+	const relationshipsAdded = processRelationships(cache, extraction.relationships, idMap, notePath, relationshipExtraction);
 
 	return {
 		nodesAdded,
@@ -263,7 +271,12 @@ export function removeNoteFromCache(cache: GraphCache, notePath: string): { node
 
 	// Use index to find edges from this note
 	const edgesToRemove = [...cache.getEdgesBySourceNote(notePath)];
+	const note = normalizeUnicode(notePath);
 	for (const edge of edgesToRemove) {
+		if (noteRelationshipEvidence(edge).some(source => source.note === note)) {
+			if (removeRelationshipEvidence(cache, edge, source => source.note === note)) edgesRemoved++;
+			continue;
+		}
 		const fallback = Object.values(edgeMedLit(edge))
 			.flatMap(p => p.evidence ?? [])
 			.find(e => e.note !== notePath);
@@ -274,6 +287,7 @@ export function removeNoteFromCache(cache: GraphCache, notePath: string): { node
 		cache.removeEdge(edge.id);
 		edgesRemoved++;
 	}
+	cache.setRelationshipCorrections(note, []);
 
 	// Use index to find nodes from this note
 	const nodesToCheck = [...cache.getNodesBySourceNote(notePath)];

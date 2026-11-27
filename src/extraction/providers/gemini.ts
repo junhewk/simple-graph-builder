@@ -103,7 +103,7 @@ export const geminiAdapter: ProviderAdapter = {
 				headers: { 'x-goog-api-key': creds.apiKey },
 				body,
 			};
-		});
+		}, !req.strictBudget);
 
 		// Gemini has historically reported failure with HTTP 200.
 		if (data.error) {

@@ -96,7 +96,7 @@ export const openaiAdapter: ProviderAdapter = {
 				},
 				body,
 			};
-		});
+		}, !req.strictBudget);
 
 		const output = data.output ?? [];
 

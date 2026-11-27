@@ -62,6 +62,7 @@ export const deepseekAdapter = createChatCompletionsAdapter({
 	},
 
 	maxTokens(req, flags) {
+		if (req.strictBudget) return req.maxOutputTokens;
 		const thinkingOff = flags.effort && req.effort === 'minimal';
 		return thinkingOff ? req.maxOutputTokens : Math.max(req.maxOutputTokens, THINKING_MIN_OUTPUT_TOKENS);
 	},

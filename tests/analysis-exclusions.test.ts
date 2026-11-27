@@ -87,7 +87,7 @@ async function main() {
 		assert.equal(result.analyzed, 1);
 		assert.equal(result.errors, 0);
 		assert.equal(allBodies.length, 1);
-		assert.deepEqual(reads, ['short.md', 'unchanged.md', 'new.md']);
+		assert.deepEqual(reads, ['short.md', 'unchanged.md', 'new.md', 'new.md']);
 		assert.deepEqual(progress, [[1, 3, 'short'], [2, 3, 'unchanged'], [3, 3, 'new']]);
 		assert.ok(notices.some(n => n.includes('Excluded: 2')));
 	}
@@ -118,7 +118,7 @@ async function main() {
 
 		const progress: [number, number, string][] = [];
 		const result = await analyzeEntireVault(plugin, (current, total, file) => progress.push([current, total, file]), plan);
-		assert.deepEqual(reads, ['changed.md', 'new.md']);
+		assert.deepEqual(reads, ['changed.md', 'changed.md', 'new.md', 'new.md']);
 		assert.deepEqual(progress, [[1, 2, 'changed'], [2, 2, 'new']]);
 		assert.deepEqual([result.analyzed, result.skipped, result.excluded], [2, 2, 1]);
 	}
@@ -133,7 +133,7 @@ async function main() {
 		});
 		assert.equal(result.analyzed, 1);
 		assert.equal(result.excluded, 1);
-		assert.deepEqual(reads, ['first.md']);
+		assert.deepEqual(reads, ['first.md', 'first.md']);
 	}
 
 	// A rule changed during a read does not interrupt that note; it applies next time.
@@ -179,7 +179,7 @@ async function main() {
 		});
 		assert.equal(result.analyzed, 1);
 		assert.equal(result.errors, 1);
-		assert.deepEqual(reads, ['first.md']);
+		assert.deepEqual(reads, ['first.md', 'first.md']);
 		assert.equal(isAnalyzingVault(), false);
 		assert.ok(notices.some(n => n.includes('analysis stopped')));
 	}
@@ -191,7 +191,7 @@ async function main() {
 		vault.seed('second.md', body);
 		const result = await analyzeEntireVault(plugin, () => cancelVaultAnalysis());
 		assert.equal(result.analyzed, 1);
-		assert.deepEqual(reads, ['first.md']);
+		assert.deepEqual(reads, ['first.md', 'first.md']);
 		assert.equal(isAnalyzingVault(), false);
 	}
 	console.log('analysis-exclusions: all checks passed');

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.11.0 - Relationship review and correction
+
+- **Review and correct a relationship from the graph.** Choose a source note
+  in the inspector, edit the verb, reverse the direction, or retract that
+  note's support. Use **Undo last relationship correction** to restore a change
+  while its note revision is current.
+- **Opt in to automatic background correction.** While Obsidian is open, the
+  plugin checks up to six existing relationships per 24 hours in one bounded
+  model request. It checks the returned citation against the current source
+  before applying an edit and saves each correction with undo data.
+- **Keep independent evidence.** Multiple notes can support the same edge.
+  After a successful full-note extraction, the graph refreshes the evidence
+  from that note and keeps contributions from other notes and imports.
+- **Review the graph on demand.** Run **Review graph relationships** for a
+  batch preview or ask the model to check one source in the inspector.
+
+Read the [relationship review and correction guide](docs/RELATIONSHIP_REVIEW.md).
+
 ## 0.10.4 - Claude Sonnet 5.5, Haiku 5.5, Gemini 3.8 Flash and Gemini 4 Hydrogen
 
 - **New models.** Claude now offers `claude-sonnet-5-5` (the default) and

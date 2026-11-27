@@ -95,6 +95,9 @@ export function captureGraphContext(
 
 export function relationshipEvidence(edge: OntologyEdge, reference: (path: string) => SourceNoteRef): SourceNoteRef[] {
 	const evidence: SourceNoteRef[] = edge.sourceNote ? [reference(edge.sourceNote)] : [];
+	for (const source of edge.noteEvidence ?? []) {
+		if (!evidence.some(item => item.path === source.note)) evidence.push(reference(source.note));
+	}
 	for (const provenance of Object.values(object(edge.properties.medLit))) {
 		const items = object(provenance).evidence;
 		if (!Array.isArray(items)) continue;

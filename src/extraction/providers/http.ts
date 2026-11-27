@@ -95,7 +95,8 @@ const SCHEMA_REJECTED = /schema|json_schema|response_format|structured|\bformat\
  * a model that supports it.
  */
 export async function postJsonWithDowngrade<T = unknown>(
-	build: (flags: DowngradeFlags) => PostJsonSpec
+	build: (flags: DowngradeFlags) => PostJsonSpec,
+	allowRetry = true,
 ): Promise<T> {
 	const flags: DowngradeFlags = { effort: true };
 
@@ -125,7 +126,7 @@ export async function postJsonWithDowngrade<T = unknown>(
 				);
 			}
 
-			if (flags.effort && EFFORT_REJECTED.test(text)) {
+			if (allowRetry && flags.effort && EFFORT_REJECTED.test(text)) {
 				console.warn(
 					'[simple-graph-builder] Provider rejected the reasoning-effort parameter; retrying without it.',
 					text

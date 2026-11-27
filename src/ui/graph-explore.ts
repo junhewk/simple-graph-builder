@@ -199,6 +199,7 @@ export interface InspectorRelation {
 	other: NodeRow;
 	detail?: string;
 	evidence?: { path: string; quote?: string }[];
+	reviewable?: boolean;
 }
 
 export interface PathStep {
@@ -230,6 +231,7 @@ export interface InspectorCallbacks {
 	onPathStart(): void;
 	onPathCancel(): void;
 	onFindLiterature(usePath: boolean): void;
+	onReviewRelationship(edgeId: string): void;
 }
 
 /** Relations listed before "show all"; hubs can have hundreds. */
@@ -394,6 +396,13 @@ export class GraphInspector {
 				const row = renderNodeRow(parent, relation.other, () => this.callbacks.onNavigate(relation.other, relation.edgeId), path => this.callbacks.onOpenNote(path));
 				if (relation.detail) row.createDiv({ cls: 'sgb-graph-node-reason', text: relation.detail });
 				this.renderEvidence(row, relation.evidence);
+				if (relation.reviewable) {
+					const review = row.createEl('button', { text: 'Review relationship', cls: 'sgb-graph-more' });
+					review.addEventListener('click', event => {
+						event.stopPropagation();
+						this.callbacks.onReviewRelationship(relation.edgeId);
+					});
+				}
 				shown++;
 			}
 		}

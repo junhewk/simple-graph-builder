@@ -99,7 +99,7 @@ export const anthropicAdapter: ProviderAdapter = {
 				},
 				body,
 			};
-		});
+		}, !req.strictBudget);
 
 		// A safety classifier declined. The reply is HTTP 200 with no usable
 		// text, or a truncated one; say so instead of "empty response" or a

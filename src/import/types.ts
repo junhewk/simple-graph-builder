@@ -145,6 +145,7 @@ export interface MedLitNodeProvenance {
 export interface MedLitEdgeProvenance {
 	relIds: number[];
 	evidence: { note: string; quote: string }[];
+	fallbackNote?: string;
 }
 
 export const MEDLIT_ONTOLOGY_MAJOR = 'med-lit/1';

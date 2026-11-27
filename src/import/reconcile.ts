@@ -22,6 +22,7 @@ import { generateEdgeId, generateNoteNodeId, normalizeName } from '../graph/merg
 import { isNoteNode, normalizeKey, OntologyEdge, OntologyNode } from '../types';
 import type { GraphCache } from '../graph/cache';
 import { edgeMedLit, nodeMedLit } from './node-props';
+import { setNoteRelationshipEvidence } from '../graph/relationship-evidence';
 import type { FileKey, MedLitEdgeProvenance, MedLitEntity, MedLitKg, MedLitNodeProvenance } from './types';
 
 export interface ReconcileInput {
@@ -158,6 +159,7 @@ function desiredEdges(input: ReconcileInput, kg: MedLitKg, cache: GraphCache): M
 	for (const [id, want] of [...desired]) {
 		want.provenance.evidence.sort((a, b) => a.note.localeCompare(b.note) || a.quote.localeCompare(b.quote));
 		want.sourceNote = want.provenance.evidence[0]?.note ?? want.sourceNote;
+		if (!want.provenance.evidence.length && want.sourceNote) want.provenance.fallbackNote = want.sourceNote;
 		if (!want.sourceNote) desired.delete(id);
 	}
 	return desired;
@@ -267,6 +269,15 @@ export function reconcileProjectGraph(cache: GraphCache, input: ReconcileInput):
 		if (source && isNoteNode(source)) continue;
 
 		const others = withProvenance(edgeMedLit(edge), pid, null);
+		const ordinary = edge.noteEvidence?.filter(item => !isOwned(item.note));
+		if (ordinary?.length) {
+			cache.editEdge(edge, e => {
+				if (others) e.properties.medLit = others;
+				else delete e.properties.medLit;
+				setNoteRelationshipEvidence(e, ordinary);
+			});
+			continue;
+		}
 		if (!isOwned(edge.sourceNote)) {
 			cache.editEdge(edge, e => {
 				if (others) e.properties.medLit = others;
@@ -276,7 +287,9 @@ export function reconcileProjectGraph(cache: GraphCache, input: ReconcileInput):
 		}
 		// The project was this edge's evidence. Another import may still vouch
 		// for it; otherwise it goes.
-		const fallback = Object.values(others ?? {}).flatMap(p => p.evidence ?? []).find(e => !isOwned(e.note));
+		const fallback = Object.values(others ?? {}).flatMap(p => [
+			...(p.evidence ?? []), ...(p.fallbackNote ? [{ note: p.fallbackNote, quote: '' }] : []),
+		]).find(e => !isOwned(e.note));
 		if (fallback) {
 			cache.editEdge(edge, e => {
 				e.sourceNote = fallback.note;

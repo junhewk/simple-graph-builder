@@ -8,26 +8,21 @@ This plugin builds a lightweight knowledge graph from users' Obsidian notes usin
 
 ![Graph View](https://raw.githubusercontent.com/junhewk/simple-graph-builder/master/docs/graph-view.png)
 
-## What's new in 0.10.2
+## What's new in 0.11.0
 
-- **Add a required concept directly.** Type a search term in **Required concept**
-  or choose a graph path suggestion, then press **Add AND condition** or Enter.
-  The PubMed and OpenAlex previews update immediately.
-- **See how terms combine.** Groups show their search terms with **AND** between
-  them. Use **Add alternative (OR)** within a group. If a term is already selected
-  as an alternative, the required concept field identifies the group to edit.
-- **Open a restored tab from the graph.** **Find more literature…** applies the
-  current graph origin even when Obsidian restores the literature search tab.
+- **Correct a relationship in the graph.** Edit its verb, reverse its direction,
+  or retract a source from the inspector. Each correction can be undone while
+  the reviewed note revision is current.
+- **Let the graph improve in the background.** Enable **Automatically correct
+  relationships** once to review up to six existing relationships in a single
+  model request per 24 hours. The plugin applies eligible corrections while
+  Obsidian is open.
+- **Keep evidence from each source.** After a full note analysis succeeds, the
+  graph refreshes that note's relationship evidence and keeps independent
+  support from other notes and imports.
 
-See the [0.10.2 release notes](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.2)
-and the [full changelog](CHANGELOG.md).
-
-Latest patch: [0.10.4](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.4)
-adds Claude Sonnet 5.5 and Haiku 5.5, and Gemini 3.8 Flash and Gemini 4 Hydrogen.
-Settings that used the models they replace move to them, at the same price or
-lower. [0.10.3](https://github.com/junhewk/simple-graph-builder/releases/tag/0.10.3)
-keeps analysis records when you move several analyzed notes at once, so they are
-not analyzed and billed again.
+See the [relationship correction guide](docs/RELATIONSHIP_REVIEW.md) and the
+[full changelog](CHANGELOG.md).
 
 ## Find more literature from your graph
 
@@ -51,9 +46,10 @@ Traditional knowledge graphs often require complex schemas with dozens of entity
 
 ## Features
 
-- **Entity extraction**: Extract entities and relationships from your notes with an LLM, at a depth you choose. Every request carries a JSON schema and every reply is validated against it, so malformed entities are reported and dropped rather than polluting the graph
+- **Entity extraction** uses your configured model to extract entities and relationships at the depth you choose. The plugin validates the structured output before updating the graph.
 - **Hybrid entity resolution** (opt-in): A multi-stage pipeline of fast lookups, embedding similarity and LLM verification merges "AI", "artificial intelligence" and "인공지능" into one entity (inspired by KGGen [3])
 - **Notes in the graph**: Each analyzed note becomes a node linked to the entities it mentions and the notes it wikilinks
+- **Relationship correction** lets you edit a relationship against its source note or opt in to small background reviews that apply corrections over time.
 - **Interactive graph view**: Search the graph in place, inspect and walk its relationships, focus on a neighborhood, find paths, and adjust appearance, forces and clusters live. Fast on graphs of thousands of nodes
 - **Advanced search**: Notes and entities ranked by text match plus graph proximity (Personalized PageRank, as in HippoRAG [6]), with an explanation for every result and no API calls
 - **Find more literature**: Develop editable PubMed/OpenAlex searches from explored concepts and paths, inspect citations and abstracts in Obsidian, and open articles externally
@@ -100,6 +96,8 @@ in **Required concept**, and press Enter. Review both query previews and press
 | Command | Description |
 |---------|-------------|
 | `Analyze current note` | Extract entities from the active note |
+| `Review graph relationships` | Check a batch of up to six existing relationships against short excerpts from their source notes |
+| `Undo last relationship correction` | Restore the last correction while its source note revision is still current |
 | `Search graph and notes` | Advanced search over notes and entities (no API calls) |
 | `Open graph view` | Show the knowledge graph |
 | `Find more literature…` | Search PubMed/OpenAlex from the active graph selection; also available in the inspector and path view |
@@ -113,6 +111,14 @@ in **Required concept**, and press Enter. Review both query previews and press
 
 The ribbon icon offers **Analyze current note** and **Open graph view**. The status bar shows node counts by type.
 
+To correct a single relationship, select an entity in the graph and choose
+**Review relationship** in the inspector. You can edit the verb, reverse the
+direction, or retract the selected note as a source. These edits work locally.
+Use **Check excerpt with model** in the same dialog for suggestions.
+Enable **Automatically correct relationships** to let Obsidian check a small
+batch in the background and apply supported corrections while the vault is
+open. Use **Undo last relationship correction** to reverse a change.
+
 ## Documentation
 
 | Guide | Covers |
@@ -120,6 +126,7 @@ The ribbon icon offers **Analyze current note** and **Open graph view**. The sta
 | [Graph View](https://github.com/junhewk/simple-graph-builder/blob/master/docs/GRAPH_VIEW.md) | Searching, inspecting and arranging the graph; display, forces, clusters and layout |
 | [Search](https://github.com/junhewk/simple-graph-builder/blob/master/docs/SEARCH.md) | The search command, and how results are ranked |
 | [Literature Search](docs/LITERATURE_SEARCH.md) | Graph origins, editable PubMed/OpenAlex queries, results, abstracts and external article links |
+| [Relationship Review](docs/RELATIONSHIP_REVIEW.md) | Manual corrections, automatic review, model budget, and undo |
 | [Settings](https://github.com/junhewk/simple-graph-builder/blob/master/docs/SETTINGS.md) | Providers, analysis, exclusions, entity resolution, vault write-back |
 | [Agent Access (MCP)](https://github.com/junhewk/simple-graph-builder/blob/master/docs/AGENT_ACCESS.md) | Connecting Claude Code, Claude Desktop or Codex, the tools they get, and what they can see |
 | [Importing med-lit Projects](https://github.com/junhewk/simple-graph-builder/blob/master/docs/MED_LIT_IMPORT.md) | Importing, updating and removing literature reviews |
@@ -154,6 +161,9 @@ Local graph/note search, graph exploration and agent access make no provider API
 their current usage allowances; optional literature keys are configured separately.
 Note analysis calls the configured model API.
 When an agent analyzes notes for you, it uses its own model, billed however that agent is.
+Optional background relationship review adds at most one model request per 24
+hours, with up to six short excerpts in the batch. Manual edits in the inspector
+run locally.
 
 - **Claude, OpenAI, Gemini, DeepSeek**: Each note analysis costs your provider's pricing
 - **Local servers**: Free (runs on your machine)
@@ -166,11 +176,11 @@ If [entity resolution](https://github.com/junhewk/simple-graph-builder/blob/mast
 
 ## Privacy
 
-- Your notes are sent to the configured LLM provider for entity extraction. Use a local server for fully local processing
+- The configured LLM provider receives note text for extraction and short excerpts for optional relationship review. Use a local server for fully local processing.
 - **Analyze entire vault** enumerates markdown file paths only when you start it. It reads eligible notes on your computer to count the new and changed ones, and sends nothing until you confirm those numbers
 - Analyzing the current note and auto-analysis read only the individual note being processed
 - **Literature search** sends only submitted queries, filters and configured contact/authentication details to the selected sources. Routes, source passages, vault paths and the local research question stay in Obsidian. Citation results are cached temporarily in memory
-- No data is stored externally; all graph data stays in your vault ([where](https://github.com/junhewk/simple-graph-builder/blob/master/docs/DATA_MODEL.md#where-the-data-lives))
+- The plugin stores the graph, correction records and settings in your vault. [Where the data lives](docs/DATA_MODEL.md#where-the-data-lives)
 - **Importing a med-lit project** reads its folder on your computer and copies its pages into the vault. It makes no API calls, unless you choose embedding-based matching
 - **Agent Access** (off by default) serves your notes to AI agents you connect. They see notes, not your API keys or settings, and never your excluded notes. What an agent does with what it reads (for example, sending it to its own model provider) is governed by that agent. Agents can change the graph only if you turn on **Let agents add to the graph**, and never your notes' text
 

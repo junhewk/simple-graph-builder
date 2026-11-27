@@ -104,7 +104,7 @@ export function createChatCompletionsAdapter(dialect: ChatCompletionsDialect): P
 						headers: dialect.headers(creds),
 						body,
 					};
-				});
+				}, !req.strictBudget);
 
 				// Some builds report failure with HTTP 200 and an error body.
 				if (data.error) {
@@ -131,7 +131,7 @@ export function createChatCompletionsAdapter(dialect: ChatCompletionsDialect): P
 								'Lower the reasoning effort in settings.'
 						);
 					}
-					if (attempt < dialect.emptyRetries) continue;
+					if (!req.strictBudget && attempt < dialect.emptyRetries) continue;
 					throw createError('api_error', `Empty response from ${dialect.emptyLabel}.`);
 				}
 

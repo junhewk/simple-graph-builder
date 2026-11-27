@@ -36,7 +36,8 @@ export interface ExtractionOptions {
  */
 export async function extractOntology(
 	options: ExtractionOptions,
-	prompt: string
+	prompt: string,
+	requireComplete = false,
 ): Promise<OntologyExtractionResult> {
 	const { provider, apiKey, model } = options;
 
@@ -62,7 +63,7 @@ export async function extractOntology(
 		// the reply is validated against it, and a violation is an error rather
 		// than something to be guessed around.
 		const response = await callLLMProvider(options, prompt, extractionSchemaFor(provider));
-		return parseOntologyResponse(response);
+		return parseOntologyResponse(response, requireComplete);
 	} catch (e) {
 		// handleApiError passes typed errors straight through.
 		throw handleApiError(e, provider, options.ollamaHost);
@@ -84,7 +85,7 @@ export async function extractOntologyChunked(
 	if (chunks.length === 1) {
 		// Single chunk, no need for parallel processing
 		const prompt = buildExtractionPrompt(chunks[0], existingNodeNames, mode);
-		const result = await extractOntology(options, prompt);
+		const result = await extractOntology(options, prompt, true);
 		return { result, chunkCount: 1 };
 	}
 
@@ -94,18 +95,19 @@ export async function extractOntologyChunked(
 
 	for (let i = 0; i < chunks.length; i += maxConcurrent) {
 		const batch = chunks.slice(i, i + maxConcurrent);
-		const batchResults = await Promise.all(
-			batch.map(async (chunk, batchIndex) => {
+		const batchResults = await Promise.allSettled(
+			batch.map(chunk => {
 				const prompt = buildExtractionPrompt(chunk, existingNodeNames, mode);
-				try {
-					return await extractOntology(options, prompt);
-				} catch (e) {
-					console.warn(`Chunk ${i + batchIndex + 1} extraction failed:`, e);
-					return { nodes: [], relationships: [] };
-				}
+				return extractOntology(options, prompt, true);
 			})
 		);
-		results.push(...batchResults);
+		// Wait for every started request before moving to the next note. A
+		// failed chunk makes the note incomplete, but the other requests still
+		// count against the concurrency limit until they finish.
+		for (const outcome of batchResults) {
+			if (outcome.status === 'rejected') throw outcome.reason;
+			results.push(outcome.value);
+		}
 	}
 
 	return { result: mergeChunkResults(results), chunkCount: chunks.length };
@@ -181,7 +183,8 @@ export function settingsToExtractionOptions(settings: Settings): ExtractionOptio
 async function callLLMProvider(
 	options: ExtractionOptions,
 	prompt: string,
-	responseSchema?: { name: string; schema: JsonSchemaObject }
+	responseSchema?: { name: string; schema: JsonSchemaObject },
+	strictBudget?: boolean,
 ): Promise<string> {
 	const { provider, apiKey, model, ollamaHost, localApiStyle, effort, maxOutputTokens } = options;
 	const creds = { apiKey, ollamaHost, localApiStyle };
@@ -192,11 +195,31 @@ async function callLLMProvider(
 			effort,
 			maxOutputTokens,
 			responseSchema,
+			strictBudget,
 			turns: [{ kind: 'user', text: prompt }],
 		},
 		creds
 	);
+	if (responseSchema && ['length', 'max_tokens', 'max_output_tokens', 'incomplete', 'content_filter'].includes(result.finishReason ?? '')) {
+		throw createError('parse_error', 'The provider returned an incomplete structured response.');
+	}
 	return result.text;
+}
+
+export async function completeStructured(
+	options: ExtractionOptions, prompt: string, name: string, schema: JsonSchemaObject,
+): Promise<unknown> {
+	const response = await callLLMProvider(options, prompt, { name, schema: toProviderSchema(schema, options.provider) }, true);
+	let value: unknown;
+	try {
+		value = JSON.parse(extractJsonFromResponse(response));
+	} catch {
+		throw createError('parse_error', 'The model did not return JSON for the relationship review.');
+	}
+	if (validateAgainstSchema(value, schema).length) {
+		throw createError('parse_error', 'The model returned an invalid relationship review.');
+	}
+	return value;
 }
 
 /**
@@ -844,7 +867,7 @@ function parseRelationships(
  * Parse LLM response into OntologyExtractionResult.
  * Handles both new schema (entities/relationships) and legacy schema (nodes/relationships).
  */
-function parseOntologyResponse(response: string): OntologyExtractionResult {
+function parseOntologyResponse(response: string, requireComplete: boolean): OntologyExtractionResult {
 	const jsonStr = extractJsonFromResponse(response);
 
 	let parsed: Record<string, unknown>;
@@ -870,6 +893,9 @@ function parseOntologyResponse(response: string): OntologyExtractionResult {
 
 	const { result, dropped } = parseExtraction(parsed);
 	reportDropped(dropped);
+	if (requireComplete && dropped.length) {
+		throw createError('parse_error', 'The model returned an incomplete extraction with invalid items.');
+	}
 	return result;
 }
 

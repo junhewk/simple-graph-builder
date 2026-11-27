@@ -17,6 +17,7 @@ import { OntologyEdge, OntologyNode, isNoteLayerEdge, isNoteNode, normalizeKey, 
 import { buildCsr, Csr, globalPageRank } from './ppr';
 import { TextIndex } from './text-index';
 import type { EntityRef, GraphReader, VaultSource } from './types';
+import { importedRelationshipEvidence } from '../graph/relationship-evidence';
 
 export const MENTION_WEIGHT = 1;
 export const RELATION_WEIGHT = 1;
@@ -90,9 +91,9 @@ export class GraphSnapshot {
 			const a = this.entityIdx.get(edge.source);
 			const b = this.entityIdx.get(edge.target);
 			if (a === undefined || b === undefined || a === b) continue;
-			const evidence = edge.sourceNote ? normalizeUnicode(edge.sourceNote) : undefined;
-			if (evidence && !this.noteIdx.has(evidence)) continue;
-			this.addLabeled(a, b, edge.relationship, evidence, edgeDetail(edge));
+			const source = this.visibleRelationshipSource(edge);
+			if (!source) continue;
+			this.addLabeled(a, b, edge.relationship, source.note, source.detail);
 			weighted.push([a, b, RELATION_WEIGHT]);
 			relations++;
 		}
@@ -126,6 +127,21 @@ export class GraphSnapshot {
 		}
 
 		this.csr = buildCsr(total, weighted);
+	}
+
+	private visibleRelationshipSource(edge: OntologyEdge): { note?: string; detail?: string } | undefined {
+		const primary = edge.sourceNote ? normalizeUnicode(edge.sourceNote) : undefined;
+		if (primary && this.noteIdx.has(primary)) return { note: primary, detail: edgeDetail(edge) };
+		if (!primary && !edge.noteEvidence) return { detail: edgeDetail(edge) };
+		for (const item of edge.noteEvidence ?? []) {
+			const note = normalizeUnicode(item.note);
+			if (this.noteIdx.has(note)) return { note, detail: item.detail };
+		}
+		for (const item of importedRelationshipEvidence(edge)) {
+			const note = normalizeUnicode(item.note);
+			if (this.noteIdx.has(note)) return { note, detail: item.quote };
+		}
+		return undefined;
 	}
 
 	get entityCount(): number {

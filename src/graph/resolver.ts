@@ -2,6 +2,7 @@ import { OntologyNode, RawExtractionNode, ResolutionResult, ResolutionStats, Set
 import { GraphCache } from './cache';
 import { getEmbeddings, settingsToEmbeddingOptions, verifyEntityMatch, settingsToExtractionOptions, EmbeddingOptions } from '../extraction/llm-client';
 import { generateNodeId, generateEdgeId } from './merge';
+import { mergeRelationshipEvidence } from './relationship-evidence';
 
 /**
  * EntityResolver implements a multi-stage hybrid entity resolution pipeline.
@@ -378,6 +379,7 @@ export class EntityResolver {
 
 		// Redirect edges
 		this.redirectEdges(sourceNodeId, targetNodeId);
+		this.cache.remapRelationshipCorrections(sourceNodeId, targetNodeId);
 
 		// Transfer embedding if needed
 		const sourceEmbedding = this.cache.getEmbedding(sourceNodeId);
@@ -410,12 +412,9 @@ export class EntityResolver {
 	 * Merge source notes from source node to target.
 	 */
 	private mergeSourceNotes(sourceNode: OntologyNode, targetNode: OntologyNode): void {
-		for (const notePath of sourceNode.sourceNotes) {
-			if (!targetNode.sourceNotes.includes(notePath)) {
-				targetNode.sourceNotes.push(notePath);
-			}
-		}
-		targetNode.updatedAt = Date.now();
+		this.cache.editNode(targetNode, node => {
+			node.sourceNotes = [...new Set([...node.sourceNotes, ...sourceNode.sourceNotes])];
+		});
 	}
 
 	/**
@@ -425,22 +424,16 @@ export class EntityResolver {
 		const sourceEdges = this.cache.getConnectedEdges(sourceNodeId);
 
 		for (const edge of sourceEdges) {
+			const source = edge.source === sourceNodeId ? targetNodeId : edge.source;
+			const target = edge.target === sourceNodeId ? targetNodeId : edge.target;
+			if (source === target) continue;
 			const relationship = getEdgeRelationship(edge);
-			if (edge.source === sourceNodeId && edge.target !== targetNodeId) {
-				const existingEdges = this.cache.getEdgesBySource(targetNodeId);
-				const exists = existingEdges.some(e => e.target === edge.target && (e.relationship || e.type) === relationship);
-				if (!exists) {
-					const newEdgeId = generateEdgeId(targetNodeId, edge.target, relationship);
-					this.cache.addEdge({ ...edge, source: targetNodeId, id: newEdgeId });
-				}
-			} else if (edge.target === sourceNodeId && edge.source !== targetNodeId) {
-				const existingEdges = this.cache.getEdgesByTarget(targetNodeId);
-				const exists = existingEdges.some(e => e.source === edge.source && (e.relationship || e.type) === relationship);
-				if (!exists) {
-					const newEdgeId = generateEdgeId(edge.source, targetNodeId, relationship);
-					this.cache.addEdge({ ...edge, target: targetNodeId, id: newEdgeId });
-				}
-			}
+			const id = generateEdgeId(source, target, relationship);
+			const existing = this.cache.getEdgeById(id) ?? this.cache.getEdgesBySource(source).find(
+				other => other.target === target && getEdgeRelationship(other) === relationship,
+			);
+			if (existing) this.cache.editEdge(existing, live => mergeRelationshipEvidence(live, edge));
+			else this.cache.addEdge({ ...edge, source, target, id });
 		}
 	}
 }

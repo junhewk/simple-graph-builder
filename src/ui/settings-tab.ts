@@ -6,6 +6,7 @@ import { getAdapter } from '../extraction/providers/index';
 import { EFFORT_LABELS, EFFORT_LEVELS, EffortLevel } from '../extraction/providers/effort';
 import { clearHashes } from '../graph/hashes';
 import { analyzeEntireVault, isAnalyzingVault, cancelVaultAnalysis, planVaultAnalysis, VaultAnalysisPlan } from '../commands/analyze';
+import { showRelationshipReviews } from './relationship-review-modal';
 import { getEmbeddings, settingsToEmbeddingOptions } from '../extraction/llm-client';
 import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from '../sync/batch';
 import { normalizeFolder } from '../sync/filenames';
@@ -16,6 +17,8 @@ import { canReadExternalFolders } from '../import/reader';
 import { parseExcludedPatterns, supportsNativeExclusions } from '../analysis/exclusions';
 import type { McpStatus } from '../mcp/controller';
 import { LiteratureSource, SOURCE_NAMES } from '../literature/types';
+
+const AUTOMATIC_CORRECTION_DESCRIPTION = 'While Obsidian is open, send short excerpts to the configured model at most once every 24 hours and apply supported relationship corrections. You can undo each correction.';
 
 interface DeclarativeControl {
 	type: 'toggle' | 'dropdown' | 'text' | 'slider';
@@ -511,7 +514,7 @@ export class SettingsTab extends PluginSettingTab {
 				button.setDisabled(true).setButtonText('Checking notes...');
 				void planVaultAnalysis(this.plugin)
 					.then(plan => this.confirmVaultAnalysis(plan, async () => {
-						const run = analyzeEntireVault(this.plugin, undefined, plan);
+						const run = analyzeEntireVault(this.plugin, undefined, plan, reviews => showRelationshipReviews(this.plugin, reviews));
 						updateButton();
 						onChange();
 						await run;
@@ -545,6 +548,8 @@ export class SettingsTab extends PluginSettingTab {
 			`New: ${plan.newNotes.toLocaleString()}\nChanged since last analysis: ${plan.changedNotes.toLocaleString()}\n` +
 			(skipped ? `Skipped: ${skipped}\n` : '') +
 			'\nThese notes are sent to your configured provider in chunks. You can cancel at any time.' +
+			(this.plugin.settings.reviewAfterVaultAnalysis && !this.plugin.settings.autoCorrectRelationships
+				? '\n\nReview will send short note excerpts for up to six relationships in one extra model call.' : '') +
 			(this.plugin.settings.autoAnalyzeOnSave ? '' : '\n\nTo keep new notes analyzed as you write, turn on Auto-analyze on save.');
 		new ConfirmModal(this.app, message, run).open();
 	}
@@ -712,6 +717,16 @@ export class SettingsTab extends PluginSettingTab {
 						desc: 'Counts new and changed notes, then asks before sending them.',
 						aliases: ['Batch analysis', 'Vault analysis', 'Vault enumeration'],
 						render: setting => this.configureVaultAnalysisButton(setting, () => this.refreshSettings()),
+					},
+					{
+						name: 'Review relationships after vault analysis',
+						desc: 'Preview suggestions after a vault analysis. Used when automatic correction is off.',
+						control: { type: 'toggle', key: 'reviewAfterVaultAnalysis' },
+					},
+					{
+						name: 'Automatically correct relationships',
+						desc: AUTOMATIC_CORRECTION_DESCRIPTION,
+						control: { type: 'toggle', key: 'autoCorrectRelationships' },
 					},
 					{
 						name: 'Extraction mode',
@@ -1248,6 +1263,22 @@ export class SettingsTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					});
 			});
+
+		// Optional review after a user-initiated vault analysis.
+		new Setting(containerEl)
+			.setName('Review relationships after vault analysis')
+			.setDesc('Preview suggestions after a vault analysis. Used when automatic correction is off.')
+			.addToggle(toggle => toggle.setValue(this.plugin.settings.reviewAfterVaultAnalysis).onChange(async value => {
+				this.plugin.settings.reviewAfterVaultAnalysis = value;
+				await this.plugin.saveSettings();
+			}));
+		new Setting(containerEl)
+			.setName('Automatically correct relationships')
+			.setDesc(AUTOMATIC_CORRECTION_DESCRIPTION)
+			.addToggle(toggle => toggle.setValue(this.plugin.settings.autoCorrectRelationships).onChange(async value => {
+				this.plugin.settings.autoCorrectRelationships = value;
+				await this.plugin.saveSettings();
+			}));
 
 		// Extraction mode
 		new Setting(containerEl)

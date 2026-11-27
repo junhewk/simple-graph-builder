@@ -40,6 +40,8 @@ export const DEFAULT_SETTINGS: Settings = {
 	extractionMode: 'standard',
 	extractionEffort: DEFAULT_EFFORT,
 	autoAnalyzeOnSave: false,
+	reviewAfterVaultAnalysis: false,
+	autoCorrectRelationships: false,
 	excludedPatterns: [],
 	respectObsidianExcludedFiles: false,
 	// View settings

@@ -12,6 +12,8 @@ import { openSearchModal } from './commands/search';
 import { WriteGuard } from './sync';
 import { getAnalysisEligibility, reportAnalysisUnavailable } from './analysis/exclusions';
 import { ConfirmModal } from './ui/confirm-modal';
+import { openNextRelationshipReview, undoRelationshipReview } from './ui/relationship-review-modal';
+import { BackgroundRelationshipReview } from './analysis/background-relationship-review';
 import { writeLinksForVault, removeWrittenLinks, isWritebackRunning, cancelWriteback } from './sync/batch';
 import { QueryEngine } from './query/engine';
 import { ObsidianVaultSource } from './query/obsidian-source';
@@ -47,6 +49,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 	/** Marks vault writes the plugin made, so they don't look like user edits. */
 	writeGuard = new WriteGuard();
 	private statusBarItem: HTMLElement | null = null;
+	private backgroundRelationshipReview?: BackgroundRelationshipReview;
 	/** Hash records follow note renames, batched into one data.json write per burst. */
 	private hashRenames = new HashRenameQueue(this);
 
@@ -107,6 +110,18 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			id: 'analyze-current-note',
 			name: 'Analyze current note',
 			callback: () => analyzeCurrentNote(this),
+		});
+
+		this.addCommand({
+			id: 'review-graph-relationships',
+			name: 'Review graph relationships',
+			callback: () => void openNextRelationshipReview(this),
+		});
+
+		this.addCommand({
+			id: 'undo-last-relationship-correction',
+			name: 'Undo last relationship correction',
+			callback: () => void undoRelationshipReview(this),
 		});
 
 		this.addCommand({
@@ -227,6 +242,8 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 			// NFC, so nothing waits on this; it keeps startup to one read less.
 			void healHashRecords(this).catch(error => console.error('Simple Graph Builder: could not normalize analysis records', error));
 			this.registerIndexEvents();
+			this.backgroundRelationshipReview = new BackgroundRelationshipReview(this);
+			this.backgroundRelationshipReview.updateSettings();
 			if (this.settings.mcpEnabled) void this.mcp.start();
 			void showReleaseNotesIfUpdated(this, this.freshInstall);
 		});
@@ -390,7 +407,15 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		openSearchModal(this, query);
 	}
 
+	refreshRelationshipViews(): void {
+		this.updateStatusBar();
+		for (const leaf of this.app.workspace.getLeavesOfType(GRAPH_VIEW_TYPE)) {
+			if (leaf.view instanceof GraphView) void leaf.view.renderGraph();
+		}
+	}
+
 	onunload(): void {
+		this.backgroundRelationshipReview?.dispose();
 		this.literature?.dispose();
 		this.literatureCredentials?.clearSession();
 		// Flush any pending graph changes
@@ -436,6 +461,7 @@ export default class SimpleGraphBuilderPlugin extends Plugin {
 		await updateData(this, data => {
 			data.settings = this.settings;
 		});
+		this.backgroundRelationshipReview?.updateSettings();
 
 		// Exclusions decide what search and agents may see; re-index under the new rules.
 		if (this.queryEngine) {

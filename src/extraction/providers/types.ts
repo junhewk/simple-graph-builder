@@ -48,6 +48,8 @@ export interface LlmRequest {
 	responseSchema?: { name: string; schema: JsonSchemaObject };
 	effort: EffortLevel;
 	maxOutputTokens: number;
+	/** Honor the token cap and make only one provider request. */
+	strictBudget?: boolean;
 }
 
 export interface Credentials {

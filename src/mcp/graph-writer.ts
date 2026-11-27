@@ -16,7 +16,7 @@ import { applyExtraction, isAnalyzingVault, planVaultAnalysis } from '../command
 import { parseExtraction, validateEnvelope } from '../extraction/llm-client';
 import { buildAgentExtractionInstructions, truncateContent } from '../extraction/prompts';
 import { getExtractionConfigError } from '../extraction/providers/models';
-import { computeNoteHashes, getNoteHash, hasNoteChangedByHashes, loadHashes, recordNoteHash } from '../graph/hashes';
+import { computeNoteHashes, getNoteHash, hasNoteChangedByHashes, loadHashes } from '../graph/hashes';
 import { stripFrontmatter } from '../sync/note-content';
 import { isNoteNode } from '../types';
 import type { NotFound } from '../query/types';
@@ -150,9 +150,8 @@ export class GraphWriter {
 			...this.plugin.settings,
 			enableLLMVerification: this.plugin.settings.enableLLMVerification && !getExtractionConfigError(this.plugin.settings),
 		};
-		const merged = await applyExtraction(this.plugin, file, content, result, settings);
-
-		await recordNoteHash(this.plugin, file.path, note.hash);
+		// An agent may have requested a shortened task or submitted only a subset.
+		const merged = await applyExtraction(this.plugin, file, content, result, { replace: false, settings });
 		this.plugin.updateStatusBar();
 
 		return {

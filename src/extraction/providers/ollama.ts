@@ -81,9 +81,10 @@ export const ollamaAdapter: ProviderAdapter = {
 			if (req.responseSchema) {
 				body.format = req.responseSchema.schema;
 			}
+			if (req.strictBudget) body.options = { num_predict: req.maxOutputTokens };
 
 			return { url: `${baseUrl}/api/chat`, provider: 'ollama', ollamaHost: baseUrl, body };
-		});
+		}, !req.strictBudget);
 
 		const message = data.message ?? {};
 		const text = message.content ?? '';
